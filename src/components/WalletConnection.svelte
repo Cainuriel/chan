@@ -1,0 +1,214 @@
+<!-- src/lib/components/WalletConnection.svelte -->
+<script lang="ts">
+  import { createEventDispatcher } from 'svelte';
+  import type { UTXOLibrary } from '../UTXOLibrary';
+  import type { EOAData } from '../types/ethereum.types';
+  import { WalletProviderType } from '../types/ethereum.types';
+
+  // Props
+  export let utxoLibrary: UTXOLibrary;
+  export let currentAccount: EOAData | null = null;
+  export let isInitialized: boolean = false;
+
+  // Event dispatcher
+  const dispatch = createEventDispatcher();
+
+  // Local state
+  let isConnecting = false;
+  let isDisconnecting = false;
+  let showProviderSelection = false;
+  let selectedProvider = WalletProviderType.METAMASK;
+
+  // Available providers
+  const providers = [
+    { 
+      type: WalletProviderType.METAMASK, 
+      name: 'MetaMask', 
+      icon: '🦊',
+      description: 'Connect using MetaMask browser extension'
+    },
+    { 
+      type: WalletProviderType.WALLET_CONNECT, 
+      name: 'WalletConnect', 
+      icon: '🔗',
+      description: 'Connect using WalletConnect protocol'
+    },
+    { 
+      type: WalletProviderType.COINBASE_WALLET, 
+      name: 'Coinbase Wallet', 
+      icon: '💙',
+      description: 'Connect using Coinbase Wallet'
+    },
+    { 
+      type: WalletProviderType.INJECTED, 
+      name: 'Browser Wallet', 
+      icon: '🌐',
+      description: 'Connect using any injected wallet'
+    }
+  ];
+
+  async function handleConnect(provider?: WalletProviderType) {
+    isConnecting = true;
+    showProviderSelection = false;
+
+    try {
+      const walletProvider = provider || selectedProvider;
+      
+      if (!isInitialized) {
+        selectedProvider = walletProvider;
+        dispatch('initialize');
+      } else {
+        const result = await utxoLibrary.connectWallet(walletProvider);
+        if (!result.success) {
+          console.error('Connection failed:', result.error);
+        }
+      }
+    } catch (error) {
+      console.error('Connection error:', error);
+    } finally {
+      isConnecting = false;
+    }
+  }
+
+  async function handleDisconnect() {
+    isDisconnecting = true;
+
+    try {
+      await utxoLibrary.disconnect();
+    } catch (error) {
+      console.error('Disconnection error:', error);
+    } finally {
+      isDisconnecting = false;
+    }
+  }
+
+  function handleRefresh() {
+    dispatch('refresh');
+  }
+
+  function formatAddress(address: string): string {
+    return `${address.slice(0, 6)}...${address.slice(-4)}`;
+  }
+
+  function getNetworkDisplayName(chainId: bigint): string {
+    switch (Number(chainId)) {
+      case 1: return 'Ethereum';
+      case 137: return 'Polygon';
+      case 11155111: return 'Sepolia';
+      default: return `Chain ${chainId}`;
+    }
+  }
+</script>
+
+{#if !currentAccount}
+  <!-- Not Connected State -->
+  <div class="flex items-center space-x-4">
+    {#if !showProviderSelection}
+      <button
+        on:click={() => showProviderSelection = true}
+        disabled={isConnecting}
+        class="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white px-6 py-2 rounded-lg font-semibold transition-all duration-200 shadow-lg hover:shadow-xl flex items-center space-x-2"
+      >
+        {#if isConnecting}
+          <div class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+          <span>Connecting...</span>
+        {:else}
+          <span>🔗</span>
+          <span>Connect Wallet</span>
+        {/if}
+      </button>
+    {:else}
+      <!-- Provider Selection Modal -->
+      <div class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center">
+        <div class="bg-gray-900 rounded-xl border border-white/20 p-6 max-w-md w-full mx-4">
+          <div class="flex items-center justify-between mb-6">
+            <h3 class="text-xl font-bold text-white">Choose Wallet</h3>
+            <button 
+              on:click={() => showProviderSelection = false}
+              class="text-gray-400 hover:text-white"
+            >
+              ✕
+            </button>
+          </div>
+          
+          <div class="space-y-3">
+            {#each providers as provider}
+              <button
+                on:click={() => handleConnect(provider.type)}
+                disabled={isConnecting}
+                class="w-full flex items-center space-x-4 p-4 rounded-lg border border-white/20 hover:border-white/40 hover:bg-white/10 transition-all duration-200 text-left disabled:opacity-50"
+              >
+                <div class="text-2xl">{provider.icon}</div>
+                <div class="flex-1">
+                  <div class="text-white font-medium">{provider.name}</div>
+                  <div class="text-gray-400 text-sm">{provider.description}</div>
+                </div>
+                <div class="text-gray-400">→</div>
+              </button>
+            {/each}
+          </div>
+        </div>
+      </div>
+    {/if}
+  </div>
+{:else}
+  <!-- Connected State -->
+  <div class="flex items-center space-x-4">
+    <!-- Account Info -->
+    <div class="bg-white/10 backdrop-blur-sm rounded-lg px-4 py-2 border border-white/20">
+      <div class="flex items-center space-x-3">
+        <!-- Provider Icon -->
+        <div class="w-8 h-8 bg-gradient-to-r from-green-500 to-blue-500 rounded-full flex items-center justify-center">
+          <span class="text-white text-sm font-bold">
+            {#if currentAccount.providerType === WalletProviderType.METAMASK}🦊
+            {:else if currentAccount.providerType === WalletProviderType.WALLET_CONNECT}🔗
+            {:else if currentAccount.providerType === WalletProviderType.COINBASE_WALLET}💙
+            {:else}🌐{/if}
+          </span>
+        </div>
+        
+        <!-- Account Details -->
+        <div class="text-sm">
+          <div class="text-white font-medium">
+            {formatAddress(currentAccount.address)}
+          </div>
+          <div class="text-gray-300 text-xs">
+            {getNetworkDisplayName(currentAccount.chainId)}
+            {#if currentAccount.ethBalance !== undefined}
+              • {(Number(currentAccount.ethBalance) / 1e18).toFixed(4)} ETH
+            {/if}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Action Buttons -->
+    <div class="flex items-center space-x-2">
+      <!-- Refresh Button -->
+      <button
+        on:click={handleRefresh}
+        class="p-2 text-gray-300 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-200"
+        title="Refresh data"
+      >
+        <span class="text-lg">🔄</span>
+      </button>
+
+      <!-- Account Menu -->
+      <div class="relative">
+        <button
+          on:click={handleDisconnect}
+          disabled={isDisconnecting}
+          class="bg-red-600/20 hover:bg-red-600/30 border border-red-600/30 hover:border-red-600/50 disabled:opacity-50 disabled:cursor-not-allowed text-red-300 px-4 py-2 rounded-lg font-medium transition-all duration-200 flex items-center space-x-2"
+        >
+          {#if isDisconnecting}
+            <div class="w-4 h-4 border-2 border-red-300/30 border-t-red-300 rounded-full animate-spin"></div>
+            <span>Disconnecting...</span>
+          {:else}
+            <span>🔌</span>
+            <span>Disconnect</span>
+          {/if}
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
