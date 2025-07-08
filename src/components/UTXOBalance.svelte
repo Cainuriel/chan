@@ -2,8 +2,9 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
   import type { ExtendedUTXOData, UTXOManagerStats } from '../types/utxo.types';
+  import type { ERC20TokenData } from '../types/ethereum.types';
   import { UTXOType } from '../types/utxo.types';
-
+  import { EthereumHelpers } from '../utils/ethereum.helpers';
 
   // Props
   export let utxos: ExtendedUTXOData[] = [];
@@ -18,45 +19,112 @@
   let sortOrder: 'asc' | 'desc' = 'desc';
   let showSpent = false;
 
+  // Token metadata cache
+  let tokenMetadataCache: Record<string, ERC20TokenData> = {};
+  let isLoadingMetadata = false;
+  let metadataLoaded = false;
+
   // Computed values
-  $: uniqueTokens = [...new Set(utxos.map(u => u.tokenAddress))];
+  let tokenBalances: Record<string, bigint> = {};
+  let uniqueTokens: string[] = [];
+  let filteredUTXOs: ExtendedUTXOData[]  = [];
   
-  $: filteredUTXOs = utxos
-    .filter(utxo => selectedTokenAddress === 'all' || utxo.tokenAddress === selectedTokenAddress)
-    .filter(utxo => showSpent || !utxo.isSpent)
-    .sort((a, b) => {
-      let comparison = 0;
-      
-      switch (sortBy) {
-        case 'value':
-          comparison = Number(a.value - b.value);
-          break;
-        case 'timestamp':
-          comparison = Number(a.timestamp - b.timestamp);
-          break;
-        case 'type':
-          comparison = a.utxoType.localeCompare(b.utxoType);
-          break;
+  $: if(utxos.length !== 0) {
+    uniqueTokens = [...new Set(utxos.map(u => u.tokenAddress))];
+    filteredUTXOs = utxos
+      .filter(utxo => selectedTokenAddress === 'all' || utxo.tokenAddress === selectedTokenAddress)
+      .filter(utxo => showSpent || !utxo.isSpent)
+      .sort((a, b) => {
+        let comparison = 0;
+        
+        switch (sortBy) {
+          case 'value':
+            comparison = Number(a.value - b.value);
+            break;
+          case 'timestamp':
+            comparison = Number(a.timestamp - b.timestamp);
+            break;
+          case 'type':
+            comparison = a.utxoType.localeCompare(b.utxoType);
+            break;
+        }
+        
+        return sortOrder === 'asc' ? comparison : -comparison;
+      });
+    tokenBalances = stats?.balanceByToken || {};
+    
+    // Load token metadata for unique tokens
+    loadTokenMetadata();
+
+  }
+  
+  // Load token metadata
+  async function loadTokenMetadata() {
+    if (uniqueTokens.length === 0) {
+      metadataLoaded = true;
+      return;
+    }
+
+    isLoadingMetadata = true;
+    metadataLoaded = false;
+
+    const loadPromises = uniqueTokens.map(async (tokenAddress) => {
+      if (!tokenMetadataCache[tokenAddress]) {
+        try {
+          const tokenData = await EthereumHelpers.getERC20TokenInfo(tokenAddress);
+          tokenMetadataCache[tokenAddress] = tokenData;
+        } catch (error) {
+          console.error('Failed to load token metadata for', tokenAddress, error);
+          // Set default metadata
+          tokenMetadataCache[tokenAddress] = {
+            address: tokenAddress,
+            name: 'Unknown Token',
+            symbol: 'UNK',
+            decimals: 18,
+            balance: 0n,
+            allowance: 0n,
+            verified: false
+          };
+        }
       }
-      
-      return sortOrder === 'asc' ? comparison : -comparison;
     });
 
-  $: tokenBalances = stats?.balanceByToken || {};
+    // Wait for all metadata to load
+    await Promise.all(loadPromises);
+    
+    // Trigger reactivity
+    tokenMetadataCache = { ...tokenMetadataCache };
+    isLoadingMetadata = false;
+    metadataLoaded = true;
+  }
 
-  function formatValue(value: bigint, decimals: number = 18): string {
-    const divisor = BigInt(10 ** decimals);
-    const quotient = value / divisor;
-    const remainder = value % divisor;
-    
-    if (remainder === BigInt(0)) {
-      return quotient.toString();
+  // Helper function to get token metadata
+  function getTokenMetadata(tokenAddress: string): ERC20TokenData | undefined {
+    return tokenMetadataCache[tokenAddress];
+  }
+
+  function formatValue(value: bigint | string | number, decimals: number ): string {
+
+    try {
+      // Convert to BigInt if not already
+      const bigintValue = typeof value === 'bigint' ? value : BigInt(value.toString());
+      const safeDecimals = decimals || 18;
+      const divisor = BigInt(10) ** BigInt(safeDecimals);
+      const quotient = bigintValue / divisor;
+      const remainder = bigintValue % divisor;
+      
+      if (remainder === BigInt(0)) {
+        return quotient.toString();
+      }
+      
+      const remainderStr = remainder.toString().padStart(safeDecimals, '0');
+      const trimmedRemainder = remainderStr.replace(/0+$/, '');
+      
+      return trimmedRemainder ? `${quotient}.${trimmedRemainder}` : quotient.toString();
+    } catch (error) {
+      console.error('Error formatting value:', error, 'Value:', value, 'Decimals:', decimals);
+      return '0';
     }
-    
-    const remainderStr = remainder.toString().padStart(decimals, '0');
-    const trimmedRemainder = remainderStr.replace(/0+$/, '');
-    
-    return trimmedRemainder ? `${quotient}.${trimmedRemainder}` : quotient.toString();
   }
 
   function formatTimestamp(timestamp: bigint): string {
@@ -94,56 +162,70 @@
 </script>
 
 <div class="space-y-6">
-  <!-- Balance Overview -->
-  {#if stats}
+  <!-- Loading State -->
+  {#if isLoadingMetadata && !metadataLoaded}
     <div class="bg-white/10 backdrop-blur-sm rounded-lg p-6 border border-white/20">
-      <div class="flex items-center justify-between mb-6">
-        <h2 class="text-xl font-bold text-white">Portfolio Overview</h2>
-        <button
-          on:click={handleRefresh}
-          class="p-2 text-gray-300 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-200"
-          title="Refresh balance"
-        >
-          🔄
-        </button>
+      <div class="flex items-center justify-center space-x-3">
+        <div class="animate-spin w-6 h-6 border-2 border-white/20 border-t-white rounded-full"></div>
+        <span class="text-white text-lg">Loading token metadata...</span>
       </div>
-
-      <!-- Token Balances -->
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {#each Object.entries(tokenBalances) as [tokenAddress, balance]}
-          {@const tokenData = utxos.find(u => u.tokenAddress === tokenAddress)?.tokenMetadata}
-          <div class="bg-white/5 rounded-lg p-4 border border-white/10">
-            <div class="flex items-center justify-between mb-2">
-              <div class="flex items-center space-x-2">
-                <div class="w-8 h-8 bg-gradient-to-r from-purple-500 to-blue-500 rounded-full flex items-center justify-center">
-                  <span class="text-white text-xs font-bold">
-                    {tokenData?.symbol?.substring(0, 2) || 'TK'}
-                  </span>
-                </div>
-                <div>
-                  <div class="text-white font-medium">
-                    {tokenData?.symbol || 'Unknown'}
-                  </div>
-                  <div class="text-gray-400 text-xs">
-                    {tokenData?.name || 'Unknown Token'}
-                  </div>
-                </div>
-              </div>
-            </div>
-            
-            <div class="text-right">
-              <div class="text-2xl font-bold text-white">
-                {formatValue(balance, tokenData?.decimals)}
-              </div>
-              <div class="text-gray-400 text-sm">
-                {utxos.filter(u => u.tokenAddress === tokenAddress && !u.isSpent).length} UTXOs
-              </div>
-            </div>
-          </div>
-        {/each}
+      <div class="mt-4 text-center text-gray-400 text-sm">
+        Fetching information for {uniqueTokens.length} token{uniqueTokens.length === 1 ? '' : 's'}
       </div>
     </div>
-  {/if}
+  {:else if metadataLoaded || utxos.length === 0}
+    <!-- Content only renders when metadata is loaded or no UTXOs exist -->
+    
+    <!-- Balance Overview -->
+    {#if stats}
+      <div class="bg-white/10 backdrop-blur-sm rounded-lg p-6 border border-white/20">
+        <div class="flex items-center justify-between mb-6">
+          <h2 class="text-xl font-bold text-white">Portfolio Overview</h2>
+          <button
+            on:click={handleRefresh}
+            class="p-2 text-gray-300 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-200"
+            title="Refresh balance"
+          >
+            🔄
+          </button>
+        </div>
+
+        <!-- Token Balances -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {#each Object.entries(tokenBalances) as [tokenAddress, balance]}
+            {@const tokenData = getTokenMetadata(tokenAddress)}
+            <div class="bg-white/5 rounded-lg p-4 border border-white/10">
+              <div class="flex items-center justify-between mb-2">
+                <div class="flex items-center space-x-2">
+                  <div class="w-8 h-8 bg-gradient-to-r from-purple-500 to-blue-500 rounded-full flex items-center justify-center">
+                    <span class="text-white text-xs font-bold">
+                      {tokenData?.symbol?.substring(0, 2) || 'TK'}
+                    </span>
+                  </div>
+                  <div>
+                    <div class="text-white font-medium">
+                      {tokenData?.symbol || 'Unknown'}
+                    </div>
+                    <div class="text-gray-400 text-xs">
+                      {tokenData?.name || 'Unknown Token'}
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              <div class="text-right">
+                <div class="text-2xl font-bold text-white">
+                  {formatValue(balance, tokenData?.decimals || 18)}
+                </div>
+                <div class="text-gray-400 text-sm">
+                  {utxos.filter(u => u.tokenAddress === tokenAddress && !u.isSpent).length} UTXOs
+                </div>
+              </div>
+            </div>
+          {/each}
+        </div>
+      </div>
+    {/if}
 
   <!-- UTXO List -->
   <div class="bg-white/10 backdrop-blur-sm rounded-lg border border-white/20">
@@ -164,7 +246,7 @@
         >
           <option value="all">All Tokens</option>
           {#each uniqueTokens as tokenAddress}
-            {@const tokenData = utxos.find(u => u.tokenAddress === tokenAddress)?.tokenMetadata}
+            {@const tokenData = getTokenMetadata(tokenAddress)}
             <option value={tokenAddress}>
               {tokenData?.symbol || tokenAddress.slice(0, 8)}...
             </option>
@@ -218,6 +300,7 @@
       {:else}
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {#each filteredUTXOs as utxo (utxo.id)}
+            {@const tokenData = getTokenMetadata(utxo.tokenAddress)}
             <div 
               class="bg-white/5 rounded-lg p-4 border border-white/10 transition-all duration-200 hover:border-white/20"
               class:opacity-60={utxo.isSpent}
@@ -253,11 +336,11 @@
               <!-- UTXO Value -->
               <div class="mb-3">
                 <div class="text-2xl font-bold text-white">
-                  {formatValue(utxo.value, utxo.tokenMetadata?.decimals)}
+                  {formatValue(utxo.value, tokenData?.decimals || 18)}
                 </div>
                 <div class="text-gray-400 text-sm">
-                  {utxo.tokenMetadata?.symbol || 'Unknown'} • 
-                  {utxo.tokenMetadata?.name || 'Unknown Token'}
+                  {tokenData?.symbol || 'Unknown'} • 
+                  {tokenData?.name || 'Unknown Token'}
                 </div>
               </div>
 
@@ -304,4 +387,5 @@
       {/if}
     </div>
   </div>
+  {/if}
 </div>

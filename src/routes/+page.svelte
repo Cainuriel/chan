@@ -23,7 +23,7 @@
   let notifications: Array<{id: string, type: string, message: string}> = [];
 
   // Configuration
-  const CONTRACT_ADDRESS = '0xCA4D19D7129448743344A17E6846a8016172A599'; // amoy
+  const CONTRACT_ADDRESS = '0xBb8399072E0DFD673716cE118D249DE22A32bF66'; // amoy
   const PREFERRED_PROVIDER = WalletProviderType.METAMASK;
 
   onMount(async () => {
@@ -298,8 +298,14 @@
 
         <!-- Tab Content -->
         <div class="space-y-6">
-          {#if activeTab === 'balance'}
+          {#if activeTab === 'balance' }
+            {#if utxos.length === 0}
+              <div class="text-center text-gray-400">
+                No UTXOs found. Start by depositing tokens.
+              </div>
+            {:else}
             <UTXOBalance {utxos} {stats} on:refresh={refreshData} />
+            {/if}
           {:else if activeTab === 'deposit'}
             <DepositForm {utxoLibrary} on:deposited={refreshData} />
           {:else if activeTab === 'operations'}

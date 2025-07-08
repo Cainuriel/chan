@@ -2,6 +2,8 @@
   import { createEventDispatcher } from 'svelte';
   import type { UTXOLibrary } from '../UTXOLibrary';
   import type { ExtendedUTXOData } from '../types/utxo.types';
+  import type { ERC20TokenData } from '../types/ethereum.types';
+  import { EthereumHelpers } from '../utils/ethereum.helpers';
 
   // Props
   export let utxoLibrary: UTXOLibrary;
@@ -16,6 +18,47 @@
   // State
   let activeOperation: OperationType = 'split';
   let isProcessing = false;
+
+  // Token metadata cache
+  let tokenMetadataCache: Record<string, ERC20TokenData> = {};
+
+  // Load token metadata when UTXOs change
+  $: if (utxos.length > 0) {
+    loadTokenMetadata();
+  }
+
+  // Load token metadata
+  async function loadTokenMetadata() {
+    const uniqueTokens = [...new Set(utxos.map(u => u.tokenAddress))];
+    for (const tokenAddress of uniqueTokens) {
+      if (!tokenMetadataCache[tokenAddress]) {
+        try {
+          const tokenData = await EthereumHelpers.getERC20TokenInfo(tokenAddress);
+          tokenMetadataCache[tokenAddress] = tokenData;
+          // Trigger reactivity
+          tokenMetadataCache = { ...tokenMetadataCache };
+        } catch (error) {
+          console.error('Failed to load token metadata for', tokenAddress, error);
+          // Set default metadata
+          tokenMetadataCache[tokenAddress] = {
+            address: tokenAddress,
+            name: 'Unknown Token',
+            symbol: 'UNK',
+            decimals: 18,
+            balance: 0n,
+            allowance: 0n,
+            verified: false
+          };
+          tokenMetadataCache = { ...tokenMetadataCache };
+        }
+      }
+    }
+  }
+
+  // Helper function to get token metadata
+  function getTokenMetadata(tokenAddress: string): ERC20TokenData | undefined {
+    return tokenMetadataCache[tokenAddress];
+  }
 
   // Split operation state
   let splitSelectedUTXO = '';
@@ -50,19 +93,27 @@
     withdrawRecipient = withdrawRecipient || address;
   }
 
-  function formatValue(value: bigint, decimals: number = 18): string {
-    const divisor = BigInt(10 ** decimals);
-    const quotient = value / divisor;
-    const remainder = value % divisor;
-    
-    if (remainder === BigInt(0)) {
-      return quotient.toString();
+  function formatValue(value: bigint | string | number, decimals: number = 18): string {
+    try {
+      // Convert to BigInt if not already
+      const bigintValue = typeof value === 'bigint' ? value : BigInt(value.toString());
+      const safeDecimals = decimals || 18;
+      const divisor = BigInt(10) ** BigInt(safeDecimals);
+      const quotient = bigintValue / divisor;
+      const remainder = bigintValue % divisor;
+      
+      if (remainder === BigInt(0)) {
+        return quotient.toString();
+      }
+      
+      const remainderStr = remainder.toString().padStart(safeDecimals, '0');
+      const trimmedRemainder = remainderStr.replace(/0+$/, '');
+      
+      return trimmedRemainder ? `${quotient}.${trimmedRemainder}` : quotient.toString();
+    } catch (error) {
+      console.error('Error formatting value:', error, 'Value:', value, 'Decimals:', decimals);
+      return '0';
     }
-    
-    const remainderStr = remainder.toString().padStart(decimals, '0');
-    const trimmedRemainder = remainderStr.replace(/0+$/, '');
-    
-    return trimmedRemainder ? `${quotient}.${trimmedRemainder}` : quotient.toString();
   }
 
   // Helper function to safely convert amount to BigInt
@@ -101,7 +152,8 @@
     if (!utxo) return { valid: false, error: 'No UTXO selected' };
 
     try {
-      const decimals = utxo.tokenMetadata?.decimals || 18;
+      const tokenData = getTokenMetadata(utxo.tokenAddress);
+      const decimals = tokenData?.decimals || 18;
       const totalInput = utxo.value;
       
       let totalOutput = BigInt(0);
@@ -143,7 +195,8 @@
     isProcessing = true;
 
     try {
-      const decimals = utxo.tokenMetadata?.decimals || 18;
+      const tokenData = getTokenMetadata(utxo.tokenAddress);
+      const decimals = tokenData?.decimals || 18;
       const outputValues = splitOutputs.map(output => 
         parseAmountToBigInt(output.amount, decimals)
       );
@@ -385,6 +438,7 @@
               <!-- Validation Info -->
               {#if splitSelectedUTXO}
                 {@const validation = validateSplitAmounts()}
+                {@const splitTokenData = getTokenMetadata(selectedUTXOData.split?.tokenAddress || '')}
                 <div class="mt-4 p-3 rounded-lg border {validation.valid ? 'border-green-500 bg-green-500/10' : 'border-red-500 bg-red-500/10'}">
                   <div class="text-sm {validation.valid ? 'text-green-400' : 'text-red-400'}">
                     {#if validation.valid}
@@ -394,8 +448,8 @@
                     {/if}
                   </div>
                   <div class="text-xs text-gray-400 mt-1">
-                    Input: {formatValue(selectedUTXOData.split.value, selectedUTXOData.split.tokenMetadata?.decimals)} 
-                    {selectedUTXOData.split.tokenMetadata?.symbol}
+                    Input: {formatValue(selectedUTXOData.split.value, splitTokenData?.decimals || 18)} 
+                    {splitTokenData?.symbol || 'UNK'}
                   </div>
                 </div>
               {/if}
@@ -422,8 +476,9 @@
             >
               <option value="">Choose a UTXO...</option>
               {#each availableUTXOs as utxo}
+                {@const tokenData = getTokenMetadata(utxo.tokenAddress)}
                 <option value={utxo.id}>
-                  {formatValue(utxo.value, utxo.tokenMetadata?.decimals)} {utxo.tokenMetadata?.symbol} 
+                  {formatValue(utxo.value, tokenData?.decimals || 18)} {tokenData?.symbol || 'UNK'} 
                   (ID: {utxo.id.slice(0, 8)}...)
                 </option>
               {/each}
@@ -446,13 +501,14 @@
           </div>
 
           {#if selectedUTXOData.withdraw}
+            {@const withdrawTokenData = getTokenMetadata(selectedUTXOData.withdraw.tokenAddress)}
             <div class="bg-blue-600/20 border border-blue-600/30 rounded-lg p-4">
               <div class="flex space-x-3">
                 <div class="text-blue-400 text-xl">ℹ️</div>
                 <div class="text-sm text-blue-200">
                   <div class="font-medium mb-1">Withdrawal Details:</div>
                   <div class="space-y-1 text-blue-300">
-                    <div>Amount: {formatValue(selectedUTXOData.withdraw.value, selectedUTXOData.withdraw.tokenMetadata?.decimals)} {selectedUTXOData.withdraw.tokenMetadata?.symbol}</div>
+                    <div>Amount: {formatValue(selectedUTXOData.withdraw.value, withdrawTokenData?.decimals || 18)} {withdrawTokenData?.symbol || 'UNK'}</div>
                     <div>Token: {selectedUTXOData.withdraw.tokenAddress}</div>
                     <div>This will convert your UTXO back to standard ERC20 tokens</div>
                   </div>
@@ -481,8 +537,9 @@
             >
               <option value="">Choose a UTXO...</option>
               {#each availableUTXOs as utxo}
+                {@const tokenData = getTokenMetadata(utxo.tokenAddress)}
                 <option value={utxo.id}>
-                  {formatValue(utxo.value, utxo.tokenMetadata?.decimals)} {utxo.tokenMetadata?.symbol} 
+                  {formatValue(utxo.value, tokenData?.decimals || 18)} {tokenData?.symbol || 'UNK'} 
                   (ID: {utxo.id.slice(0, 8)}...)
                 </option>
               {/each}
