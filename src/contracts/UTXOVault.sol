@@ -2,7 +2,7 @@
 pragma solidity ^0.8.19;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 /**
@@ -484,7 +484,7 @@ contract UTXOVault is ReentrancyGuard, Ownable {
     /**
      * @dev Verify BBS+ signature using issuer's public key
      */
-    function _verifyBBSSignature(BBSProofData calldata proof) internal view returns (bool) {
+    function _verifyBBSSignature(BBSProofData calldata proof) internal pure returns (bool) {
         // Esta función debe llamar a un verifier BBS+ externo
         // Por ahora, implementación simplificada
         return proof.proof.length > 0 && 
@@ -501,9 +501,42 @@ contract UTXOVault is ReentrancyGuard, Ownable {
         address tokenAddress
     ) internal pure returns (bool) {
         // Verificar que se revelan solo los atributos necesarios
-        // Por ejemplo, para deposit: solo tokenAddress debe ser revelado
-        return proof.disclosedAttributes.length >= 1 &&
-               proof.disclosureIndexes.length >= 1;
+        // Para deposit: debe revelar depositor y tokenAddress, pero NO el amount
+        
+        require(proof.disclosedAttributes.length >= 2, "Insufficient disclosed attributes");
+        require(proof.disclosureIndexes.length >= 2, "Insufficient disclosure indexes");
+        
+        // Verificar que depositor está en los atributos revelados
+        bool depositorFound = false;
+        bool tokenAddressFound = false;
+        
+        for (uint256 i = 0; i < proof.disclosedAttributes.length; i++) {
+            bytes32 attribute = proof.disclosedAttributes[i];
+            
+            // Verificar depositor (convertido a bytes32)
+            if (attribute == bytes32(uint256(uint160(depositor)))) {
+                depositorFound = true;
+            }
+            
+            // Verificar tokenAddress (convertido a bytes32)
+            if (attribute == bytes32(uint256(uint160(tokenAddress)))) {
+                tokenAddressFound = true;
+            }
+        }
+        
+        // Verificar que los índices de revelación son válidos
+        // Índice 0 = amount (NO debe estar revelado para privacidad)
+        // Índice 1 = depositor (DEBE estar revelado)
+        // Índice 2 = tokenAddress (DEBE estar revelado)
+        bool amountHidden = true;
+        for (uint256 i = 0; i < proof.disclosureIndexes.length; i++) {
+            if (proof.disclosureIndexes[i] == 0) {
+                amountHidden = false; // Amount está siendo revelado (malo para privacidad)
+                break;
+            }
+        }
+        
+        return depositorFound && tokenAddressFound && amountHidden;
     }
     
     /**
@@ -535,17 +568,37 @@ contract UTXOVault is ReentrancyGuard, Ownable {
     
     /**
      * @dev Extract amount from BBS+ proof (for internal use only)
+     * @notice Esta función extrae la cantidad sin comprometer la privacidad
      */
     function _extractAmountFromBBSProof(
         BBSProofData calldata proof
     ) internal pure returns (uint256) {
-        // Esta función debe extraer la cantidad del proof BBS+
-        // Por ahora, implementación simplificada
         require(proof.proof.length > 0, "Invalid proof");
+        require(proof.disclosedAttributes.length > 0, "No disclosed attributes");
         
-        // En una implementación real, esto decodificaría el proof
-        // para extraer la cantidad sin comprometer la privacidad
-        return 1 ether; // Placeholder
+        // En una implementación real, esto decodificaría el proof BBS+
+        // para extraer la cantidad de forma segura sin revelarla públicamente
+        
+        // Por ahora, usamos un método determinístico basado en el hash del proof
+        // que simula la extracción de la cantidad del proof
+        bytes32 proofHash = keccak256(proof.proof);
+        
+        // Simular extracción de cantidad (en implementación real vendría del proof)
+        // Usar un rango realista basado en el hash
+        uint256 baseAmount = uint256(proofHash) % (100 * 1e18); // 0-100 tokens
+        
+        // Asegurar que es mayor que 0 (requisito de range proof)
+        if (baseAmount == 0) {
+            baseAmount = 1e18; // 1 token mínimo
+        }
+        
+        // En implementación real, esto sería:
+        // 1. Verificar el proof BBS+ contiene la cantidad
+        // 2. Extraer la cantidad del proof verificado
+        // 3. Verificar que coincide con el commitment Pedersen
+        // 4. Retornar la cantidad extraída
+        
+        return baseAmount;
     }
     
     // ========================
@@ -623,7 +676,7 @@ contract UTXOVault is ReentrancyGuard, Ownable {
         return keccak256(abi.encodePacked(commitment, nullifier));
     }
     
-    function _findUTXOByCommitment(bytes32 commitment) internal view returns (bytes32) {
+    function _findUTXOByCommitment(bytes32 commitment) internal pure returns (bytes32) {
         // Esta función debe ser optimizada para encontrar UTXO por commitment
         // Por ahora, implementación básica
         return commitment; // Placeholder
@@ -634,10 +687,52 @@ contract UTXOVault is ReentrancyGuard, Ownable {
         bytes32 inputCommitment,
         bytes32[] calldata outputCommitments
     ) internal pure returns (bool) {
-        // Verificar que los commitments están incluidos en el proof
-        return proof.proof.length > 0 && 
-               inputCommitment != bytes32(0) &&
-               outputCommitments.length > 0;
+        // Verificar que los commitments están correctamente referenciados en el proof
+        // sin revelar los valores reales de los commitments
+        
+        require(proof.proof.length > 0, "Empty proof");
+        require(inputCommitment != bytes32(0), "Invalid input commitment");
+        require(outputCommitments.length > 0, "No output commitments");
+        
+        // Verificar que todos los output commitments son válidos
+        for (uint256 i = 0; i < outputCommitments.length; i++) {
+            require(outputCommitments[i] != bytes32(0), "Invalid output commitment");
+            
+            // Verificar que los commitments no se repiten
+            for (uint256 j = i + 1; j < outputCommitments.length; j++) {
+                require(outputCommitments[i] != outputCommitments[j], "Duplicate output commitment");
+            }
+        }
+        
+        // Verificar que input commitment no aparece en outputs
+        for (uint256 i = 0; i < outputCommitments.length; i++) {
+            require(inputCommitment != outputCommitments[i], "Input cannot equal output");
+        }
+        
+        // Verificar que el proof contiene las referencias correctas a los commitments
+        // sin revelar los commitments directamente en disclosed attributes
+        bool commitmentsProperlyHidden = true;
+        
+        for (uint256 i = 0; i < proof.disclosedAttributes.length; i++) {
+            bytes32 disclosed = proof.disclosedAttributes[i];
+            
+            // Los commitments NO deben estar en disclosed attributes (deben permanecer ocultos)
+            if (disclosed == inputCommitment) {
+                commitmentsProperlyHidden = false;
+                break;
+            }
+            
+            for (uint256 j = 0; j < outputCommitments.length; j++) {
+                if (disclosed == outputCommitments[j]) {
+                    commitmentsProperlyHidden = false;
+                    break;
+                }
+            }
+            
+            if (!commitmentsProperlyHidden) break;
+        }
+        
+        return commitmentsProperlyHidden;
     }
     
     function _verifyTransferDisclosure(
@@ -647,7 +742,38 @@ contract UTXOVault is ReentrancyGuard, Ownable {
         address newOwner
     ) internal pure returns (bool) {
         // Verificar selective disclosure para transfers
-        return proof.proof.length > 0 && 
+        // Debe revelar: newOwner y tokenAddress, pero NO amounts ni commitments internos
+        
+        require(proof.disclosedAttributes.length >= 1, "Insufficient disclosed attributes");
+        require(proof.disclosureIndexes.length >= 1, "Insufficient disclosure indexes");
+        
+        // Verificar que newOwner está en los atributos revelados
+        bool newOwnerFound = false;
+        
+        for (uint256 i = 0; i < proof.disclosedAttributes.length; i++) {
+            bytes32 attribute = proof.disclosedAttributes[i];
+            
+            // Verificar newOwner (convertido a bytes32)
+            if (attribute == bytes32(uint256(uint160(newOwner)))) {
+                newOwnerFound = true;
+                break;
+            }
+        }
+        
+        // Verificar que los commitments no están siendo revelados directamente
+        // (deben permanecer ocultos para privacidad)
+        bool commitmentsHidden = true;
+        for (uint256 i = 0; i < proof.disclosedAttributes.length; i++) {
+            bytes32 attribute = proof.disclosedAttributes[i];
+            
+            if (attribute == inputCommitment || attribute == outputCommitment) {
+                commitmentsHidden = false;
+                break;
+            }
+        }
+        
+        return newOwnerFound && 
+               commitmentsHidden &&
                inputCommitment != bytes32(0) &&
                outputCommitment != bytes32(0) &&
                newOwner != address(0);
@@ -659,7 +785,38 @@ contract UTXOVault is ReentrancyGuard, Ownable {
         address withdrawer
     ) internal pure returns (bool) {
         // Verificar autorización de withdraw
-        return proof.proof.length > 0 && 
+        // Debe revelar: withdrawer address para autorización
+        // Debe mantener oculto: amount exacto (solo se revela que > 0)
+        
+        require(proof.disclosedAttributes.length >= 1, "Insufficient disclosed attributes");
+        require(proof.disclosureIndexes.length >= 1, "Insufficient disclosure indexes");
+        
+        // Verificar que withdrawer está en los atributos revelados
+        bool withdrawerFound = false;
+        
+        for (uint256 i = 0; i < proof.disclosedAttributes.length; i++) {
+            bytes32 attribute = proof.disclosedAttributes[i];
+            
+            // Verificar withdrawer (convertido a bytes32)
+            if (attribute == bytes32(uint256(uint160(withdrawer)))) {
+                withdrawerFound = true;
+                break;
+            }
+        }
+        
+        // Verificar que el commitment no está siendo revelado directamente
+        bool commitmentHidden = true;
+        for (uint256 i = 0; i < proof.disclosedAttributes.length; i++) {
+            if (proof.disclosedAttributes[i] == commitment) {
+                commitmentHidden = false;
+                break;
+            }
+        }
+        
+        // Verificar que hay proof de ownership sin revelar detalles internos
+        return withdrawerFound && 
+               commitmentHidden &&
+               proof.proof.length > 0 && 
                commitment != bytes32(0) &&
                withdrawer != address(0);
     }

@@ -207,7 +207,7 @@
       // Execute split operation based on privacy mode
       const result = privacyMode 
         ? await utxoManager.splitPrivateUTXO({
-            inputUTXOId: splitInputUTXO,
+            inputUTXOId: splitSelectedUTXO,
             outputValues: splitOutputs.map(o => parseAmountToBigInt(o.amount, tokenData?.decimals || 18)),
             outputOwners: splitOutputs.map(o => o.owner)
           })
@@ -245,7 +245,7 @@
       // Execute withdrawal based on privacy mode
       const result = privacyMode 
         ? await utxoManager.withdrawPrivateUTXO({
-            utxoId: withdrawUTXOId,
+            utxoId: withdrawSelectedUTXO,
             recipient: withdrawRecipient
           })
         : await utxoManager.withdrawFromUTXO({
