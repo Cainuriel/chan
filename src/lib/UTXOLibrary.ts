@@ -172,10 +172,10 @@ export class UTXOLibrary extends EventEmitter {
           console.warn('⚠️ No contract code found at address, but continuing initialization');
         } else {
           console.log('✅ Contract code found at address');
-          // Try to call a method if available
+          // Try to call a simple view method if available
           try {
-            await this.contract.requireZenroomProofs();
-            console.log('✅ Contract verification successful');
+            const count = await this.contract.getUserUTXOCount(this.currentEOA?.address || ethers.ZeroAddress);
+            console.log('✅ Contract verification successful, UTXO count:', count.toString());
           } catch (methodError) {
             console.warn('⚠️ Contract method call failed, but contract exists:', methodError);
           }
