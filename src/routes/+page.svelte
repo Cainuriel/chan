@@ -25,7 +25,7 @@
   let privacyMode = true; // Default to privacy mode
 
   // Configuration
-  const CONTRACT_ADDRESS = '0x035E8ab5cC9dB596342912C48a1E7a6d2d60eE4d'; // amoy
+  const CONTRACT_ADDRESS = '0x533B018Bb4F3984E1025ffC995BD4C81e3cAF801'; // amoy
   const PREFERRED_PROVIDER = WalletProviderType.METAMASK;
 
   onMount(async () => {
@@ -79,12 +79,16 @@
     privateUTXOManager.on('utxo:created', (utxo: ExtendedUTXOData) => {
       addNotification('success', `UTXO created: ${utxo.value.toString()} tokens`);
       refreshData();
+      // Switch to balance tab to show the new UTXO
+      setActiveTab('balance');
     });
 
     // Private UTXO events
     privateUTXOManager.on('private:utxo:created', (utxo: PrivateUTXO) => {
-      addNotification('success', `Private UTXO created with commitment: ${utxo.commitment.slice(0, 8)}...`);
+      addNotification('success', `🎉 Private UTXO created successfully! Check your balance.`);
       refreshData();
+      // Switch to balance tab to show the new private UTXO
+      setActiveTab('balance');
     });
 
     privateUTXOManager.on('private:utxo:transferred', (data: { from: string, to: string }) => {

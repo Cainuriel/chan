@@ -313,6 +313,16 @@ export class PrivateUTXOManager extends UTXOLibrary {
    * Crear UTXO privado con BBS+ credential usando depositAsPrivateUTXO
    */
   async createPrivateUTXO(params: CreateUTXOParams): Promise<UTXOOperationResult> {
+    // Usar la función completa con el nuevo contrato deployado
+    console.log('� Using full BBS+ function with new deployed contract...');
+    return this.createPrivateUTXO_Full(params);
+  }
+
+  /**
+   * Crear UTXO privado con BBS+ credential usando depositAsPrivateUTXO
+   * VERSIÓN COMPLETA (actualmente deshabilitada hasta redeploy del contrato)
+   */
+  async createPrivateUTXO_Full(params: CreateUTXOParams): Promise<UTXOOperationResult> {
     this.ensureInitialized();
     console.log('🔐 Creating private UTXO with BBS+ credential...');
 
@@ -477,6 +487,7 @@ export class PrivateUTXOManager extends UTXOLibrary {
         const contractInterface = this.contract!.interface;
         const encodedData = contractInterface.encodeFunctionData('depositAsPrivateUTXO', [
           tokenAddress,
+          amount,  // Add the amount parameter
           commitment.pedersen_commitment,
           bbsProofData,
           nullifierHash,
@@ -560,8 +571,62 @@ export class PrivateUTXOManager extends UTXOLibrary {
       
       console.log('✅ Allowance verified, proceeding with deposit...');
       
+      // 8.2. Debugging adicional: verificar estado del contrato y parámetros
+      console.log('🔍 Additional contract debugging...');
+      
+      // Verificar si el contrato tiene el código correcto
+      const contractCode = await signer.provider?.getCode(this.contract!.target as string);
+      console.log('📋 Contract code size:', contractCode?.length);
+      
+      // Verificar el balance del usuario para asegurar que puede pagar el gas
+      const userBalance = await signer.provider?.getBalance(this.currentAccount?.address!);
+      console.log('💰 User ETH balance:', ethers.formatEther(userBalance || 0n));
+      
+      // Debugging de parámetros antes de enviar la transacción
+      console.log('🔍 Final parameter validation...');
+      console.log('  - tokenAddress valid?', ethers.isAddress(tokenAddress));
+      console.log('  - commitment format:', commitment.pedersen_commitment.substring(0, 10) + '...');
+      console.log('  - nullifierHash format:', nullifierHash.substring(0, 10) + '...');
+      console.log('  - rangeProof format:', rangeProof.substring(0, 10) + '...');
+      console.log('  - bbsProofData.proof format:', bbsProofData.proof.substring(0, 10) + '...');
+      console.log('  - bbsProofData.disclosedAttributes length:', bbsProofData.disclosedAttributes.length);
+      console.log('  - bbsProofData.disclosureIndexes:', bbsProofData.disclosureIndexes.map(i => i.toString()));
+      
+      // Verificar métodos básicos del contrato
+      try {
+        console.log('🧪 Testing basic contract connectivity...');
+        if (this.currentAccount?.address) {
+          try {
+            const userUTXOCount = await this.contract!.getUserUTXOCount(this.currentAccount.address);
+            console.log('✅ getUserUTXOCount works:', userUTXOCount.toString());
+          } catch (error) {
+            console.log('❌ getUserUTXOCount failed:', error);
+          }
+        }
+      } catch (error) {
+        console.log('❌ Basic contract calls failed:', error);
+      }
+      
+      // 8.3. Verificar allowance una vez más justo antes de enviar
+      console.log('🔍 Final final allowance check...');
+      const veryFinalAllowance = await finalTokenContract.allowance(
+        this.currentAccount?.address,
+        this.contract?.target
+      );
+      console.log('💰 Very final allowance:', ethers.formatUnits(veryFinalAllowance, finalTokenDecimals));
+      
+      if (veryFinalAllowance < amount) {
+        throw new Error(`Last-second allowance check failed: ${ethers.formatUnits(veryFinalAllowance, finalTokenDecimals)} < ${ethers.formatUnits(amount, finalTokenDecimals)}`);
+      }
+      
+      console.log('🚀 Sending depositAsPrivateUTXO transaction...');
+      console.log('   Gas limit:', gasLimit.toString());
+      console.log('   Gas price:', ethers.formatUnits(gasPrice, 'gwei'), 'gwei');
+      console.log('   Estimated cost:', ethers.formatEther(gasLimit * gasPrice), 'ETH');
+      
       const tx = await this.contract!.depositAsPrivateUTXO(
         tokenAddress,
+        amount,  // Add the amount parameter
         commitment.pedersen_commitment,
         bbsProofData,
         nullifierHash,
@@ -1349,6 +1414,155 @@ export class PrivateUTXOManager extends UTXOLibrary {
     } catch (error) {
       console.error('❌ Failed to auto-configure BBS+ issuer:', error);
       throw new Error(`Failed to configure BBS+ issuer for token ${tokenAddress}: ${error}`);
+    }
+  }
+
+  /**
+   * Crear UTXO privado SIMPLIFICADO para testing/development
+   * Usa la función depositAsPrivateUTXO_Test que omite las verificaciones complejas BBS+
+   */
+  async createPrivateUTXO_Test(params: CreateUTXOParams): Promise<UTXOOperationResult> {
+    this.ensureInitialized();
+    console.log('🧪 Creating private UTXO with TESTING function (simplified)...');
+
+    try {
+      const { amount, tokenAddress, owner } = params;
+      
+      // 1. Aprobar tokens antes del depósito
+      await this.approveTokenSpending(tokenAddress, amount);
+      
+      console.log('🧪 Using simplified testing deposit function...');
+      
+      // 2. Preparar transacción con gas estimation
+      const signer = EthereumHelpers.getSigner();
+      if (!signer) {
+        throw new Error('Signer not available for deposit transaction');
+      }
+
+      // Obtener gasPrice actual de la red
+      let gasPrice: bigint;
+      try {
+        const feeData = await signer.provider?.getFeeData();
+        gasPrice = feeData?.gasPrice || ethers.parseUnits('20', 'gwei');
+      } catch (error) {
+        console.warn('Could not get gas price for deposit, using default:', error);
+        gasPrice = ethers.parseUnits('20', 'gwei');
+      }
+
+      // Usar gas fijo para testing
+      const gasLimit = BigInt(500000); // 500k gas para función simplificada
+      
+      console.log('⛽ Gas estimation for testing deposit:');
+      console.log('  - Gas limit:', gasLimit.toString());
+      console.log('  - Gas price:', ethers.formatUnits(gasPrice, 'gwei'), 'gwei');
+
+      // 3. Verificar allowance final
+      const tokenContract = new ethers.Contract(
+        tokenAddress,
+        [
+          "function allowance(address owner, address spender) view returns (uint256)",
+          "function decimals() view returns (uint8)"
+        ],
+        signer
+      );
+      
+      let tokenDecimals: number;
+      try {
+        tokenDecimals = await tokenContract.decimals();
+      } catch (error) {
+        tokenDecimals = 18;
+      }
+      
+      const finalAllowance = await tokenContract.allowance(
+        this.currentAccount?.address,
+        this.contract?.target
+      );
+      
+      console.log('💰 Final allowance check:', ethers.formatUnits(finalAllowance, tokenDecimals));
+      console.log('💰 Required amount:', ethers.formatUnits(amount, tokenDecimals));
+      
+      if (finalAllowance < amount) {
+        throw new Error(
+          `Insufficient allowance: ${ethers.formatUnits(finalAllowance, tokenDecimals)} < ${ethers.formatUnits(amount, tokenDecimals)}`
+        );
+      }
+      
+      console.log('🚀 Sending depositAsPrivateUTXO_Test transaction...');
+      
+      // 4. Ejecutar transacción simplificada
+      const tx = await (this.contract! as any).depositAsPrivateUTXO_Test(
+        tokenAddress,
+        amount,
+        {
+          gasLimit: gasLimit,
+          gasPrice: gasPrice
+        }
+      );
+
+      const receipt = await tx.wait();
+
+      // 5. Crear UTXO local simplificado
+      const utxoId = `test_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+      const commitment = ethers.keccak256(ethers.toUtf8Bytes(`${owner}:${amount}:${Date.now()}`));
+      const nullifierHash = ethers.keccak256(ethers.toUtf8Bytes(`${commitment}:${owner}`));
+
+      const privateUTXO: PrivateUTXO = {
+        id: utxoId,
+        exists: true,
+        value: amount,
+        tokenAddress,
+        owner,
+        timestamp: toBigInt(Date.now()),
+        isSpent: false,
+        commitment: commitment,
+        parentUTXO: '',
+        utxoType: UTXOType.DEPOSIT,
+        blindingFactor: 'test_blinding_factor',
+        nullifierHash: nullifierHash,
+        localCreatedAt: Date.now(),
+        confirmed: true,
+        creationTxHash: receipt?.hash,
+        blockNumber: receipt?.blockNumber,
+        bbsCredential: {
+          signature: 'test_signature',
+          attributes: {
+            value: amount.toString(),
+            owner: owner,
+            tokenAddress: tokenAddress,
+            nonce: Date.now().toString(),
+            timestamp: Date.now(),
+            utxoType: UTXOType.DEPOSIT,
+            commitment: commitment
+          },
+          issuerPubKey: 'test_issuer_key',
+          credentialId: ethers.keccak256(ethers.toUtf8Bytes(`test_${utxoId}`))
+        },
+        isPrivate: true
+      };
+
+      // 6. Almacenar en cache
+      this.utxos.set(utxoId, privateUTXO);
+      this.privateUTXOs.set(utxoId, privateUTXO);
+
+      const result: UTXOOperationResult = {
+        success: true,
+        transactionHash: receipt?.hash,
+        gasUsed: receipt?.gasUsed,
+        createdUTXOIds: [utxoId]
+      };
+
+      console.log('✅ Private UTXO created successfully (testing mode):', utxoId);
+      this.emit('private:utxo:created', privateUTXO);
+
+      return result;
+
+    } catch (error) {
+      console.error('❌ Private UTXO creation (testing) failed:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Private UTXO creation (testing) failed',
+        errorDetails: error
+      };
     }
   }
 

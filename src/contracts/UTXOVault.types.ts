@@ -61,6 +61,7 @@ export interface CommitmentProofContract {
  */
 export interface DepositAsPrivateUTXOParams {
   tokenAddress: string;
+  amount: bigint; // uint256 - amount to deposit
   commitment: string; // bytes32
   bbsProof: BBSProofDataContract;
   nullifierHash: string; // bytes32
@@ -422,7 +423,8 @@ export const UTXO_VAULT_ABI = [
   "function transferUTXO(bytes32 utxoId, address newOwner, bytes calldata transferProof) external",
   
   // New private UTXO functions
-  "function depositAsPrivateUTXO(address tokenAddress, bytes32 commitment, (bytes proof, bytes32[] disclosedAttributes, uint256[] disclosureIndexes, bytes32 challenge, uint256 timestamp) bbsProof, bytes32 nullifierHash, bytes rangeProof) external",
+  "function depositAsPrivateUTXO(address tokenAddress, uint256 amount, bytes32 commitment, (bytes proof, bytes32[] disclosedAttributes, uint256[] disclosureIndexes, bytes32 challenge, uint256 timestamp) bbsProof, bytes32 nullifierHash, bytes rangeProof) external",
+  "function depositAsPrivateUTXO_Test(address tokenAddress, uint256 amount) external",
   "function splitPrivateUTXO(bytes32 inputCommitment, bytes32[] calldata outputCommitments, (bytes proof, bytes32[] disclosedAttributes, uint256[] disclosureIndexes, bytes32 challenge, uint256 timestamp) splitProof, bytes calldata equalityProof, bytes32 nullifierHash) external returns (bytes32[] memory)",
   "function transferPrivateUTXO(bytes32 inputCommitment, bytes32 outputCommitment, (bytes proof, bytes32[] disclosedAttributes, uint256[] disclosureIndexes, bytes32 challenge, uint256 timestamp) transferProof, address newOwner, bytes32 nullifierHash) external",
   "function withdrawFromPrivateUTXO(bytes32 commitment, (bytes proof, bytes32[] disclosedAttributes, uint256[] disclosureIndexes, bytes32 challenge, uint256 timestamp) withdrawProof, bytes32 nullifierHash) external",
@@ -515,7 +517,7 @@ export interface UTXOVaultInterface {
   encodeFunctionData(functionFragment: "splitUTXO", values: [string, string[], string[], bigint[], string]): string;
   encodeFunctionData(functionFragment: "combineUTXOs", values: [string[], string, string, string]): string;
   encodeFunctionData(functionFragment: "transferUTXO", values: [string, string, string]): string;
-  encodeFunctionData(functionFragment: "depositAsPrivateUTXO", values: [string, string, BBSProofDataContract, string, string]): string;
+  encodeFunctionData(functionFragment: "depositAsPrivateUTXO", values: [string, bigint, string, BBSProofDataContract, string, string]): string;
   encodeFunctionData(functionFragment: "splitPrivateUTXO", values: [string, string[], BBSProofDataContract, string, string]): string;
   encodeFunctionData(functionFragment: "transferPrivateUTXO", values: [string, string, BBSProofDataContract, string, string]): string;
   encodeFunctionData(functionFragment: "withdrawFromPrivateUTXO", values: [string, BBSProofDataContract, string]): string;
@@ -605,10 +607,18 @@ export interface UTXOVaultContract {
   // Private UTXO functions
   depositAsPrivateUTXO(
     tokenAddress: string,
+    amount: bigint,
     commitment: string,
     bbsProof: BBSProofDataContract,
     nullifierHash: string,
     rangeProof: string,
+    overrides?: ContractCallOptions
+  ): Promise<ContractTransactionResponse>;
+  
+  // Testing version of deposit (simplified)
+  depositAsPrivateUTXO_Test(
+    tokenAddress: string,
+    amount: bigint,
     overrides?: ContractCallOptions
   ): Promise<ContractTransactionResponse>;
   
