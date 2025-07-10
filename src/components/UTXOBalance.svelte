@@ -2,13 +2,16 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
   import type { ExtendedUTXOData, UTXOManagerStats } from '../types/utxo.types';
+  import type { PrivateUTXO } from '../lib/PrivateUTXOManager';
   import type { ERC20TokenData } from '../types/ethereum.types';
   import { UTXOType } from '../types/utxo.types';
   import { EthereumHelpers } from '../utils/ethereum.helpers';
 
   // Props
   export let utxos: ExtendedUTXOData[] = [];
+  export let privateUTXOs: PrivateUTXO[] = [];
   export let stats: UTXOManagerStats | null = null;
+  export let privacyMode: boolean = true;
 
   // Event dispatcher
   const dispatch = createEventDispatcher();
@@ -18,6 +21,7 @@
   let sortBy: 'value' | 'timestamp' | 'type' = 'timestamp';
   let sortOrder: 'asc' | 'desc' = 'desc';
   let showSpent = false;
+  let showPrivateDetails = false; // Toggle for showing private UTXO details
 
   // Token metadata cache
   let tokenMetadataCache: Record<string, ERC20TokenData> = {};
@@ -28,9 +32,15 @@
   let tokenBalances: Record<string, bigint> = {};
   let uniqueTokens: string[] = [];
   let filteredUTXOs: ExtendedUTXOData[]  = [];
+  let filteredPrivateUTXOs: PrivateUTXO[] = [];
   
-  $: if(utxos.length !== 0) {
-    uniqueTokens = [...new Set(utxos.map(u => u.tokenAddress))];
+  $: if(utxos.length !== 0 || privateUTXOs.length !== 0) {
+    // Get unique tokens from both regular and private UTXOs
+    const regularTokens = utxos.map(u => u.tokenAddress);
+    const privateTokens = privateUTXOs.map(u => u.tokenAddress);
+    uniqueTokens = [...new Set([...regularTokens, ...privateTokens])];
+    
+    // Filter regular UTXOs
     filteredUTXOs = utxos
       .filter(utxo => selectedTokenAddress === 'all' || utxo.tokenAddress === selectedTokenAddress)
       .filter(utxo => showSpent || !utxo.isSpent)
@@ -51,6 +61,29 @@
         
         return sortOrder === 'asc' ? comparison : -comparison;
       });
+
+    // Filter private UTXOs
+    filteredPrivateUTXOs = privateUTXOs
+      .filter(utxo => selectedTokenAddress === 'all' || utxo.tokenAddress === selectedTokenAddress)
+      .filter(utxo => showSpent || !utxo.isSpent)
+      .sort((a, b) => {
+        let comparison = 0;
+        
+        switch (sortBy) {
+          case 'value':
+            comparison = Number(a.value - b.value);
+            break;
+          case 'timestamp':
+            comparison = Number(a.timestamp - b.timestamp);
+            break;
+          case 'type':
+            comparison = a.utxoType.localeCompare(b.utxoType);
+            break;
+        }
+        
+        return sortOrder === 'asc' ? comparison : -comparison;
+      });
+      
     tokenBalances = stats?.balanceByToken || {};
     
     // Load token metadata for unique tokens
@@ -227,15 +260,112 @@
       </div>
     {/if}
 
-  <!-- UTXO List -->
-  <div class="bg-white/10 backdrop-blur-sm rounded-lg border border-white/20">
-    <div class="p-6 border-b border-white/10">
-      <div class="flex items-center justify-between mb-4">
-        <h2 class="text-xl font-bold text-white">UTXOs</h2>
-        <div class="text-gray-300 text-sm">
-          {filteredUTXOs.length} of {utxos.length} UTXOs
+  <!-- UTXO Lists -->
+  <div class="space-y-6">
+    
+    <!-- Private UTXOs Section -->
+    {#if privateUTXOs.length > 0}
+      <div class="bg-white/10 backdrop-blur-sm rounded-lg border border-white/20">
+        <div class="p-6 border-b border-white/10">
+          <div class="flex items-center justify-between mb-4">
+            <div class="flex items-center space-x-3">
+              <h2 class="text-xl font-bold text-white">🔐 Private UTXOs</h2>
+              <span class="px-2 py-1 bg-purple-600/20 border border-purple-500/50 rounded-lg text-purple-300 text-xs">
+                BBS+ Encrypted
+              </span>
+            </div>
+            <div class="flex items-center space-x-4">
+              <button
+                on:click={() => showPrivateDetails = !showPrivateDetails}
+                class="text-gray-300 hover:text-white text-sm px-3 py-1 rounded-lg border border-white/20 hover:bg-white/10 transition-all duration-200"
+              >
+                {showPrivateDetails ? '🙈 Hide Details' : '👁️ Show Details'}
+              </button>
+              <div class="text-gray-300 text-sm">
+                {filteredPrivateUTXOs.length} of {privateUTXOs.length} Private UTXOs
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="p-6">
+          {#if filteredPrivateUTXOs.length === 0}
+            <div class="text-center text-gray-400 py-8">
+              No private UTXOs match the current filters
+            </div>
+          {:else}
+            <div class="space-y-4">
+              {#each filteredPrivateUTXOs as utxo (utxo.id)}
+                <div class="bg-white/5 rounded-lg p-4 border border-white/10 hover:bg-white/10 transition-all duration-200">
+                  <div class="flex items-center justify-between">
+                    <div class="flex items-center space-x-3">
+                      <div class="text-purple-400 text-xl">
+                        {getUTXOTypeIcon(utxo.utxoType)}
+                      </div>
+                      <div>
+                        <div class="text-white font-medium">
+                          {showPrivateDetails ? formatValue(utxo.value, getTokenMetadata(utxo.tokenAddress)?.decimals || 18) : '••••••'} 
+                          {getTokenMetadata(utxo.tokenAddress)?.symbol || 'TOKEN'}
+                        </div>
+                        <div class="text-gray-400 text-sm">
+                          Commitment: {utxo.commitment.slice(0, 10)}...{utxo.commitment.slice(-6)}
+                        </div>
+                      </div>
+                    </div>
+                    
+                    <div class="text-right">
+                      <div class="text-gray-300 text-sm">
+                        {formatTimestamp(utxo.timestamp)}
+                      </div>
+                      <div class="flex items-center space-x-2 mt-1">
+                        <span class="px-2 py-1 bg-purple-600/20 text-purple-300 text-xs rounded">
+                          {UTXOType[utxo.utxoType]}
+                        </span>
+                        {#if utxo.isSpent}
+                          <span class="px-2 py-1 bg-red-600/20 text-red-300 text-xs rounded">
+                            Spent
+                          </span>
+                        {/if}
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {#if showPrivateDetails}
+                    <div class="mt-3 pt-3 border-t border-white/10">
+                      <div class="grid grid-cols-2 gap-4 text-xs">
+                        <div>
+                          <span class="text-gray-400">UTXO ID:</span>
+                          <div class="text-white font-mono break-all">{utxo.id}</div>
+                        </div>
+                        <div>
+                          <span class="text-gray-400">Owner:</span>
+                          <div class="text-white font-mono">{utxo.owner.slice(0, 8)}...{utxo.owner.slice(-6)}</div>
+                        </div>
+                      </div>
+                    </div>
+                  {/if}
+                </div>
+              {/each}
+            </div>
+          {/if}
         </div>
       </div>
+    {/if}
+
+    <!-- Regular UTXOs Section -->
+    <div class="bg-white/10 backdrop-blur-sm rounded-lg border border-white/20">
+      <div class="p-6 border-b border-white/10">
+        <div class="flex items-center justify-between mb-4">
+          <div class="flex items-center space-x-3">
+            <h2 class="text-xl font-bold text-white">🔓 Regular UTXOs</h2>
+            <span class="px-2 py-1 bg-blue-600/20 border border-blue-500/50 rounded-lg text-blue-300 text-xs">
+              Transparent
+            </span>
+          </div>
+          <div class="text-gray-300 text-sm">
+            {filteredUTXOs.length} of {utxos.length} UTXOs
+          </div>
+        </div>
 
       <!-- Filters -->
       <div class="flex flex-wrap items-center gap-4">
@@ -386,6 +516,8 @@
         </div>
       {/if}
     </div>
-  </div>
+  </div> <!-- Close Regular UTXOs section -->
+  
+  </div> <!-- Close UTXO Lists wrapper -->
   {/if}
 </div>

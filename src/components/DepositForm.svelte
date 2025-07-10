@@ -1,11 +1,12 @@
 <!-- src/lib/components/DepositForm.svelte -->
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
-  import type { UTXOLibrary } from '../UTXOLibrary';
+  import type { PrivateUTXOManager } from '../lib/PrivateUTXOManager';
   import type { ERC20TokenData } from '../types/ethereum.types';
 
   // Props
-  export let utxoLibrary: UTXOLibrary;
+  export let utxoManager: PrivateUTXOManager;
+  export let privacyMode: boolean = true;
 
   // Event dispatcher
   const dispatch = createEventDispatcher();
@@ -58,13 +59,13 @@
     tokenError = '';
 
     try {
-      const currentAccount = utxoLibrary.currentAccount;
+      const currentAccount = utxoManager.currentAccount;
       if (!currentAccount) {
         throw new Error('No account connected');
       }
 
       // Get token info from ethereum helpers
-      tokenData = await utxoLibrary['ethereum'].getERC20TokenInfo(
+      tokenData = await utxoManager['ethereum'].getERC20TokenInfo(
         tokenAddress, 
         currentAccount.address
       );
@@ -82,7 +83,7 @@
   }
 
   async function handleDeposit() {
-    if (!tokenData || !amount || !utxoLibrary.currentAccount) {
+    if (!tokenData || !amount || !utxoManager.currentAccount) {
       return;
     }
 
@@ -108,13 +109,15 @@
       const depositParams = {
         amount: amountBigInt,
         tokenAddress: tokenAddress,
-        owner: utxoLibrary.currentAccount.address,
+        owner: utxoManager.currentAccount.address,
         blindingFactor: useCustomBlinding && customBlindingFactor ? 
           customBlindingFactor : undefined
       };
 
-      // Execute deposit
-      const result = await utxoLibrary.depositAsUTXO(depositParams);
+      // Execute deposit - choose between private and public based on privacy mode
+      const result = privacyMode 
+        ? await utxoManager.createPrivateUTXO(depositParams)
+        : await utxoManager.depositAsUTXO(depositParams);
 
       if (result.success) {
         // Reset form
@@ -246,9 +249,17 @@
 <div class="space-y-6">
   <!-- Header -->
   <div class="bg-white/10 backdrop-blur-sm rounded-lg p-6 border border-white/20">
-    <h2 class="text-xl font-bold text-white mb-2">Deposit ERC20 as UTXO</h2>
+    <div class="flex items-center justify-between mb-2">
+      <h2 class="text-xl font-bold text-white">Deposit ERC20 as UTXO</h2>
+      <div class="flex items-center space-x-2 px-3 py-1 rounded-lg {privacyMode ? 'bg-purple-600/20 border border-purple-500/50' : 'bg-blue-600/20 border border-blue-500/50'}">
+        <span class="text-lg">{privacyMode ? '🔐' : '🔓'}</span>
+        <span class="text-sm font-medium {privacyMode ? 'text-purple-300' : 'text-blue-300'}">
+          {privacyMode ? 'Private Mode' : 'Public Mode'}
+        </span>
+      </div>
+    </div>
     <p class="text-gray-300 text-sm">
-      Convert your ERC20 tokens into privacy-preserving UTXOs using Zenroom cryptography
+      Convert your ERC20 tokens into {privacyMode ? 'privacy-preserving' : 'transparent'} UTXOs using {privacyMode ? 'BBS+ cryptography' : 'standard cryptography'}
     </p>
   </div>
 

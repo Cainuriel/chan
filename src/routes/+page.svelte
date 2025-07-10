@@ -1,7 +1,7 @@
 <!-- src/routes/+page.svelte -->
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { UTXOLibrary } from '../UTXOLibrary';
+  import { PrivateUTXOManager, type PrivateUTXO } from '$lib/PrivateUTXOManager';
   import { WalletProviderType } from '../types/ethereum.types';
   import type { UTXOManagerStats, ExtendedUTXOData } from '../types/utxo.types';
   import type { EOAData } from '../types/ethereum.types';
@@ -14,13 +14,15 @@
   import TransactionHistory from '../components/TransactionHistory.svelte';
 
   // State
-  let utxoLibrary: UTXOLibrary;
+  let privateUTXOManager: PrivateUTXOManager;
   let isInitialized = false;
   let currentAccount: EOAData | null = null;
   let utxos: ExtendedUTXOData[] = [];
+  let privateUTXOs: PrivateUTXO[] = [];
   let stats: UTXOManagerStats | null = null;
   let activeTab = 'balance';
   let notifications: Array<{id: string, type: string, message: string}> = [];
+  let privacyMode = true; // Default to privacy mode
 
   // Configuration
   const CONTRACT_ADDRESS = '0xBb8399072E0DFD673716cE118D249DE22A32bF66'; // amoy
@@ -28,8 +30,8 @@
 
   onMount(async () => {
     try {
-      // Initialize UTXO Library
-      utxoLibrary = new UTXOLibrary({
+      // Initialize Private UTXO Manager
+      privateUTXOManager = new PrivateUTXOManager({
         autoConsolidate: false,
         consolidationThreshold: 5,
         maxUTXOAge: 7 * 24 * 60 * 60, // 7 days
@@ -42,62 +44,79 @@
       // Setup event listeners
       setupEventListeners();
 
-      console.log('🚀 UTXO Manager initialized');
+      console.log('� Private UTXO Manager initialized');
     } catch (error) {
-      console.error('❌ Failed to initialize UTXO Manager:', error);
-      addNotification('error', 'Failed to initialize UTXO Manager');
+      console.error('❌ Failed to initialize Private UTXO Manager:', error);
+      addNotification('error', 'Failed to initialize Private UTXO Manager');
     }
   });
 
   function setupEventListeners() {
     // Library events
-    utxoLibrary.on('library:initialized', (data: any) => {
+    privateUTXOManager.on('library:initialized', (data: any) => {
       isInitialized = true;
-      addNotification('success', 'UTXO Library initialized successfully');
+      addNotification('success', 'Private UTXO Manager initialized successfully');
       refreshData();
     });
 
     // Wallet events
-    utxoLibrary.on('wallet:connected', (eoa: EOAData) => {
+    privateUTXOManager.on('wallet:connected', (eoa: EOAData) => {
       currentAccount = eoa;
       addNotification('success', `Wallet connected: ${eoa.address.slice(0, 6)}...${eoa.address.slice(-4)}`);
       refreshData();
     });
 
-    utxoLibrary.on('wallet:disconnected', () => {
+    privateUTXOManager.on('wallet:disconnected', () => {
       currentAccount = null;
       utxos = [];
+      privateUTXOs = [];
       stats = null;
       isInitialized = false;
       addNotification('info', 'Wallet disconnected');
     });
 
     // UTXO events
-    utxoLibrary.on('utxo:created', (utxo: ExtendedUTXOData) => {
+    privateUTXOManager.on('utxo:created', (utxo: ExtendedUTXOData) => {
       addNotification('success', `UTXO created: ${utxo.value.toString()} tokens`);
       refreshData();
     });
 
-    utxoLibrary.on('utxo:spent', (utxoId: string) => {
-      addNotification('info', `UTXO spent: ${utxoId.slice(0, 8)}...`);
+    // Private UTXO events
+    privateUTXOManager.on('private:utxo:created', (utxo: PrivateUTXO) => {
+      addNotification('success', `Private UTXO created with commitment: ${utxo.commitment.slice(0, 8)}...`);
+      refreshData();
+    });
+
+    privateUTXOManager.on('private:utxo:transferred', (data: { from: string, to: string }) => {
+      addNotification('success', `Private UTXO transferred successfully`);
+      refreshData();
+    });
+
+    privateUTXOManager.on('private:utxo:spent', (utxoId: string) => {
+      addNotification('info', `Private UTXO spent: ${utxoId.slice(0, 8)}...`);
+      refreshData();
+    });
+
+    privateUTXOManager.on('private:utxo:withdrawn', (utxoId: string) => {
+      addNotification('success', `Private UTXO withdrawn successfully`);
       refreshData();
     });
 
     // Operation events
-    utxoLibrary.on('operation:failed', (error: any) => {
+    privateUTXOManager.on('operation:failed', (error: any) => {
       addNotification('error', `Operation failed: ${error.message}`);
     });
   }
 
   async function initializeLibrary() {
     try {
-      const success = await utxoLibrary.initialize(CONTRACT_ADDRESS, PREFERRED_PROVIDER);
+      const success = await privateUTXOManager.initialize(CONTRACT_ADDRESS, PREFERRED_PROVIDER);
       if (!success) {
-        addNotification('error', 'Failed to initialize library');
+        addNotification('error', 'Failed to initialize Private UTXO Manager');
       }
     } catch (error) {
       console.error('Initialization error:', error);
-      addNotification('error', 'Library initialization failed');
+      addNotification('error', 'Private UTXO Manager initialization failed');
     }
   }
 
@@ -106,13 +125,16 @@
 
     try {
       // Sync with blockchain
-      await utxoLibrary.syncWithBlockchain();
+      await privateUTXOManager.syncWithBlockchain();
       
-      // Get UTXOs
-      utxos = utxoLibrary.getUTXOsByOwner(currentAccount.address);
+      // Get regular UTXOs
+      utxos = privateUTXOManager.getUTXOsByOwner(currentAccount.address);
+      
+      // Get private UTXOs
+      privateUTXOs = privateUTXOManager.getPrivateUTXOsByOwner(currentAccount.address);
       
       // Get stats
-      stats = utxoLibrary.getStats();
+      stats = privateUTXOManager.getStats();
     } catch (error) {
       console.error('Failed to refresh data:', error);
       addNotification('error', 'Failed to refresh data');
@@ -139,6 +161,23 @@
 
   function setActiveTab(tab: string) {
     activeTab = tab;
+  }
+
+  function togglePrivacyMode() {
+    privacyMode = !privacyMode;
+    addNotification('info', `Privacy mode ${privacyMode ? 'enabled' : 'disabled'}`);
+    refreshData();
+  }
+
+  // Get combined balance (regular + private UTXOs)
+  function getTotalBalance(tokenAddress?: string): bigint {
+    const regularBalance = utxos
+      .filter(utxo => !tokenAddress || utxo.tokenAddress === tokenAddress)
+      .reduce((sum, utxo) => sum + utxo.value, BigInt(0));
+    
+    const privateBalance = privateUTXOManager?.getPrivateBalance(tokenAddress) || BigInt(0);
+    
+    return regularBalance + privateBalance;
   }
 </script>
 
@@ -189,14 +228,26 @@
         
         <div class="flex items-center space-x-4">
           {#if isInitialized}
-            <div class="flex items-center space-x-2 text-green-400">
-              <div class="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
-              <span class="text-sm">Connected</span>
+            <div class="flex items-center space-x-4">
+              <!-- Privacy Mode Toggle -->
+              <button
+                on:click={togglePrivacyMode}
+                class="flex items-center space-x-2 px-3 py-2 rounded-lg transition-all duration-200 {privacyMode ? 'bg-purple-600 text-white' : 'bg-white/10 text-gray-300 hover:bg-white/20'}"
+              >
+                <span>{privacyMode ? '🔐' : '🔓'}</span>
+                <span class="text-sm">{privacyMode ? 'Private' : 'Public'}</span>
+              </button>
+              
+              <!-- Connection Status -->
+              <div class="flex items-center space-x-2 text-green-400">
+                <div class="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+                <span class="text-sm">Connected</span>
+              </div>
             </div>
           {/if}
           
           <WalletConnection 
-            {utxoLibrary}
+            utxoManager={privateUTXOManager}
             {currentAccount}
             {isInitialized}
             on:initialize={initializeLibrary}
@@ -253,10 +304,15 @@
       <div class="space-y-8">
         <!-- Stats Overview -->
         {#if stats}
-          <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
+          <div class="grid grid-cols-1 md:grid-cols-5 gap-6">
             <div class="bg-white/10 backdrop-blur-sm rounded-lg p-6 border border-white/20">
-              <div class="text-purple-400 text-sm font-medium mb-1">Total UTXOs</div>
+              <div class="text-purple-400 text-sm font-medium mb-1">Regular UTXOs</div>
               <div class="text-white text-2xl font-bold">{stats.unspentUTXOs}</div>
+            </div>
+            
+            <div class="bg-white/10 backdrop-blur-sm rounded-lg p-6 border border-white/20">
+              <div class="text-pink-400 text-sm font-medium mb-1">Private UTXOs</div>
+              <div class="text-white text-2xl font-bold">{privateUTXOs.length}</div>
             </div>
             
             <div class="bg-white/10 backdrop-blur-sm rounded-lg p-6 border border-white/20">
@@ -299,19 +355,39 @@
         <!-- Tab Content -->
         <div class="space-y-6">
           {#if activeTab === 'balance' }
-            {#if utxos.length === 0}
+            {#if utxos.length === 0 && privateUTXOs.length === 0}
               <div class="text-center text-gray-400">
                 No UTXOs found. Start by depositing tokens.
               </div>
             {:else}
-            <UTXOBalance {utxos} {stats} on:refresh={refreshData} />
+              <UTXOBalance 
+                {utxos} 
+                {privateUTXOs}
+                {stats} 
+                {privacyMode}
+                on:refresh={refreshData} 
+              />
             {/if}
           {:else if activeTab === 'deposit'}
-            <DepositForm {utxoLibrary} on:deposited={refreshData} />
+            <DepositForm 
+              utxoManager={privateUTXOManager} 
+              {privacyMode}
+              on:deposited={refreshData} 
+            />
           {:else if activeTab === 'operations'}
-            <OperationsPanel {utxoLibrary} {utxos} on:operation={refreshData} />
+            <OperationsPanel 
+              utxoManager={privateUTXOManager} 
+              {utxos} 
+              {privateUTXOs}
+              {privacyMode}
+              on:operation={refreshData} 
+            />
           {:else if activeTab === 'history'}
-            <TransactionHistory {utxos} />
+            <TransactionHistory 
+              {utxos} 
+              {privateUTXOs}
+              {privacyMode}
+            />
           {/if}
         </div>
       </div>

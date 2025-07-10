@@ -1,12 +1,12 @@
 <!-- src/lib/components/WalletConnection.svelte -->
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
-  import type { UTXOLibrary } from '../UTXOLibrary';
+  import type { PrivateUTXOManager } from '../lib/PrivateUTXOManager';
   import type { EOAData } from '../types/ethereum.types';
   import { WalletProviderType } from '../types/ethereum.types';
 
   // Props
-  export let utxoLibrary: UTXOLibrary;
+  export let utxoManager: PrivateUTXOManager;
   export let currentAccount: EOAData | null = null;
   export let isInitialized: boolean = false;
 
@@ -58,7 +58,7 @@
         selectedProvider = walletProvider;
         dispatch('initialize');
       } else {
-        const result = await utxoLibrary.connectWallet(walletProvider);
+        const result = await utxoManager.connectWallet(walletProvider);
         if (!result.success) {
           console.error('Connection failed:', result.error);
         }
@@ -74,7 +74,7 @@
     isDisconnecting = true;
 
     try {
-      await utxoLibrary.disconnect();
+      await utxoManager.disconnect();
     } catch (error) {
       console.error('Disconnection error:', error);
     } finally {

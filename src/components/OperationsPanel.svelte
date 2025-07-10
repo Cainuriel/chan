@@ -1,13 +1,15 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
-  import type { UTXOLibrary } from '../UTXOLibrary';
+  import type { PrivateUTXOManager, PrivateUTXO } from '../lib/PrivateUTXOManager';
   import type { ExtendedUTXOData } from '../types/utxo.types';
   import type { ERC20TokenData } from '../types/ethereum.types';
   import { EthereumHelpers } from '../utils/ethereum.helpers';
 
   // Props
-  export let utxoLibrary: UTXOLibrary;
+  export let utxoManager: PrivateUTXOManager;
   export let utxos: ExtendedUTXOData[] = [];
+  export let privateUTXOs: PrivateUTXO[] = [];
+  export let privacyMode: boolean = true;
 
   // Event dispatcher
   const dispatch = createEventDispatcher();
@@ -84,8 +86,8 @@
   };
 
   // Initialize with current account as default owner
-  $: if (utxoLibrary.currentAccount) {
-    const address = utxoLibrary.currentAccount.address;
+  $: if (utxoManager.currentAccount) {
+    const address = utxoManager.currentAccount.address;
     splitOutputs = splitOutputs.map(output => ({
       ...output,
       owner: output.owner || address
@@ -137,7 +139,7 @@
   function addSplitOutput() {
     splitOutputs = [...splitOutputs, { 
       amount: '', 
-      owner: utxoLibrary.currentAccount?.address || '' 
+      owner: utxoManager.currentAccount?.address || '' 
     }];
   }
 
@@ -202,7 +204,14 @@
       );
       const outputOwners = splitOutputs.map(output => output.owner);
 
-      const result = await utxoLibrary.splitUTXO({
+      // Execute split operation based on privacy mode
+      const result = privacyMode 
+        ? await utxoManager.splitPrivateUTXO({
+            inputUTXOId: splitInputUTXO,
+            outputValues: splitOutputs.map(o => parseAmountToBigInt(o.amount, tokenData?.decimals || 18)),
+            outputOwners: splitOutputs.map(o => o.owner)
+          })
+        : await utxoManager.splitUTXO({
         inputUTXOId: splitSelectedUTXO,
         outputValues,
         outputOwners
@@ -212,8 +221,8 @@
         // Reset form
         splitSelectedUTXO = '';
         splitOutputs = [
-          { amount: '', owner: utxoLibrary.currentAccount?.address || '' },
-          { amount: '', owner: utxoLibrary.currentAccount?.address || '' }
+          { amount: '', owner: utxoManager.currentAccount?.address || '' },
+          { amount: '', owner: utxoManager.currentAccount?.address || '' }
         ];
         
         dispatch('operation', { type: 'split', result });
@@ -233,7 +242,13 @@
     isProcessing = true;
 
     try {
-      const result = await utxoLibrary.withdrawFromUTXO({
+      // Execute withdrawal based on privacy mode
+      const result = privacyMode 
+        ? await utxoManager.withdrawPrivateUTXO({
+            utxoId: withdrawUTXOId,
+            recipient: withdrawRecipient
+          })
+        : await utxoManager.withdrawFromUTXO({
         utxoId: withdrawSelectedUTXO,
         recipient: withdrawRecipient
       });
@@ -241,7 +256,7 @@
       if (result.success) {
         // Reset form
         withdrawSelectedUTXO = '';
-        withdrawRecipient = utxoLibrary.currentAccount?.address || '';
+        withdrawRecipient = utxoManager.currentAccount?.address || '';
         
         dispatch('operation', { type: 'withdraw', result });
       } else {

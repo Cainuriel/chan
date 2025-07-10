@@ -63,7 +63,7 @@ import {
   UTXONotFoundError,
   InsufficientFundsError,
   UTXOAlreadySpentError
-} from './types/utxo.types';
+} from '../types/utxo.types';
 
 import {
   type EOAData,
@@ -72,7 +72,7 @@ import {
   type WalletConnectionResult,
   type ERC20TokenData,
   type EthereumTransactionReceipt
-} from './types/ethereum.types';
+} from '../types/ethereum.types';
 
 import {
   type UTXOVaultContract,
@@ -84,10 +84,10 @@ import {
   type WithdrawFromUTXOParams as ContractWithdrawParams,
   createUTXOVaultContract,
   UTXO_VAULT_CONSTANTS
-} from './contracts/UTXOVault.types';
+} from '../contracts/UTXOVault.types';
 
-import { ZenroomHelpers } from './utils/zenroom.helpers';
-import { EthereumHelpers } from './utils/ethereum.helpers';
+import { ZenroomHelpers } from '../utils/zenroom.helpers';
+import { EthereumHelpers } from '../utils/ethereum.helpers';
  
 /**
  * Main UTXOLibrary class
@@ -97,11 +97,11 @@ export class UTXOLibrary extends EventEmitter {
   // Core components
   private zenroom: typeof ZenroomHelpers;
   private ethereum: typeof EthereumHelpers;
-  private contract: UTXOVaultContract | null = null;
+  protected contract: UTXOVaultContract | null = null;
   // State management
-  private utxos: Map<string, ExtendedUTXOData> = new Map();
-  private config: UTXOManagerConfig;
-  private currentEOA: EOAData | null = null;
+  protected utxos: Map<string, ExtendedUTXOData> = new Map();
+  protected config: UTXOManagerConfig;
+  protected currentEOA: EOAData | null = null;
   private isInitialized: boolean = false;
 
   // Cache and sync
@@ -760,7 +760,7 @@ export class UTXOLibrary extends EventEmitter {
   /**
    * Ensure library is initialized
    */
-  private ensureInitialized(): void {
+  protected ensureInitialized(): void {
     if (!this.isInitialized) {
       throw new Error('UTXOLibrary not initialized. Call initialize() first.');
     }
@@ -845,9 +845,9 @@ export const utxoLibrary = new UTXOLibrary();
 /**
  * Export types for external use
  */
-export * from './types/utxo.types';
-export * from './types/ethereum.types';
-export * from './types/zenroom.d'; 
+export * from '../types/utxo.types';
+export * from '../types/ethereum.types';
+export * from '../types/zenroom.d'; 
 // Export specific contract types to avoid conflicts
 export type {
   UTXODataContract,
@@ -884,4 +884,4 @@ export type {
   createUTXOVaultInterface,
   isUTXODataContract,
   isSplitOperationContract
-} from './contracts/UTXOVault.types';
+} from '../contracts/UTXOVault.types';

@@ -1,10 +1,13 @@
 <!-- src/lib/components/TransactionHistory.svelte -->
 <script lang="ts">
   import type { ExtendedUTXOData } from '../types/utxo.types';
+  import type { PrivateUTXO } from '../lib/PrivateUTXOManager';
   import { UTXOType } from '../types/utxo.types';
 
   // Props
   export let utxos: ExtendedUTXOData[] = [];
+  export let privateUTXOs: PrivateUTXO[] = [];
+  export let privacyMode: boolean = true;
 
   // Local state
   let filterType: 'all' | UTXOType = 'all';
