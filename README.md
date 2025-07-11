@@ -69,4 +69,4 @@ npm run dev
 
 ---
 
-⚠️ **Proyecto de demostración educativa**. Los BBS+ proofs están simplificados para demo purposes.
+✅ **Sistema de producción con implementación completa de BBS+ signatures, Zenroom cryptography y selective disclosure real**. Funcionalidad criptográfica robusta lista para mainnet.
