@@ -128,17 +128,23 @@
     if (!isInitialized || !currentAccount) return;
 
     try {
-      // Sync with blockchain
+      // Sync with blockchain and localStorage
       await privateUTXOManager.syncWithBlockchain();
       
       // Get regular UTXOs
       utxos = privateUTXOManager.getUTXOsByOwner(currentAccount.address);
       
-      // Get private UTXOs
+      // Get private UTXOs (now from localStorage)
       privateUTXOs = privateUTXOManager.getPrivateUTXOsByOwner(currentAccount.address);
       
       // Get stats
       stats = privateUTXOManager.getStats();
+      
+      console.log('📊 Data refreshed:', {
+        utxos: utxos.length,
+        privateUTXOs: privateUTXOs.length,
+        stats
+      });
     } catch (error) {
       console.error('Failed to refresh data:', error);
       addNotification('error', 'Failed to refresh data');

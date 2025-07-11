@@ -669,9 +669,14 @@ export class PrivateUTXOManager extends UTXOLibrary {
         isPrivate: true
       };
 
-      // 10. Almacenar en cache
+      // 10. Almacenar en cache y localStorage
       this.utxos.set(utxoId, privateUTXO);
+      this.privateUTXOs.set(utxoId, privateUTXO);
       this.privateCredentials.set(utxoId, credential);
+
+      // 11. Guardar en localStorage para preservar privacidad
+      const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
+      PrivateUTXOStorage.savePrivateUTXO(owner, privateUTXO);
 
       const result: UTXOOperationResult = {
         success: true,
@@ -1187,47 +1192,81 @@ export class PrivateUTXOManager extends UTXOLibrary {
   // ========================
 
   /**
-   * Sincronizar con blockchain usando el nuevo contrato UTXOVault
-   * Sobrescribe la implementación del padre que usa funciones inexistentes
-   * Versión simplificada para evitar errores de contrato
+   * Sincronizar con blockchain y localStorage
+   * Sistema híbrido: eventos del contrato + almacenamiento local privado
    */
   async syncWithBlockchain(): Promise<boolean> {
     if (!this.contract || !this.currentEOA) {
       return false;
     }
 
-    console.log('🔄 Syncing with private blockchain...');
+    console.log('🔄 Syncing with blockchain and localStorage...');
 
     try {
-      // En el nuevo contrato UTXOVault, solo podemos obtener información limitada
-      // por la privacidad. Por ahora, solo validamos la conexión.
+      // 1. Verificar conexión con contrato
+      const userUTXOCount = await this.contract.getUserUTXOCount(this.currentEOA.address);
+      console.log(`📊 User has ${userUTXOCount} UTXOs in contract`);
+
+      // 2. Cargar UTXOs privados desde localStorage (preserva privacidad total)
+      const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
+      const localUTXOs = PrivateUTXOStorage.getPrivateUTXOs(this.currentEOA.address);
       
-      try {
-        const userUTXOCount = await this.contract.getUserUTXOCount(this.currentEOA.address);
-        console.log(`📊 User has ${userUTXOCount} UTXOs in contract`);
-      } catch (error) {
-        console.warn('⚠️ Could not get UTXO count, contract may not be deployed:', error);
-        // No fallar si el contrato no está disponible en desarrollo
+      console.log(`� Found ${localUTXOs.length} private UTXOs in localStorage`);
+      
+      // 3. Cargar UTXOs en cache
+      this.privateUTXOs.clear();
+      for (const utxo of localUTXOs) {
+        this.privateUTXOs.set(utxo.id, utxo);
       }
 
-      // Para desarrollo, simplemente reportar como sincronizado
-      console.log(`✅ Private blockchain sync completed (development mode)`);
+      // 4. Obtener estadísticas locales
+      const stats = PrivateUTXOStorage.getUserStats(this.currentEOA.address);
+      
+      console.log('📈 Local UTXO statistics:');
+      console.log(`  - Total UTXOs: ${stats.totalUTXOs}`);
+      console.log(`  - Unspent UTXOs: ${stats.unspentUTXOs}`);
+      console.log(`  - Unique tokens: ${stats.uniqueTokens}`);
+      console.log(`  - Total balance: ${stats.totalBalance.toString()}`);
+      
+      // 5. Verificar consistencia con contrato
+      if (Number(userUTXOCount) !== stats.unspentUTXOs) {
+        console.warn(`⚠️ UTXO count mismatch: Contract(${userUTXOCount}) vs Local(${stats.unspentUTXOs})`);
+        console.warn('   This is expected during development. Contract count may include testing deposits.');
+      }
+
+      console.log('✅ Privacy-preserving sync completed');
       
       // Emitir evento de sincronización
       this.emit('blockchain:synced', {
         localUTXOs: Array.from(this.utxos.values()).length,
         privateUTXOs: Array.from(this.privateUTXOs.values()).length,
-        syncMode: 'development'
+        contractUTXOCount: Number(userUTXOCount),
+        localStats: stats,
+        syncMode: 'localStorage+contract'
       });
 
       return true;
 
     } catch (error) {
-      console.error('❌ Private blockchain sync failed:', error);
+      console.error('❌ Sync failed:', error);
       this.emit('blockchain:sync:failed', error);
       
-      // En desarrollo, no fallar por errores de sync
-      return true;
+      // En caso de error, al menos cargar datos locales
+      try {
+        const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
+        const localUTXOs = PrivateUTXOStorage.getPrivateUTXOs(this.currentEOA.address);
+        
+        this.privateUTXOs.clear();
+        for (const utxo of localUTXOs) {
+          this.privateUTXOs.set(utxo.id, utxo);
+        }
+        
+        console.log(`📱 Loaded ${localUTXOs.length} UTXOs from localStorage (offline mode)`);
+        return true;
+      } catch (localError) {
+        console.error('❌ Failed to load local data:', localError);
+        return false;
+      }
     }
   }
 
@@ -1540,9 +1579,13 @@ export class PrivateUTXOManager extends UTXOLibrary {
         isPrivate: true
       };
 
-      // 6. Almacenar en cache
+      // 6. Almacenar en cache y localStorage
       this.utxos.set(utxoId, privateUTXO);
       this.privateUTXOs.set(utxoId, privateUTXO);
+
+      // 7. Guardar en localStorage para preservar privacidad
+      const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
+      PrivateUTXOStorage.savePrivateUTXO(owner, privateUTXO);
 
       const result: UTXOOperationResult = {
         success: true,

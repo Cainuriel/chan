@@ -16,49 +16,23 @@
   // Local state
   let isConnecting = false;
   let isDisconnecting = false;
-  let showProviderSelection = false;
-  let selectedProvider = WalletProviderType.METAMASK;
 
-  // Available providers
-  const providers = [
-    { 
-      type: WalletProviderType.METAMASK, 
-      name: 'MetaMask', 
-      icon: '🦊',
-      description: 'Connect using MetaMask browser extension'
-    },
-    { 
-      type: WalletProviderType.WALLET_CONNECT, 
-      name: 'WalletConnect', 
-      icon: '🔗',
-      description: 'Connect using WalletConnect protocol'
-    },
-    { 
-      type: WalletProviderType.COINBASE_WALLET, 
-      name: 'Coinbase Wallet', 
-      icon: '💙',
-      description: 'Connect using Coinbase Wallet'
-    },
-    { 
-      type: WalletProviderType.INJECTED, 
-      name: 'Browser Wallet', 
-      icon: '🌐',
-      description: 'Connect using any injected wallet'
-    }
-  ];
+  // Only MetaMask provider for simplicity
+  const provider = {
+    type: WalletProviderType.METAMASK, 
+    name: 'MetaMask', 
+    icon: '🦊',
+    description: 'Connect using MetaMask (Polygon Amoy Network)'
+  };
 
-  async function handleConnect(provider?: WalletProviderType) {
+  async function handleConnect() {
     isConnecting = true;
-    showProviderSelection = false;
 
     try {
-      const walletProvider = provider || selectedProvider;
-      
       if (!isInitialized) {
-        selectedProvider = walletProvider;
         dispatch('initialize');
       } else {
-        const result = await utxoManager.connectWallet(walletProvider);
+        const result = await utxoManager.connectWallet(WalletProviderType.METAMASK);
         if (!result.success) {
           console.error('Connection failed:', result.error);
         }
@@ -94,6 +68,7 @@
     switch (Number(chainId)) {
       case 1: return 'Ethereum';
       case 137: return 'Polygon';
+      case 80002: return 'Polygon Amoy';
       case 11155111: return 'Sepolia';
       default: return `Chain ${chainId}`;
     }
@@ -102,54 +77,24 @@
 
 {#if !currentAccount}
   <!-- Not Connected State -->
-  <div class="flex items-center space-x-4">
-    {#if !showProviderSelection}
-      <button
-        on:click={() => showProviderSelection = true}
-        disabled={isConnecting}
-        class="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white px-6 py-2 rounded-lg font-semibold transition-all duration-200 shadow-lg hover:shadow-xl flex items-center space-x-2"
-      >
-        {#if isConnecting}
-          <div class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-          <span>Connecting...</span>
-        {:else}
-          <span>🔗</span>
-          <span>Connect Wallet</span>
-        {/if}
-      </button>
-    {:else}
-      <!-- Provider Selection Modal -->
-      <div class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center">
-        <div class="bg-gray-900 rounded-xl border border-white/20 p-6 max-w-md w-full mx-4">
-          <div class="flex items-center justify-between mb-6">
-            <h3 class="text-xl font-bold text-white">Choose Wallet</h3>
-            <button 
-              on:click={() => showProviderSelection = false}
-              class="text-gray-400 hover:text-white"
-            >
-              ✕
-            </button>
-          </div>
-          
-          <div class="space-y-3">
-            {#each providers as provider}
-              <button
-                on:click={() => handleConnect(provider.type)}
-                disabled={isConnecting}
-                class="w-full flex items-center space-x-4 p-4 rounded-lg border border-white/20 hover:border-white/40 hover:bg-white/10 transition-all duration-200 text-left disabled:opacity-50"
-              >
-                <div class="text-2xl">{provider.icon}</div>
-                <div class="flex-1">
-                  <div class="text-white font-medium">{provider.name}</div>
-                  <div class="text-gray-400 text-sm">{provider.description}</div>
-                </div>
-                <div class="text-gray-400">→</div>
-              </button>
-            {/each}
-          </div>
-        </div>
-      </div>
-    {/if}
+  <div class="flex flex-col items-end space-y-2">
+    <button
+      on:click={handleConnect}
+      disabled={isConnecting}
+      class="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white px-6 py-2 rounded-lg font-semibold transition-all duration-200 shadow-lg hover:shadow-xl flex items-center space-x-2"
+    >
+      {#if isConnecting}
+        <div class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+        <span>Connecting...</span>
+      {:else}
+        <span>{provider.icon}</span>
+        <span>Connect MetaMask</span>
+      {/if}
+    </button>
+    <div class="text-xs text-gray-400 text-right">
+      <div>Polygon Amoy Network</div>
+      <div>Testnet Required</div>
+    </div>
   </div>
 {:else}
   <!-- Connected State -->

@@ -36,12 +36,12 @@ npm run dev
 ```
 
 ### **2. Configuración**
-- Conectar MetaMask a Polygon Amoy testnet
+- Conectar MetaMask a **Polygon Amoy testnet** (única red soportada)
 - Asegurar balance de tokens ERC20 para pruebas
 - La aplicación auto-configura BBS+ issuers
 
 ### **3. Uso Básico**
-1. **Connect Wallet** → Conectar MetaMask
+1. **Connect MetaMask** → Conectar MetaMask (Polygon Amoy)
 2. **Deposit** → Convertir ERC20 a UTXO privado  
 3. **Transfer** → Envío confidencial entre usuarios
 4. **Withdraw** → Retiro privado a ERC20
@@ -64,7 +64,7 @@ npm run dev
 1. `npm run dev` → Servidor local
 2. Abrir `http://localhost:5173`
 3. **"Get Started"** → Auto-inicialización
-4. **Conectar MetaMask** → Listo para usar
+4. **Conectar MetaMask** → Asegurar red Polygon Amoy
 5. **Deposit** con Privacy Mode activado
 
 ---
