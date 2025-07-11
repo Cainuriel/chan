@@ -136,13 +136,39 @@ export class PrivateUTXOManager extends UTXOLibrary {
     try {
       console.log('🔧 Setting up BBS+ issuer for token:', tokenAddress);
       
-      // Generar claves BBS+ usando Zenroom
+      // Verificar si ya existen claves almacenadas
+      if (this.currentEOA) {
+        const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
+        if (PrivateUTXOStorage.hasBBSKeys(this.currentEOA.address, tokenAddress)) {
+          console.log('🔑 Loading existing BBS+ keys from localStorage...');
+          const savedKeys = PrivateUTXOStorage.getBBSKeys(this.currentEOA.address);
+          const tokenKeys = savedKeys[tokenAddress.toLowerCase()];
+          
+          this.bbsIssuerKeys.set(tokenAddress, tokenKeys.issuerPrivateKey);
+          this.bbsVerificationKeys.set(tokenAddress, tokenKeys.verificationKey);
+          
+          console.log('✅ BBS+ keys loaded from localStorage for token:', tokenAddress);
+          return tokenKeys.issuerPublicKey;
+        }
+      }
+      
+      // Generar nuevas claves BBS+ usando Zenroom
       const keyPair = await ZenroomHelpers.generateBBSKeyPair(issuerPrivateKey);
       
       this.bbsIssuerKeys.set(tokenAddress, keyPair.privateKey);
       this.bbsVerificationKeys.set(tokenAddress, keyPair.publicKey);
       
-      console.log('✅ BBS+ issuer configured for token:', tokenAddress);
+      // Guardar claves en localStorage para persistencia
+      if (this.currentEOA) {
+        const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
+        PrivateUTXOStorage.saveBBSKeys(this.currentEOA.address, tokenAddress, {
+          issuerPrivateKey: keyPair.privateKey,
+          issuerPublicKey: keyPair.publicKey,
+          verificationKey: keyPair.publicKey
+        });
+      }
+      
+      console.log('✅ BBS+ issuer configured and saved for token:', tokenAddress);
       return keyPair.publicKey;
     } catch (error) {
       console.error('❌ Failed to setup BBS+ issuer:', error);
@@ -969,6 +995,11 @@ export class PrivateUTXOManager extends UTXOLibrary {
 
       // Marcar input como gastado
       inputUTXO.isSpent = true;
+      
+      // Actualizar en localStorage
+      const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
+      PrivateUTXOStorage.savePrivateUTXO(inputUTXO.owner, inputUTXO);
+      
       this.emit('private:utxo:spent', inputUTXOId);
 
       // Crear UTXOs de salida
@@ -1011,6 +1042,11 @@ export class PrivateUTXOManager extends UTXOLibrary {
         this.utxos.set(outputId, outputUTXO);
         this.privateCredentials.set(outputId, outputCredentials[i]);
         createdUTXOIds.push(outputId);
+        
+        // Guardar en localStorage para preservar privacidad
+        const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
+        PrivateUTXOStorage.savePrivateUTXO(outputOwners[i], outputUTXO);
+        
         this.emit('private:utxo:created', outputUTXO);
       }
 
@@ -1102,6 +1138,11 @@ export class PrivateUTXOManager extends UTXOLibrary {
 
       // Marcar como gastado
       utxo.isSpent = true;
+      
+      // Actualizar en localStorage
+      const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
+      PrivateUTXOStorage.savePrivateUTXO(utxo.owner, utxo);
+      
       this.emit('private:utxo:withdrawn', utxoId);
 
       const result: UTXOOperationResult = {
@@ -1213,13 +1254,41 @@ export class PrivateUTXOManager extends UTXOLibrary {
       
       console.log(`� Found ${localUTXOs.length} private UTXOs in localStorage`);
       
-      // 3. Cargar UTXOs en cache
+      // 3. Cargar claves BBS+ necesarias para operaciones criptográficas
+      const bbsKeys = PrivateUTXOStorage.getBBSKeys(this.currentEOA.address);
+      const tokenAddresses = Object.keys(bbsKeys);
+      
+      this.bbsIssuerKeys.clear();
+      this.bbsVerificationKeys.clear();
+      
+      for (const tokenAddress of tokenAddresses) {
+        const keys = bbsKeys[tokenAddress];
+        this.bbsIssuerKeys.set(tokenAddress, keys.issuerPrivateKey);
+        this.bbsVerificationKeys.set(tokenAddress, keys.verificationKey);
+      }
+      
+      console.log(`🔑 Loaded BBS+ keys for ${tokenAddresses.length} tokens`);
+      
+      // 4. Cargar UTXOs en cache
       this.privateUTXOs.clear();
       for (const utxo of localUTXOs) {
         this.privateUTXOs.set(utxo.id, utxo);
       }
 
-      // 4. Obtener estadísticas locales
+      // 4.5. Auto-configurar claves BBS+ para tokens de UTXOs si no existen
+      const utxoTokenAddresses = [...new Set(localUTXOs.map(utxo => utxo.tokenAddress))];
+      for (const tokenAddress of utxoTokenAddresses) {
+        if (!this.bbsIssuerKeys.has(tokenAddress)) {
+          console.log(`⚙️ Auto-configuring BBS+ keys for token: ${tokenAddress}`);
+          try {
+            await this.setupBBSIssuer(tokenAddress);
+          } catch (error) {
+            console.warn(`⚠️ Failed to auto-configure BBS+ keys for ${tokenAddress}:`, error);
+          }
+        }
+      }
+
+      // 5. Obtener estadísticas locales
       const stats = PrivateUTXOStorage.getUserStats(this.currentEOA.address);
       
       console.log('📈 Local UTXO statistics:');
@@ -1228,7 +1297,7 @@ export class PrivateUTXOManager extends UTXOLibrary {
       console.log(`  - Unique tokens: ${stats.uniqueTokens}`);
       console.log(`  - Total balance: ${stats.totalBalance.toString()}`);
       
-      // 5. Verificar consistencia con contrato
+      // 6. Verificar consistencia con contrato
       if (Number(userUTXOCount) !== stats.unspentUTXOs) {
         console.warn(`⚠️ UTXO count mismatch: Contract(${userUTXOCount}) vs Local(${stats.unspentUTXOs})`);
         console.warn('   This is expected during development. Contract count may include testing deposits.');

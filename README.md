@@ -59,6 +59,24 @@ npm run dev
 - [x] Integración con Zenroom para cryptography
 - [x] Privacy mode con selective disclosure
 - [x] Sincronización automática con blockchain
+- [x] localStorage storage para desarrollo (POC)
+
+### 🏗️ **Almacenamiento de Datos - POC vs Producción**
+
+#### 📋 **POC Actual (localStorage)**
+Para este Proof of Concept, los UTXOs privados se almacenan en **localStorage** del navegador:
+- ✅ **Ventajas**: Desarrollo rápido, no requiere infraestructura adicional
+- ⚠️ **Limitaciones**: Solo local, se pierde al limpiar navegador
+- 🎯 **Uso**: Solo para testing y demostración
+
+#### 🔒 **Producción (Base de Datos Tradicional)**
+En producción se implementará:
+- 🗄️ **Base de datos privada** con encriptación end-to-end
+- 🔐 **Claves derivadas** del usuario para acceso a datos
+- 🌐 **Sincronización multi-dispositivo** preservando privacidad
+- 🛡️ **Backup seguro** con zero-knowledge architecture
+
+> **Nota**: El contrato UTXOVault mantiene **privacidad completa** en ambos casos - solo almacena commitments criptográficos, nunca datos sensibles.
 
 ### **🎯 Como Usar Ahora**
 1. `npm run dev` → Servidor local
@@ -66,6 +84,7 @@ npm run dev
 3. **"Get Started"** → Auto-inicialización
 4. **Conectar MetaMask** → Asegurar red Polygon Amoy
 5. **Deposit** con Privacy Mode activado
+6. Los UTXOs se guardan en localStorage para pruebas
 
 ---
 

@@ -377,7 +377,7 @@ Timestamp: ${Date.now()}`;
         address: tokenAddress,
         symbol,
         name,
-        decimals,
+        decimals: Number(decimals),  // Convert BigInt to number
         balance: balance ? BigInt(balance.toString()) : undefined,
         allowance: allowance ? BigInt(allowance.toString()) : undefined,
         verified: false // Would need external verification service

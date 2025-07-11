@@ -10,7 +10,6 @@
   export let utxos: ExtendedUTXOData[] = [];
   export let privateUTXOs: PrivateUTXO[] = [];
   export let privacyMode: boolean = true;
-
   // Event dispatcher
   const dispatch = createEventDispatcher();
 
@@ -21,45 +20,158 @@
   let activeOperation: OperationType = 'split';
   let isProcessing = false;
 
+  // Loading states
+  let isLoadingUTXOs = false;
+  let isLoadingTokenMetadata = false;
+  let utxosLoaded = false;
+  let tokenMetadataLoaded = false;
+
+  // Computed loading state
+  $: isFullyLoaded = utxosLoaded && tokenMetadataLoaded;
+  $: isLoadingAny = isLoadingUTXOs || isLoadingTokenMetadata;
+
   // Token metadata cache
   let tokenMetadataCache: Record<string, ERC20TokenData> = {};
 
-  // Load token metadata when UTXOs change
-  $: if (utxos.length > 0) {
-    loadTokenMetadata();
+  // Watch for UTXO changes and trigger loading sequence
+  $: if (utxos.length > 0 || privateUTXOs.length > 0) {
+    handleUTXOsChanged();
   }
 
-  // Load token metadata
+  // Handle UTXOs change - start loading sequence
+  async function handleUTXOsChanged() {
+    console.log('🔄 UTXOs changed, starting loading sequence...');
+    
+    // Reset states
+    utxosLoaded = false;
+    tokenMetadataLoaded = false;
+    
+    // Phase 1: Mark UTXOs as loaded (they come from props)
+    isLoadingUTXOs = true;
+    console.log('📦 Phase 1: UTXOs loading...', {
+      regular: utxos.length,
+      private: privateUTXOs.length
+    });
+    
+    // Simulate UTXO processing time if needed
+    await new Promise(resolve => setTimeout(resolve, 100));
+    isLoadingUTXOs = false;
+    utxosLoaded = true;
+    console.log('✅ Phase 1: UTXOs loaded');
+
+    // Phase 2: Load token metadata
+    await loadTokenMetadata();
+  }
+
+  // Load token metadata - Phase 2
   async function loadTokenMetadata() {
-    const uniqueTokens = [...new Set(utxos.map(u => u.tokenAddress))];
-    for (const tokenAddress of uniqueTokens) {
-      if (!tokenMetadataCache[tokenAddress]) {
-        try {
-          const tokenData = await EthereumHelpers.getERC20TokenInfo(tokenAddress);
-          tokenMetadataCache[tokenAddress] = tokenData;
-          // Trigger reactivity
-          tokenMetadataCache = { ...tokenMetadataCache };
-        } catch (error) {
-          console.error('Failed to load token metadata for', tokenAddress, error);
-          // Set default metadata
-          tokenMetadataCache[tokenAddress] = {
-            address: tokenAddress,
-            name: 'Unknown Token',
-            symbol: 'UNK',
-            decimals: 18,
-            balance: 0n,
-            allowance: 0n,
-            verified: false
-          };
-          tokenMetadataCache = { ...tokenMetadataCache };
+    if (!utxosLoaded) {
+      console.warn('⚠️ Attempting to load token metadata before UTXOs are loaded');
+      return;
+    }
+
+    isLoadingTokenMetadata = true;
+    console.log('🏷️ Phase 2: Token metadata loading...');
+
+    try {
+      // Get unique token addresses from both regular and private UTXOs
+      const regularTokens = utxos.map(u => u.tokenAddress);
+      const privateTokens = privateUTXOs.map(u => u.tokenAddress);
+      const uniqueTokens = [...new Set([...regularTokens, ...privateTokens])];
+      
+      console.log('🔍 Loading token metadata for:', uniqueTokens);
+      
+      for (const tokenAddress of uniqueTokens) {
+        if (!tokenMetadataCache[tokenAddress]) {
+          try {
+            console.log(`📊 Fetching metadata for ${tokenAddress}...`);
+            const tokenData = await EthereumHelpers.getERC20TokenInfo(tokenAddress);
+            console.log(`✅ Token metadata loaded:`, {
+              address: tokenData.address,
+              symbol: tokenData.symbol,
+              name: tokenData.name,
+              decimals: tokenData.decimals,
+              hasBalance: tokenData.balance !== undefined,
+              hasAllowance: tokenData.allowance !== undefined,
+              verified: tokenData.verified
+            });
+            
+            tokenMetadataCache[tokenAddress] = tokenData;
+            // Trigger reactivity
+            tokenMetadataCache = { ...tokenMetadataCache };
+          } catch (error) {
+            console.error('❌ Failed to load token metadata for', tokenAddress, error);
+            // Set default metadata with warning
+            tokenMetadataCache[tokenAddress] = {
+              address: tokenAddress,
+              name: `Unknown Token (${tokenAddress.slice(0, 6)}...)`,
+              symbol: 'UNK',
+              decimals: 18, // Default fallback
+              balance: 0n,
+              allowance: 0n,
+              verified: false
+            };
+            tokenMetadataCache = { ...tokenMetadataCache };
+          }
         }
       }
+
+      isLoadingTokenMetadata = false;
+      tokenMetadataLoaded = true;
+      console.log('✅ Phase 2: Token metadata loaded for all tokens');
+      console.log('🎉 All data loaded, ready to render operations');
+      
+      // Log summary of loaded tokens
+      const tokenSummary = Object.entries(tokenMetadataCache).map(([address, data]) => ({
+        address: address.slice(0, 8) + '...',
+        symbol: data.symbol,
+        decimals: data.decimals
+      }));
+      console.log('📋 Token metadata summary:', tokenSummary);
+      
+    } catch (error) {
+      console.error('❌ Error loading token metadata:', error);
+      isLoadingTokenMetadata = false;
+      tokenMetadataLoaded = false;
     }
   }
 
   // Helper function to get token metadata
-  function getTokenMetadata(tokenAddress: string): ERC20TokenData | undefined {
-    return tokenMetadataCache[tokenAddress];
+  function getTokenMetadata(tokenAddress: string): ERC20TokenData {
+    const metadata = tokenMetadataCache[tokenAddress];
+
+    if (!metadata) {
+      console.warn(`⚠️ Token metadata not found for ${tokenAddress}, using defaults`);
+      return {
+        address: tokenAddress,
+        name: `Token ${tokenAddress.slice(0, 6)}...`,
+        symbol: 'UNK',
+        decimals: 18,
+        balance: 0n,
+        allowance: 0n,
+        verified: false
+      };
+    }
+    
+    // Ensure all fields are present, with defaults for missing ones
+    const completeMetadata: ERC20TokenData = {
+      address: metadata.address,
+      name: metadata.name,
+      symbol: metadata.symbol,
+      decimals: metadata.decimals,
+      balance: metadata.balance ?? 0n,  // Default to 0n if undefined
+      allowance: metadata.allowance ?? 0n,  // Default to 0n if undefined
+      verified: metadata.verified ?? false
+    };
+    
+    console.log(`📋 Using metadata for ${tokenAddress}:`, {
+      symbol: completeMetadata.symbol, 
+      decimals: completeMetadata.decimals.toString(),
+      hasBalance: metadata.balance !== undefined,
+      hasAllowance: metadata.allowance !== undefined
+    });
+        console.log(`completeMetadata`, completeMetadata);
+    return completeMetadata;
   }
 
   // Split operation state
@@ -77,13 +189,63 @@
   let transferSelectedUTXO = '';
   let transferRecipient = '';
 
-  // Computed values
-  $: availableUTXOs = utxos.filter(utxo => !utxo.isSpent && utxo.confirmed);
+  // Split validation state
+  let splitValidation: { valid: boolean; error?: string; canSubmit: boolean } = { 
+    valid: false, 
+    error: 'No UTXO selected',
+    canSubmit: false 
+  };
+
+  // Computed values - only available when data is fully loaded
+  $: availableUTXOs = isFullyLoaded ? [
+    // Regular UTXOs
+    ...utxos.filter(utxo => !utxo.isSpent && utxo.confirmed),
+    // Private UTXOs converted to compatible format
+    ...privateUTXOs.filter(utxo => !utxo.isSpent).map(privateUTXO => ({
+      id: privateUTXO.id,
+      value: privateUTXO.value,
+      tokenAddress: privateUTXO.tokenAddress,
+      owner: privateUTXO.owner,
+      isSpent: privateUTXO.isSpent,
+      confirmed: true,
+      timestamp: privateUTXO.timestamp,
+      utxoType: 'private' as const,
+      commitment: privateUTXO.commitment,
+      nullifierHash: privateUTXO.nullifierHash,
+      blindingFactor: privateUTXO.blindingFactor
+    }))
+  ] : [];
+  
   $: selectedUTXOData = {
     split: availableUTXOs.find(u => u.id === splitSelectedUTXO),
     withdraw: availableUTXOs.find(u => u.id === withdrawSelectedUTXO),
     transfer: availableUTXOs.find(u => u.id === transferSelectedUTXO)
   };
+
+  // Debug: Log UTXOs props when they change
+  $: {
+    console.log('📥 OperationsPanel received UTXOs:', {
+      regularUTXOs: utxos.length,
+      privateUTXOs: privateUTXOs.length,
+      regularDetails: utxos.map(u => ({ id: u.id.slice(0, 8), spent: u.isSpent, confirmed: u.confirmed })),
+      privateDetails: privateUTXOs.map(u => ({ id: u.id.slice(0, 8), spent: u.isSpent }))
+    });
+  }
+
+  // Debug: Log available UTXOs when they change
+  $: if (availableUTXOs.length > 0) {
+    console.log('🔧 Available UTXOs for operations:', {
+      total: availableUTXOs.length,
+      regular: utxos.filter(utxo => !utxo.isSpent && utxo.confirmed).length,
+      private: privateUTXOs.filter(utxo => !utxo.isSpent).length,
+      utxos: availableUTXOs.map(u => ({
+        id: u.id.slice(0, 8),
+        type: u.utxoType || 'regular',
+        value: u.value.toString(),
+        tokenAddress: u.tokenAddress
+      }))
+    });
+  }
 
   // Initialize with current account as default owner
   $: if (utxoManager.currentAccount) {
@@ -95,11 +257,100 @@
     withdrawRecipient = withdrawRecipient || address;
   }
 
+  // Reactive split validation - only when data is loaded
+  $: {
+    try {
+      // Only validate if data is fully loaded
+      if (!isFullyLoaded) {
+        splitValidation = { 
+          valid: false, 
+          error: 'Loading data...',
+          canSubmit: false 
+        };
+      } else {
+        const utxo = selectedUTXOData.split;
+        if (!utxo) {
+          splitValidation = { 
+            valid: false, 
+            error: 'No UTXO selected',
+            canSubmit: false 
+          };
+        } else {
+          const tokenData = getTokenMetadata(utxo.tokenAddress);
+          const decimals = tokenData.decimals;
+          const totalInput = utxo.value;
+          
+          console.log(`decimals ---------- `, decimals);
+          let totalOutput = BigInt(0);
+          let hasEmptyFields = false;
+          let hasInvalidAmounts = false;
+        
+        console.log('🔄 Reactive validation:', {
+          selectedUTXO: utxo.id.slice(0, 8),
+          totalInput: formatValue(totalInput),
+          outputs: splitOutputs.map(o => ({ amount: o.amount, owner: o.owner?.slice(0, 8) + '...' }))
+        });
+        
+        for (const output of splitOutputs) {
+          if (!output.amount || !output.owner) {
+            hasEmptyFields = true;
+            continue;
+          }
+          
+          const amountBigInt = parseAmountToBigInt(output.amount, decimals);
+          if (amountBigInt <= 0) {
+            hasInvalidAmounts = true;
+            continue;
+          }
+          
+          totalOutput += amountBigInt;
+        }
+        
+        if (hasEmptyFields) {
+          splitValidation = { 
+            valid: false, 
+            error: 'All outputs must have amount and owner',
+            canSubmit: false 
+          };
+        } else if (hasInvalidAmounts) {
+          splitValidation = { 
+            valid: false, 
+            error: 'All amounts must be positive',
+            canSubmit: false 
+          };
+        } else if (totalOutput !== totalInput) {
+          const diff = totalInput - totalOutput;
+          const diffFormatted = formatValue(diff > 0 ? diff : -diff, decimals);
+          splitValidation = { 
+            valid: false, 
+            error: `Sum of outputs (${formatValue(totalOutput, decimals)}) must equal input (${formatValue(totalInput, decimals)}). Difference: ${diffFormatted}`,
+            canSubmit: false 
+          };
+        } else {
+          splitValidation = { 
+            valid: true,
+            canSubmit: true 
+          };
+          console.log('✅ Split validation passed');
+        }
+        }
+      }
+    } catch (error) {
+      console.error('❌ Reactive validation error:', error);
+      splitValidation = { 
+        valid: false, 
+        error: 'Validation failed: ' + (error instanceof Error ? error.message : 'Unknown error'),
+        canSubmit: false 
+      };
+    }
+  }
+
   function formatValue(value: bigint | string | number, decimals: number = 18): string {
     try {
       // Convert to BigInt if not already
       const bigintValue = typeof value === 'bigint' ? value : BigInt(value.toString());
       const safeDecimals = decimals || 18;
+      
       const divisor = BigInt(10) ** BigInt(safeDecimals);
       const quotient = bigintValue / divisor;
       const remainder = bigintValue % divisor;
@@ -119,19 +370,51 @@
   }
 
   // Helper function to safely convert amount to BigInt
-  function parseAmountToBigInt(amountStr: string, decimals: number): bigint {
+  function parseAmountToBigInt(amountInput: string | number, decimals: number): bigint {
     try {
+      if (!amountInput) {
+        return 0n;
+      }
+      
+      // Convert to string regardless of input type
+      const amountStr = String(amountInput).trim();
+      
+      if (amountStr === '') {
+        return 0n;
+      }
+      
+      // Check if it's a valid number
       const amountFloat = parseFloat(amountStr);
       if (isNaN(amountFloat) || amountFloat <= 0) {
         return 0n;
       }
       
-      const amountFixed = amountFloat.toFixed(decimals);
-      const [integerPart, decimalPart = ''] = amountFixed.split('.');
-      const paddedDecimal = decimalPart.padEnd(decimals, '0');
+      // Split into integer and decimal parts
+      const [integerPart, decimalPart = ''] = amountStr.split('.');
+      
+      // Truncate decimal part to the token's decimals (don't round, truncate)
+      const truncatedDecimal = decimalPart.slice(0, decimals);
+      
+      // Pad with zeros if needed
+      const paddedDecimal = truncatedDecimal.padEnd(decimals, '0');
+      
+      // Combine integer and decimal parts
       const fullAmountStr = integerPart + paddedDecimal;
+      
+      console.log(`💱 Parse ${amountInput} with ${decimals} decimals:`, {
+        original: amountInput,
+        stringified: amountStr,
+        integerPart,
+        decimalPart,
+        truncatedDecimal,
+        paddedDecimal,
+        fullAmountStr,
+        result: BigInt(fullAmountStr).toString()
+      });
+      
       return BigInt(fullAmountStr);
-    } catch {
+    } catch (error) {
+      console.error('Error parsing amount:', error, 'Input:', amountInput, 'Type:', typeof amountInput);
       return 0n;
     }
   }
@@ -155,36 +438,112 @@
 
     try {
       const tokenData = getTokenMetadata(utxo.tokenAddress);
-      const decimals = tokenData?.decimals || 18;
+      const decimals = tokenData.decimals;
       const totalInput = utxo.value;
       
+      console.log('🔍 Validating split amounts:', {
+        totalInput: totalInput.toString(),
+        totalInputFormatted: formatValue(totalInput),
+        decimals,
+        outputs: splitOutputs.map(o => ({ amount: o.amount, owner: o.owner.slice(0, 8) + '...' }))
+      });
+      
       let totalOutput = BigInt(0);
+      const outputDetails = [];
+      
       for (const output of splitOutputs) {
         if (!output.amount || !output.owner) {
+          console.log('❌ Missing amount or owner:', output);
           return { valid: false, error: 'All outputs must have amount and owner' };
         }
         
         const amountBigInt = parseAmountToBigInt(output.amount, decimals);
+        outputDetails.push({
+          amount: output.amount,
+          amountBigInt: amountBigInt.toString(),
+          owner: output.owner.slice(0, 8) + '...'
+        });
         
         if (amountBigInt <= 0) {
+          console.log('❌ Invalid amount:', { amount: output.amount, amountBigInt });
           return { valid: false, error: 'All amounts must be positive' };
         }
         
         totalOutput += amountBigInt;
       }
       
+      console.log('📊 Detailed validation:', {
+        totalInput: totalInput.toString(),
+        totalOutput: totalOutput.toString(),
+        difference: (totalInput - totalOutput).toString(),
+        inputFormatted: formatValue(totalInput),
+        outputFormatted: formatValue(totalOutput),
+        outputDetails,
+        isEqual: totalOutput === totalInput
+      });
+      
       if (totalOutput !== totalInput) {
+        const diff = totalInput - totalOutput;
+        const diffFormatted = formatValue(diff);
+        console.log('❌ Amounts do not match. Difference:', diffFormatted);
         return { 
           valid: false, 
-          error: `Sum of outputs (${formatValue(totalOutput, decimals)}) must equal input (${formatValue(totalInput, decimals)})` 
+          error: `Sum of outputs (${formatValue(totalOutput)}) must equal input (${formatValue(totalInput)}). Difference: ${diffFormatted}` 
         };
       }
       
+      console.log('✅ Validation passed');
       return { valid: true };
     } catch (error) {
-      return { valid: false, error: 'Invalid amounts' };
+      console.error('❌ Validation error:', error);
+      return { valid: false, error: 'Validation failed: ' + (error instanceof Error ? error.message : 'Unknown error') };
     }
   }
+
+  // Helper function to calculate split remainder  
+  function calculateSplitRemainder() {
+    if (!selectedUTXOData.split) return { remainder: '0', formatted: '0' };
+    
+    const utxo = selectedUTXOData.split;
+    const tokenData = getTokenMetadata(utxo.tokenAddress);
+    const decimals = tokenData.decimals;
+    const totalInput = utxo.value;
+    
+    let totalOutput = BigInt(0);
+    for (const output of splitOutputs) {
+      if (output.amount) {
+        totalOutput += parseAmountToBigInt(output.amount, decimals);
+      }
+    }
+    
+    const remainderBigInt = totalInput - totalOutput;
+    const remainderFormatted = formatValue(remainderBigInt, decimals);
+    
+    return {
+      remainder: remainderBigInt.toString(),
+      formatted: remainderFormatted,
+      isPositive: remainderBigInt > 0,
+      isNegative: remainderBigInt < 0,
+      isZero: remainderBigInt === 0n
+    };
+  }
+
+  // Auto-complete remaining amount in last output (function kept for potential future use)
+  /*
+  function autoCompleteLastSplit() {
+    if (!selectedUTXOData.split || splitOutputs.length === 0) return;
+    
+    const remainderData = calculateSplitRemainder();
+    const lastIndex = splitOutputs.length - 1;
+    
+    if (remainderData.isPositive) {
+      splitOutputs[lastIndex] = {
+        ...splitOutputs[lastIndex],
+        amount: remainderData.formatted
+      };
+    }
+  }
+  */
 
   async function executeSplit() {
     const validation = validateSplitAmounts();
@@ -198,7 +557,7 @@
 
     try {
       const tokenData = getTokenMetadata(utxo.tokenAddress);
-      const decimals = tokenData?.decimals || 18;
+      const decimals = tokenData.decimals;
       const outputValues = splitOutputs.map(output => 
         parseAmountToBigInt(output.amount, decimals)
       );
@@ -208,7 +567,7 @@
       const result = privacyMode 
         ? await utxoManager.splitPrivateUTXO({
             inputUTXOId: splitSelectedUTXO,
-            outputValues: splitOutputs.map(o => parseAmountToBigInt(o.amount, tokenData?.decimals || 18)),
+            outputValues: splitOutputs.map(o => parseAmountToBigInt(o.amount, decimals)),
             outputOwners: splitOutputs.map(o => o.owner)
           })
         : await utxoManager.splitUTXO({
@@ -218,6 +577,11 @@
       });
 
       if (result.success) {
+        console.log('✅ Split operation completed successfully:', result);
+        
+        // Debug localStorage state after split
+        setTimeout(() => debugSplitResult(), 1000);
+        
         // Reset form
         splitSelectedUTXO = '';
         splitOutputs = [
@@ -305,13 +669,14 @@
     }
   }
 
-  function canExecute(): boolean {
-    if (isProcessing) return false;
+  // Reactive canExecute - updates automatically when dependencies change
+  $: canExecute = (() => {
+    // Can't execute if processing or data not loaded
+    if (isProcessing || !isFullyLoaded) return false;
 
     switch (activeOperation) {
       case 'split':
-        const validation = validateSplitAmounts();
-        return validation.valid;
+        return splitValidation.canSubmit;
       case 'withdraw':
         return !!(withdrawSelectedUTXO && withdrawRecipient);
       case 'transfer':
@@ -319,16 +684,83 @@
       default:
         return false;
     }
+  })();
+
+  // Debug function to verify localStorage update after split
+  async function debugSplitResult() {
+    if (!utxoManager.currentAccount) {
+      console.warn('No current account to debug');
+      return;
+    }
+
+    console.log('🔍 Debugging split result - localStorage state:');
+    
+    try {
+      // Check localStorage directly
+      const { PrivateUTXOStorage } = await import('../lib/PrivateUTXOStorage');
+      const storedUTXOs = PrivateUTXOStorage.getPrivateUTXOs(utxoManager.currentAccount.address);
+      
+      console.log('📦 Private UTXOs in localStorage:', {
+        count: storedUTXOs.length,
+        utxos: storedUTXOs.map(u => ({
+          id: u.id.slice(0, 8) + '...',
+          value: u.value.toString(),
+          isSpent: u.isSpent,
+          owner: u.owner,
+          timestamp: new Date(u.localCreatedAt).toLocaleTimeString()
+        }))
+      });
+
+      // Check manager state
+      const managerPrivateUTXOs = utxoManager.getPrivateUTXOsByOwner(utxoManager.currentAccount.address);
+      
+      console.log('🎮 Private UTXOs in manager:', {
+        count: managerPrivateUTXOs.length,
+        utxos: managerPrivateUTXOs.map(u => ({
+          id: u.id.slice(0, 8) + '...',
+          value: u.value.toString(),
+          isSpent: u.isSpent,
+          owner: u.owner,
+          timestamp: new Date(u.localCreatedAt).toLocaleTimeString()
+        }))
+      });
+
+      // Cross-check consistency
+      const storageNotSpent = storedUTXOs.filter(u => !u.isSpent);
+      const managerNotSpent = managerPrivateUTXOs.filter(u => !u.isSpent);
+      
+      console.log('✅ Consistency check:', {
+        storageUnspent: storageNotSpent.length,
+        managerUnspent: managerNotSpent.length,
+        consistent: storageNotSpent.length === managerNotSpent.length
+      });
+
+    } catch (error) {
+      console.error('❌ Error debugging split result:', error);
+    }
   }
 </script>
 
 <div class="space-y-6">
   <!-- Header -->
   <div class="bg-white/10 backdrop-blur-sm rounded-lg p-6 border border-white/20">
-    <h2 class="text-xl font-bold text-white mb-2">UTXO Operations</h2>
-    <p class="text-gray-300 text-sm">
-      Perform privacy-preserving operations on your UTXOs
-    </p>
+    <div class="flex justify-between items-center">
+      <div>
+        <h2 class="text-xl font-bold text-white mb-2">UTXO Operations</h2>
+        <p class="text-gray-300 text-sm">
+          Perform privacy-preserving operations on your UTXOs
+        </p>
+      </div>
+      <!-- Debug Button (temporary) -->
+      <button
+        type="button"
+        on:click={debugSplitResult}
+        class="px-3 py-1 text-xs bg-gray-600 hover:bg-gray-700 text-white rounded"
+        title="Debug localStorage state"
+      >
+        🔍 Debug Storage
+      </button>
+    </div>
   </div>
 
   <!-- Operation Tabs -->
@@ -353,12 +785,52 @@
 
   <!-- Operation Forms -->
   <div class="bg-white/10 backdrop-blur-sm rounded-lg p-6 border border-white/20">
-    {#if availableUTXOs.length === 0}
+    
+    <!-- Loading State -->
+    {#if isLoadingAny || !isFullyLoaded}
+      <div class="text-center py-12">
+        <div class="text-6xl mb-4">⏳</div>
+        <div class="text-white text-xl font-semibold mb-4">Loading Data...</div>
+        
+        <!-- Loading Progress -->
+        <div class="space-y-2 max-w-md mx-auto">
+          <div class="flex items-center justify-between text-sm">
+            <span class="text-gray-300">UTXOs</span>
+            <span class="text-{utxosLoaded ? 'green' : 'yellow'}-400">
+              {utxosLoaded ? '✅' : isLoadingUTXOs ? '⏳' : '⏸️'}
+            </span>
+          </div>
+          <div class="flex items-center justify-between text-sm">
+            <span class="text-gray-300">Token Metadata</span>
+            <span class="text-{tokenMetadataLoaded ? 'green' : 'yellow'}-400">
+              {tokenMetadataLoaded ? '✅' : isLoadingTokenMetadata ? '⏳' : '⏸️'}
+            </span>
+          </div>
+        </div>
+        
+        {#if isLoadingTokenMetadata}
+          <div class="mt-4 text-gray-400 text-sm">
+            Loading token information...
+          </div>
+        {/if}
+      </div>
+    
+    <!-- No UTXOs Available -->
+    {:else if availableUTXOs.length === 0}
       <div class="text-center py-12">
         <div class="text-gray-400 text-6xl mb-4">📪</div>
         <div class="text-white text-xl font-semibold mb-2">No UTXOs Available</div>
-        <div class="text-gray-400">
+        <div class="text-gray-400 mb-4">
           You need confirmed UTXOs to perform operations. Try depositing some tokens first.
+        </div>
+        <div class="text-xs text-gray-500 mt-4 bg-gray-800/50 rounded p-2">
+          Debug: Regular UTXOs: {utxos.length}, Private UTXOs: {privateUTXOs.length}
+          {#if utxos.length > 0}
+            <br/>Regular UTXOs: {utxos.map(u => `${u.id.slice(0,6)}(spent:${u.isSpent}, confirmed:${u.confirmed})`).join(', ')}
+          {/if}
+          {#if privateUTXOs.length > 0}
+            <br/>Private UTXOs: {privateUTXOs.map(u => `${u.id.slice(0,6)}(spent:${u.isSpent})`).join(', ')}
+          {/if}
         </div>
       </div>
     {:else}
@@ -372,20 +844,29 @@
             <label for="split-utxo-select" class="block text-sm font-medium text-white mb-2">
               Select UTXO to Split
             </label>
-            <select
-              id="split-utxo-select"
-              bind:value={splitSelectedUTXO}
-              class="w-full bg-white/5 border border-white/20 rounded-lg px-4 py-3 text-white"
-              required
-            >
-              <option value="">Choose a UTXO...</option>
-              {#each availableUTXOs as utxo}
-                <option value={utxo.id}>
-                  {formatValue(utxo.value, utxo.tokenMetadata?.decimals)} {utxo.tokenMetadata?.symbol} 
-                  (ID: {utxo.id.slice(0, 8)}...)
-                </option>
-              {/each}
-            </select>
+            
+            {#if !tokenMetadataLoaded}
+              <div class="w-full bg-gray-800 border border-gray-600 rounded-lg px-4 py-3 text-gray-400 flex items-center">
+                <div class="animate-spin w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full mr-2"></div>
+                Loading token metadata...
+              </div>
+            {:else}
+              <select
+                id="split-utxo-select"
+                bind:value={splitSelectedUTXO}
+                class="w-full bg-gray-800 border border-gray-600 rounded-lg px-4 py-3 text-white focus:border-purple-500 focus:outline-none"
+                required
+              >
+                <option value="">Choose a UTXO...</option>
+                {#each availableUTXOs as utxo}
+                  {@const tokenData = getTokenMetadata(utxo.tokenAddress)}
+                  <option value={utxo.id}>
+                    {formatValue(utxo.value, tokenData.decimals)} {tokenData.symbol} 
+                    (ID: {utxo.id.slice(0, 8)}...)
+                  </option>
+                {/each}
+              </select>
+            {/if}
           </div>
 
           {#if selectedUTXOData.split}
@@ -454,17 +935,57 @@
               {#if splitSelectedUTXO}
                 {@const validation = validateSplitAmounts()}
                 {@const splitTokenData = getTokenMetadata(selectedUTXOData.split?.tokenAddress || '')}
-                <div class="mt-4 p-3 rounded-lg border {validation.valid ? 'border-green-500 bg-green-500/10' : 'border-red-500 bg-red-500/10'}">
-                  <div class="text-sm {validation.valid ? 'text-green-400' : 'text-red-400'}">
-                    {#if validation.valid}
+                {@const remainderData = calculateSplitRemainder()}
+                
+                <!-- Real-time remainder display -->
+                <div class="bg-blue-600/20 border border-blue-600/30 rounded-lg p-3 mb-4">
+                  <div class="flex justify-between items-center text-sm">
+                    <span class="text-blue-200">Input Total:</span>
+                    <span class="text-white font-mono">{formatValue(selectedUTXOData.split.value, splitTokenData.decimals)} {splitTokenData.symbol}</span>
+                  </div>
+                  <div class="flex justify-between items-center text-sm mt-1">
+                    <span class="text-blue-200">Output Total:</span>
+                    <span class="text-white font-mono">{formatValue(selectedUTXOData.split.value - BigInt(remainderData.remainder), splitTokenData.decimals)} {splitTokenData.symbol}</span>
+                  </div>
+                  <div class="flex justify-between items-center text-sm mt-1">
+                    <span class="text-blue-200">Remaining:</span>
+                    <span class="font-mono {remainderData.isZero ? 'text-green-400' : remainderData.isPositive ? 'text-yellow-400' : 'text-red-400'}">
+                      {remainderData.formatted} {splitTokenData.symbol}
+                    </span>
+                  </div>
+                </div>
+
+                <!-- Validation Status -->
+                <div class="p-3 rounded-lg border {splitValidation.valid ? 'border-green-500 bg-green-500/10' : 'border-red-500 bg-red-500/10'}">
+                  <div class="text-sm {splitValidation.valid ? 'text-green-400' : 'text-red-400'}">
+                    {#if splitValidation.valid}
                       ✅ Split configuration is valid
                     {:else}
-                      ❌ {validation.error}
+                      ❌ {splitValidation.error}
                     {/if}
                   </div>
-                  <div class="text-xs text-gray-400 mt-1">
-                    Input: {formatValue(selectedUTXOData.split.value, splitTokenData?.decimals || 18)} 
-                    {splitTokenData?.symbol || 'UNK'}
+                </div>
+
+                <!-- Debug Section -->
+                <div class="p-3 bg-gray-800 rounded-lg border border-gray-600">
+                  <div class="flex gap-2">
+                    <button
+                      type="button"
+                      on:click={() => {
+                        console.log(' Current split state:', {
+                          selectedUTXO: selectedUTXOData.split?.id,
+                          outputs: splitOutputs,
+                          validation: splitValidation
+                        });
+                        alert('Check console for split state');
+                      }}
+                      class="text-xs bg-purple-600 hover:bg-purple-700 px-3 py-1 rounded"
+                    >
+                      Debug State
+                    </button>
+                    <div class="text-xs text-gray-400 flex items-center ml-2">
+                      Validation: {splitValidation.canSubmit ? '✅ Ready' : '❌ Blocked'}
+                    </div>
                   </div>
                 </div>
               {/if}
@@ -483,21 +1004,29 @@
             <label for="withdraw-utxo-select" class="block text-sm font-medium text-white mb-2">
               Select UTXO to Withdraw
             </label>
-            <select
-              id="withdraw-utxo-select"
-              bind:value={withdrawSelectedUTXO}
-              class="w-full bg-white/5 border border-white/20 rounded-lg px-4 py-3 text-white"
-              required
-            >
-              <option value="">Choose a UTXO...</option>
-              {#each availableUTXOs as utxo}
-                {@const tokenData = getTokenMetadata(utxo.tokenAddress)}
-                <option value={utxo.id}>
-                  {formatValue(utxo.value, tokenData?.decimals || 18)} {tokenData?.symbol || 'UNK'} 
-                  (ID: {utxo.id.slice(0, 8)}...)
-                </option>
-              {/each}
-            </select>
+            
+            {#if !tokenMetadataLoaded}
+              <div class="w-full bg-gray-800 border border-gray-600 rounded-lg px-4 py-3 text-gray-400 flex items-center">
+                <div class="animate-spin w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full mr-2"></div>
+                Loading token metadata...
+              </div>
+            {:else}
+              <select
+                id="withdraw-utxo-select"
+                bind:value={withdrawSelectedUTXO}
+                class="w-full bg-gray-800 border border-gray-600 rounded-lg px-4 py-3 text-white focus:border-purple-500 focus:outline-none"
+                required
+              >
+                <option value="">Choose a UTXO...</option>
+                {#each availableUTXOs as utxo}
+                  {@const tokenData = getTokenMetadata(utxo.tokenAddress)}
+                  <option value={utxo.id}>
+                    {formatValue(utxo.value, tokenData.decimals)} {tokenData.symbol} 
+                    (ID: {utxo.id.slice(0, 8)}...)
+                  </option>
+                {/each}
+              </select>
+            {/if}
           </div>
 
           <!-- Recipient -->
@@ -523,7 +1052,7 @@
                 <div class="text-sm text-blue-200">
                   <div class="font-medium mb-1">Withdrawal Details:</div>
                   <div class="space-y-1 text-blue-300">
-                    <div>Amount: {formatValue(selectedUTXOData.withdraw.value, withdrawTokenData?.decimals || 18)} {withdrawTokenData?.symbol || 'UNK'}</div>
+                    <div>Amount: {formatValue(selectedUTXOData.withdraw.value, withdrawTokenData.decimals)} {withdrawTokenData.symbol}</div>
                     <div>Token: {selectedUTXOData.withdraw.tokenAddress}</div>
                     <div>This will convert your UTXO back to standard ERC20 tokens</div>
                   </div>
@@ -544,21 +1073,29 @@
             <label for="transfer-utxo-select" class="block text-sm font-medium text-white mb-2">
               Select UTXO to Transfer
             </label>
-            <select
-              id="transfer-utxo-select"
-              bind:value={transferSelectedUTXO}
-              class="w-full bg-white/5 border border-white/20 rounded-lg px-4 py-3 text-white"
-              required
-            >
-              <option value="">Choose a UTXO...</option>
-              {#each availableUTXOs as utxo}
-                {@const tokenData = getTokenMetadata(utxo.tokenAddress)}
-                <option value={utxo.id}>
-                  {formatValue(utxo.value, tokenData?.decimals || 18)} {tokenData?.symbol || 'UNK'} 
-                  (ID: {utxo.id.slice(0, 8)}...)
-                </option>
-              {/each}
-            </select>
+            
+            {#if !tokenMetadataLoaded}
+              <div class="w-full bg-gray-800 border border-gray-600 rounded-lg px-4 py-3 text-gray-400 flex items-center">
+                <div class="animate-spin w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full mr-2"></div>
+                Loading token metadata...
+              </div>
+            {:else}
+              <select
+                id="transfer-utxo-select"
+                bind:value={transferSelectedUTXO}
+                class="w-full bg-gray-800 border border-gray-600 rounded-lg px-4 py-3 text-white focus:border-purple-500 focus:outline-none"
+                required
+              >
+                <option value="">Choose a UTXO...</option>
+                {#each availableUTXOs as utxo}
+                  {@const tokenData = getTokenMetadata(utxo.tokenAddress)}
+                  <option value={utxo.id}>
+                    {formatValue(utxo.value, tokenData.decimals)} {tokenData.symbol} 
+                    (ID: {utxo.id.slice(0, 8)}...)
+                  </option>
+                {/each}
+              </select>
+            {/if}
           </div>
 
           <!-- New Owner -->
@@ -594,7 +1131,7 @@
       <div class="pt-6 border-t border-white/10">
         <button
           on:click={handleExecute}
-          disabled={!canExecute()}
+          disabled={!canExecute}
           class="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white py-4 rounded-lg font-semibold transition-all duration-200 shadow-lg hover:shadow-xl flex items-center justify-center space-x-2"
         >
           {#if isProcessing}

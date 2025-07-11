@@ -2,6 +2,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { PrivateUTXOManager, type PrivateUTXO } from '$lib/PrivateUTXOManager';
+  import { PrivateUTXOStorage } from '$lib/PrivateUTXOStorage';
   import { WalletProviderType } from '../types/ethereum.types';
   import type { UTXOManagerStats, ExtendedUTXOData } from '../types/utxo.types';
   import type { EOAData } from '../types/ethereum.types';
@@ -25,7 +26,7 @@
   let privacyMode = true; // Default to privacy mode
 
   // Configuration
-  const CONTRACT_ADDRESS = '0x533B018Bb4F3984E1025ffC995BD4C81e3cAF801'; // amoy
+  const CONTRACT_ADDRESS = '0x4735A18Ef4B63520C0AE9bC990ee234AAb95dE9c'; // amoy
   const PREFERRED_PROVIDER = WalletProviderType.METAMASK;
 
   onMount(async () => {
@@ -44,7 +45,11 @@
       // Setup event listeners
       setupEventListeners();
 
-      console.log('� Private UTXO Manager initialized');
+      console.log('🔧 Private UTXO Manager initialized');
+      
+      // Auto-initialize library and reconnect if possible
+      await initializeLibrary();
+      
     } catch (error) {
       console.error('❌ Failed to initialize Private UTXO Manager:', error);
       addNotification('error', 'Failed to initialize Private UTXO Manager');
@@ -60,10 +65,18 @@
     });
 
     // Wallet events
-    privateUTXOManager.on('wallet:connected', (eoa: EOAData) => {
+    privateUTXOManager.on('wallet:connected', async (eoa: EOAData) => {
       currentAccount = eoa;
       addNotification('success', `Wallet connected: ${eoa.address.slice(0, 6)}...${eoa.address.slice(-4)}`);
-      refreshData();
+      
+      // Try full refresh first
+      await refreshData();
+      
+      // If no private UTXOs loaded, try loading all user UTXOs
+      if (privateUTXOs.length === 0) {
+        console.log('🔄 No UTXOs from sync, trying to load stored UTXOs...');
+        loadAllUserUTXOs();
+      }
     });
 
     privateUTXOManager.on('wallet:disconnected', () => {
@@ -114,10 +127,31 @@
 
   async function initializeLibrary() {
     try {
+      console.log('🚀 Initializing library...');
       const success = await privateUTXOManager.initialize(CONTRACT_ADDRESS, PREFERRED_PROVIDER);
       if (!success) {
         addNotification('error', 'Failed to initialize Private UTXO Manager');
+        return;
       }
+      
+      console.log('✅ Library initialized successfully');
+      
+      // Try to auto-reconnect if MetaMask is already connected
+      if (typeof window !== 'undefined' && window.ethereum) {
+        try {
+          const accounts = await window.ethereum.request({ method: 'eth_accounts' });
+          if (accounts && accounts.length > 0) {
+            console.log('🔄 Auto-reconnecting to existing wallet session...');
+            const reconnectResult = await privateUTXOManager.connectWallet(PREFERRED_PROVIDER);
+            if (reconnectResult.success) {
+              console.log('✅ Auto-reconnection successful');
+            }
+          }
+        } catch (autoConnectError: any) {
+          console.log('ℹ️ Auto-reconnect not available:', autoConnectError.message || autoConnectError);
+        }
+      }
+      
     } catch (error) {
       console.error('Initialization error:', error);
       addNotification('error', 'Private UTXO Manager initialization failed');
@@ -125,29 +159,131 @@
   }
 
   async function refreshData() {
-    if (!isInitialized || !currentAccount) return;
+    if (!isInitialized || !currentAccount) {
+      console.log('⏸️ RefreshData skipped:', { isInitialized, currentAccount: !!currentAccount });
+      return;
+    }
 
     try {
+      console.log('🔄 Starting refreshData...');
+      
       // Sync with blockchain and localStorage
-      await privateUTXOManager.syncWithBlockchain();
+      const syncSuccess = await privateUTXOManager.syncWithBlockchain();
+      console.log('🔄 Sync result:', syncSuccess);
       
       // Get regular UTXOs
       utxos = privateUTXOManager.getUTXOsByOwner(currentAccount.address);
+      console.log('🔗 Regular UTXOs after refresh:', {
+        total: utxos.length,
+        unspent: utxos.filter(u => !u.isSpent).length,
+        spent: utxos.filter(u => u.isSpent).length
+      });
       
       // Get private UTXOs (now from localStorage)
       privateUTXOs = privateUTXOManager.getPrivateUTXOsByOwner(currentAccount.address);
+      console.log('🔒 Private UTXOs after refresh:', {
+        total: privateUTXOs.length,
+        unspent: privateUTXOs.filter(u => !u.isSpent).length,
+        spent: privateUTXOs.filter(u => u.isSpent).length,
+        details: privateUTXOs.map(u => ({
+          id: u.id.slice(0, 8) + '...',
+          value: u.value.toString(),
+          isSpent: u.isSpent,
+          createdAt: new Date(u.localCreatedAt).toLocaleTimeString()
+        }))
+      });
       
       // Get stats
       stats = privateUTXOManager.getStats();
       
-      console.log('📊 Data refreshed:', {
-        utxos: utxos.length,
-        privateUTXOs: privateUTXOs.length,
+      console.log('📊 Data refreshed successfully:', {
+        totalUTXOs: utxos.length + privateUTXOs.length,
+        availableForOperations: utxos.filter(u => !u.isSpent && u.confirmed).length + privateUTXOs.filter(u => !u.isSpent).length,
         stats
       });
     } catch (error) {
       console.error('Failed to refresh data:', error);
       addNotification('error', 'Failed to refresh data');
+    }
+  }
+
+  // Debug function for multi-account storage
+  function debugMultiAccountStorage() {
+    if (!currentAccount?.address) {
+      addNotification('error', 'Please connect wallet first');
+      return;
+    }
+
+    try {
+      console.log('🔍 === MULTI-ACCOUNT STORAGE DEBUG ===');
+      
+      // Current account detailed info
+      console.log(`\n👤 Current Account: ${currentAccount.address}`);
+      PrivateUTXOStorage.debugStorage(currentAccount.address);
+      
+      // All accounts in system
+      const allAccounts = PrivateUTXOStorage.getAllStoredAccounts();
+      console.log(`\n👥 All accounts with data (${allAccounts.length}):`);
+      allAccounts.forEach((account, i) => {
+        console.log(`${i + 1}. ${account}`);
+        const stats = PrivateUTXOStorage.getEnhancedUserStats(account);
+        console.log(`   - Owned: ${stats.ownedCount} UTXOs, Received: ${stats.receivedCount} UTXOs`);
+        console.log(`   - Total Balance: ${stats.totalBalance.toString()}`);
+      });
+      
+      // Enhanced stats for current user
+      const enhancedStats = PrivateUTXOStorage.getEnhancedUserStats(currentAccount.address);
+      console.log(`\n📊 Enhanced Stats for ${currentAccount.address}:`);
+      console.log(`- Owned UTXOs: ${enhancedStats.breakdown.owned.count} (${enhancedStats.breakdown.owned.balance.toString()})`);
+      console.log(`- Received UTXOs: ${enhancedStats.breakdown.received.count} (${enhancedStats.breakdown.received.balance.toString()})`);
+      console.log(`- Total: ${enhancedStats.totalCount} UTXOs (${enhancedStats.totalBalance.toString()})`);
+      
+      addNotification('success', `Debug complete! Found ${allAccounts.length} accounts with data. Check console for details.`);
+      
+    } catch (error: any) {
+      console.error('❌ Multi-account debug failed:', error);
+      addNotification('error', `Debug failed: ${error.message || error}`);
+    }
+  }
+
+  // Load UTXOs with enhanced multi-account support
+  function loadAllUserUTXOs() {
+    if (!currentAccount?.address) {
+      addNotification('error', 'Please connect wallet first');
+      return;
+    }
+
+    try {
+      console.log('🔄 Loading all UTXOs (owned + received)...');
+      
+      // Get all UTXOs for current user
+      const { owned, received, all } = PrivateUTXOStorage.getAllUserUTXOs(currentAccount.address);
+      
+      console.log(`🔄 Found UTXOs:`);
+      console.log(`  - Owned: ${owned.length}`);
+      console.log(`  - Received: ${received.length}`);
+      console.log(`  - Total: ${all.length}`);
+      
+      // Update the UI with all UTXOs
+      privateUTXOs = all;
+      
+      // Show result
+      if (all.length > 0) {
+        addNotification('success', `Loaded ${all.length} UTXOs (${owned.length} owned + ${received.length} received)`);
+        console.log('🔄 UTXO breakdown:', all.map((u: any) => ({ 
+          id: u.id, 
+          value: u.value, 
+          owner: u.owner,
+          type: typeof u.value,
+          isOwned: u.owner.toLowerCase() === currentAccount?.address.toLowerCase()
+        })));
+      } else {
+        addNotification('info', 'No UTXOs found. Create some deposits first.');
+      }
+      
+    } catch (error: any) {
+      console.error('❌ Failed to load all UTXOs:', error);
+      addNotification('error', `Failed to load UTXOs: ${error.message || error}`);
     }
   }
 
@@ -188,6 +324,17 @@
     const privateBalance = privateUTXOManager?.getPrivateBalance(tokenAddress) || BigInt(0);
     
     return regularBalance + privateBalance;
+  }
+
+  // Expose debug function to global scope for development (optional)
+  if (typeof window !== 'undefined') {
+    (window as any).debugUTXOStorage = () => {
+      if (currentAccount?.address) {
+        debugMultiAccountStorage();
+      } else {
+        console.warn('No account connected. Connect wallet first.');
+      }
+    };
   }
 </script>
 
@@ -247,6 +394,27 @@
                 <span>{privacyMode ? '🔐' : '🔓'}</span>
                 <span class="text-sm">{privacyMode ? 'Private' : 'Public'}</span>
               </button>
+              
+              <!-- Debug Tools -->
+              {#if currentAccount}
+                <button
+                  on:click={loadAllUserUTXOs}
+                  class="flex items-center space-x-2 px-3 py-2 rounded-lg bg-blue-600/20 text-blue-300 hover:bg-blue-600/30 transition-all duration-200"
+                  title="Load all UTXOs (owned + received)"
+                >
+                  <span>�</span>
+                  <span class="text-sm">Load All UTXOs</span>
+                </button>
+                
+                <button
+                  on:click={debugMultiAccountStorage}
+                  class="flex items-center space-x-2 px-3 py-2 rounded-lg bg-purple-600/20 text-purple-300 hover:bg-purple-600/30 transition-all duration-200"
+                  title="Debug multi-account storage system"
+                >
+                  <span>�</span>
+                  <span class="text-sm">Debug Storage</span>
+                </button>
+              {/if}
               
               <!-- Connection Status -->
               <div class="flex items-center space-x-2 text-green-400">
