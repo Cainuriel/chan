@@ -589,9 +589,6 @@
       if (result.success) {
         console.log('✅ Split operation completed successfully:', result);
         
-        // Debug localStorage state after split
-        setTimeout(() => debugSplitResult(), 1000);
-        
         // Reset form
         splitSelectedUTXO = '';
         splitOutputs = [
@@ -691,7 +688,8 @@
     }
   })();
 
-  // Debug function to verify localStorage update after split
+  // Debug function to verify localStorage update after split (kept for future debugging)
+  /*
   async function debugSplitResult() {
     if (!utxoManager.currentAccount) {
       console.warn('No current account to debug');
@@ -744,6 +742,20 @@
       console.error('❌ Error debugging split result:', error);
     }
   }
+  */
+
+  // Debug function for split state (kept for future debugging) 
+  /*
+  function debugSplitState() {
+    console.log('🔍 Current split state:', {
+      selectedUTXO: selectedUTXOData.split?.id,
+      outputs: splitOutputs,
+      validation: splitValidation,
+      remainder: splitRemainder
+    });
+    alert('Check console for split state');
+  }
+  */
 </script>
 
 <div class="space-y-6">
@@ -756,15 +768,6 @@
           Perform privacy-preserving operations on your UTXOs
         </p>
       </div>
-      <!-- Debug Button (temporary) -->
-      <button
-        type="button"
-        on:click={debugSplitResult}
-        class="px-3 py-1 text-xs bg-gray-600 hover:bg-gray-700 text-white rounded"
-        title="Debug localStorage state"
-      >
-        🔍 Debug Storage
-      </button>
     </div>
   </div>
 
@@ -965,28 +968,9 @@
                       ❌ {splitValidation.error}
                     {/if}
                   </div>
-                </div>
-
-                <!-- Debug Section -->
-                <div class="p-3 bg-gray-800 rounded-lg border border-gray-600">
-                  <div class="flex gap-2">
-                    <button
-                      type="button"
-                      on:click={() => {
-                        console.log(' Current split state:', {
-                          selectedUTXO: selectedUTXOData.split?.id,
-                          outputs: splitOutputs,
-                          validation: splitValidation
-                        });
-                        alert('Check console for split state');
-                      }}
-                      class="text-xs bg-purple-600 hover:bg-purple-700 px-3 py-1 rounded"
-                    >
-                      Debug State
-                    </button>
-                    <div class="text-xs text-gray-400 flex items-center ml-2">
-                      Validation: {splitValidation.canSubmit ? '✅ Ready' : '❌ Blocked'}
-                    </div>
+                  <!-- Validation Status Indicator -->
+                  <div class="text-xs text-gray-400 text-center mt-2">
+                    Status: {splitValidation.canSubmit ? '✅ Ready to Execute' : '❌ Validation Required'}
                   </div>
                 </div>
               {/if}
