@@ -485,33 +485,64 @@
     }
   }
 
-  // Helper function to calculate split remainder  
-  function calculateSplitRemainder() {
-    if (!selectedUTXOData.split) return { remainder: '0', formatted: '0' };
+  // Reactive calculation of split remainder - updates automatically when inputs change
+  $: splitRemainder = (() => {
+    if (!selectedUTXOData.split || !utxoManager.currentAccount || !isFullyLoaded) return { 
+      remainder: '0', 
+      formatted: '0',
+      outputToOthers: BigInt(0),
+      remainingToUser: BigInt(0),
+      formattedOutputToOthers: '0',
+      formattedRemainingToUser: '0',
+      isPositive: false,
+      isNegative: false,
+      isZero: true
+    };
     
     const utxo = selectedUTXOData.split;
     const tokenData = getTokenMetadata(utxo.tokenAddress);
     const decimals = tokenData.decimals;
     const totalInput = utxo.value;
+    const currentUserAddress = utxoManager.currentAccount.address.toLowerCase();
     
     let totalOutput = BigInt(0);
+    let outputToOthers = BigInt(0);
+    let remainingToUser = BigInt(0);
+    
     for (const output of splitOutputs) {
-      if (output.amount) {
-        totalOutput += parseAmountToBigInt(output.amount, decimals);
+      if (output.amount && output.owner) {
+        const outputValue = parseAmountToBigInt(output.amount, decimals);
+        totalOutput += outputValue;
+        
+        // Clasificar según la dirección del owner
+        if (output.owner.toLowerCase() === currentUserAddress) {
+          remainingToUser += outputValue;
+        } else {
+          outputToOthers += outputValue;
+        }
       }
     }
     
     const remainderBigInt = totalInput - totalOutput;
     const remainderFormatted = formatValue(remainderBigInt, decimals);
     
+    // Si hay remainder positivo, va al usuario
+    if (remainderBigInt > 0) {
+      remainingToUser += remainderBigInt;
+    }
+    
     return {
       remainder: remainderBigInt.toString(),
       formatted: remainderFormatted,
       isPositive: remainderBigInt > 0,
       isNegative: remainderBigInt < 0,
-      isZero: remainderBigInt === 0n
+      isZero: remainderBigInt === 0n,
+      outputToOthers,
+      remainingToUser,
+      formattedOutputToOthers: formatValue(outputToOthers, decimals),
+      formattedRemainingToUser: formatValue(remainingToUser, decimals)
     };
-  }
+  })();
 
   // Auto-complete remaining amount in last output (function kept for potential future use)
   /*
@@ -906,7 +937,6 @@
               {#if splitSelectedUTXO}
                 {@const validation = validateSplitAmounts()}
                 {@const splitTokenData = getTokenMetadata(selectedUTXOData.split?.tokenAddress || '')}
-                {@const remainderData = calculateSplitRemainder()}
                 
                 <!-- Real-time remainder display -->
                 <div class="bg-blue-600/20 border border-blue-600/30 rounded-lg p-3 mb-4">
@@ -915,13 +945,13 @@
                     <span class="text-white font-mono">{formatValue(selectedUTXOData.split.value, splitTokenData.decimals)} {splitTokenData.symbol}</span>
                   </div>
                   <div class="flex justify-between items-center text-sm mt-1">
-                    <span class="text-blue-200">Output Total:</span>
-                    <span class="text-white font-mono">{formatValue(selectedUTXOData.split.value - BigInt(remainderData.remainder), splitTokenData.decimals)} {splitTokenData.symbol}</span>
+                    <span class="text-blue-200">Output to Others:</span>
+                    <span class="text-white font-mono">{splitRemainder.formattedOutputToOthers} {splitTokenData.symbol}</span>
                   </div>
                   <div class="flex justify-between items-center text-sm mt-1">
-                    <span class="text-blue-200">Remaining:</span>
-                    <span class="font-mono {remainderData.isZero ? 'text-green-400' : remainderData.isPositive ? 'text-yellow-400' : 'text-red-400'}">
-                      {remainderData.formatted} {splitTokenData.symbol}
+                    <span class="text-blue-200">Remaining to You:</span>
+                    <span class="font-mono {splitRemainder.isZero ? 'text-green-400' : splitRemainder.isPositive ? 'text-yellow-400' : 'text-red-400'}">
+                      {splitRemainder.formattedRemainingToUser} {splitTokenData.symbol}
                     </span>
                   </div>
                 </div>
