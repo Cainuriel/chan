@@ -431,7 +431,7 @@ export const UTXO_VAULT_ABI = [
   
   // View functions
   "function getUTXOsByOwner(address owner) external view returns (bytes32[] memory)",
-  "function getUTXOInfo(bytes32 utxoId) external view returns (bool exists, uint256 value, address tokenAddress, address owner, uint256 timestamp, bool isSpent, bytes32 commitment, bytes32 parentUTXO, uint8 utxoType)",
+  "function getUTXOInfo(bytes32 utxoId) external view returns (bool exists, bytes32 commitment, address tokenAddress, address owner, uint256 timestamp, bool isSpent, bytes32 parentUTXO, uint8 utxoType, bytes32 nullifierHash)",
   "function getSplitOperation(bytes32 operationId) external view returns (bytes32 inputUTXO, bytes32[] memory outputUTXOs, address[] memory outputOwners, uint256[] memory outputValues, bytes memory splitProof, uint256 timestamp)",
   "function getCombineOperation(bytes32 operationId) external view returns (bytes32[] memory inputUTXOs, bytes32 outputUTXO, address outputOwner, uint256 totalValue, bytes memory combineProof, uint256 timestamp)",
   
@@ -546,7 +546,7 @@ export interface UTXOVaultContract {
   // Read-only functions
   utxos(utxoId: string): Promise<UTXODataContract>;
   getUTXOsByOwner(owner: string): Promise<string[]>;
-  getUTXOInfo(utxoId: string): Promise<UTXODataContract>;
+  getUTXOInfo(utxoId: string): Promise<[boolean, string, string, string, bigint, boolean, string, number, string]>;
   getSplitOperation(operationId: string): Promise<SplitOperationContract>;
   getCombineOperation(operationId: string): Promise<CombineOperationContract>;
   nonces(user: string): Promise<bigint>;

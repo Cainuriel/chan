@@ -737,8 +737,8 @@ export class PrivateUTXOManager extends UTXOLibrary {
       const { utxoId, newOwner } = params;
       
       // Obtener UTXO privado
-      const utxo = this.utxos.get(utxoId) as PrivateUTXO;
-      if (!utxo?.isPrivate) {
+      const utxo = this.privateUTXOs.get(utxoId) as PrivateUTXO;
+      if (!utxo || !utxo.isPrivate) {
         throw new Error('UTXO is not private or does not exist');
       }
 
@@ -849,6 +849,7 @@ export class PrivateUTXOManager extends UTXOLibrary {
 
       // Almacenar nuevo UTXO
       this.utxos.set(newUtxoId, newPrivateUTXO);
+      this.privateUTXOs.set(newUtxoId, newPrivateUTXO);
       this.privateCredentials.set(newUtxoId, newCredential);
 
       const result: UTXOOperationResult = {
@@ -884,14 +885,39 @@ export class PrivateUTXOManager extends UTXOLibrary {
       const { inputUTXOId, outputValues, outputOwners } = params;
       
       // Obtener UTXO privado
-      const inputUTXO = this.utxos.get(inputUTXOId) as PrivateUTXO;
-      if (!inputUTXO?.isPrivate) {
+      const inputUTXO = this.privateUTXOs.get(inputUTXOId) as PrivateUTXO;
+      if (!inputUTXO || !inputUTXO.isPrivate) {
         throw new Error('Input UTXO is not private or does not exist');
       }
 
-      const inputCredential = this.privateCredentials.get(inputUTXOId);
+      // Debug: Verificar estado de credenciales
+      console.log('🔍 Credential verification:', {
+        inputUTXOId,
+        hasUTXO: !!inputUTXO,
+        hasCredentialInUTXO: !!inputUTXO.bbsCredential,
+        hasCredentialInMap: this.privateCredentials.has(inputUTXOId),
+        credentialMapSize: this.privateCredentials.size,
+        credentialMapKeys: Array.from(this.privateCredentials.keys()).map(id => id.slice(0, 8) + '...'),
+        utxoCredentialType: typeof inputUTXO.bbsCredential,
+        utxoCredentialValue: inputUTXO.bbsCredential
+      });
+
+      let inputCredential = this.privateCredentials.get(inputUTXOId);
       if (!inputCredential) {
-        throw new Error('Input credential not found');
+        console.error('❌ Credential not found in privateCredentials map');
+        console.error('Available credentials:', Array.from(this.privateCredentials.entries()).map(([id, cred]) => ({
+          id: id.slice(0, 8) + '...',
+          hasCredential: !!cred
+        })));
+        
+        // Fallback: usar la credencial del UTXO si existe
+        if (inputUTXO.bbsCredential) {
+          console.log('🔄 Using credential from UTXO as fallback');
+          this.privateCredentials.set(inputUTXOId, inputUTXO.bbsCredential);
+          inputCredential = inputUTXO.bbsCredential;
+        } else {
+          throw new Error('Input credential not found and no fallback available');
+        }
       }
 
       // Validar que la suma sea correcta
@@ -981,15 +1007,284 @@ export class PrivateUTXOManager extends UTXOLibrary {
         outputBlindingFactors[0]
       );
 
-      // Ejecutar transacción usando splitPrivateUTXO
-      const tx = await this.contract!.splitPrivateUTXO(
-        inputUTXO.commitment,
+      // Debug: Verify function exists on contract
+      console.log('🔍 Contract function verification:', {
+        contractAddress: (this.contract! as any).target || 'unknown',
+        hasSplitPrivateUTXO: typeof this.contract!.splitPrivateUTXO === 'function',
+        contractInterface: this.contract!.interface ? 'has interface' : 'no interface'
+      });
+
+      // Validate and format parameters to match contract exactly
+      console.log('🔍 Pre-validation parameters:', {
+        inputCommitment: inputUTXO.commitment,
         outputCommitments,
         bbsProofData,
         equalityProof,
-        nullifierHash,
-        { gasLimit: this.config.defaultGasLimit }
+        nullifierHash
+      });
+
+      // Ensure all parameters are properly formatted
+      const validatedInputCommitment = ethers.isHexString(inputUTXO.commitment, 32) 
+        ? inputUTXO.commitment 
+        : ethers.zeroPadValue(inputUTXO.commitment, 32);
+
+      const validatedOutputCommitments = outputCommitments.map(commitment => 
+        ethers.isHexString(commitment, 32) 
+          ? commitment 
+          : ethers.zeroPadValue(commitment, 32)
       );
+
+      const validatedNullifierHash = ethers.isHexString(nullifierHash, 32)
+        ? nullifierHash
+        : ethers.zeroPadValue(nullifierHash, 32);
+
+      const validatedEqualityProof = ethers.isHexString(equalityProof)
+        ? equalityProof
+        : ethers.hexlify(equalityProof);
+
+      // Validate BBS proof structure matches contract
+      const validatedBBSProof = {
+        proof: ethers.isHexString(bbsProofData.proof) ? bbsProofData.proof : ethers.hexlify(bbsProofData.proof),
+        disclosedAttributes: bbsProofData.disclosedAttributes.map(attr => 
+          ethers.isHexString(attr, 32) ? attr : ethers.zeroPadValue(attr, 32)
+        ),
+        disclosureIndexes: bbsProofData.disclosureIndexes.map(idx => BigInt(idx)),
+        challenge: ethers.isHexString(bbsProofData.challenge, 32) 
+          ? bbsProofData.challenge 
+          : ethers.zeroPadValue(bbsProofData.challenge, 32),
+        timestamp: BigInt(bbsProofData.timestamp)
+      };
+
+      console.log('✅ Validated parameters:', {
+        inputCommitment: validatedInputCommitment,
+        inputCommitmentLength: validatedInputCommitment.length,
+        outputCommitments: validatedOutputCommitments,
+        outputCommitmentsLength: validatedOutputCommitments.length,
+        bbsProofData: validatedBBSProof,
+        equalityProof: validatedEqualityProof,
+        equalityProofLength: validatedEqualityProof.length,
+        nullifierHash: validatedNullifierHash,
+        nullifierHashLength: validatedNullifierHash.length
+      });
+
+      // CRITICAL: Verificar que el UTXO realmente existe en el contrato
+      console.log('� === CRITICAL UTXO VERIFICATION ===');
+      console.log('📋 Input UTXO details:', {
+        id: inputUTXO.id,
+        value: inputUTXO.value.toString(),
+        owner: inputUTXO.owner,
+        isSpent: inputUTXO.isSpent,
+        commitment: inputUTXO.commitment,
+        exists: inputUTXO.exists,
+        confirmed: inputUTXO.confirmed,
+        creationTxHash: inputUTXO.creationTxHash,
+        blockNumber: inputUTXO.blockNumber,
+        localCreatedAt: inputUTXO.localCreatedAt,
+        isPrivate: inputUTXO.isPrivate
+      });
+
+      // Check if this UTXO was created locally vs actually on-chain
+      if (!inputUTXO.creationTxHash || !inputUTXO.blockNumber) {
+        console.error('� UTXO appears to be locally created without blockchain confirmation!');
+        console.error('This suggests the UTXO was never actually created on the contract');
+        throw new Error('Cannot split UTXO: No blockchain confirmation found. This UTXO may not exist on the contract.');
+      }
+
+      console.log('✅ UTXO has blockchain confirmation, proceeding with contract verification...');
+
+      // Since this is a private UTXO with improved contract, let's try different approaches
+      console.log('🔍 Attempting contract verification using commitment...');
+      try {
+        // First, check if the commitment exists in the contract
+        const commitment = inputUTXO.commitment;
+        console.log('📝 Using commitment for lookup:', commitment);
+        
+        // Try to get all UTXOs for the owner and find our UTXO
+        const ownerUTXOs = await this.contract!.getUTXOsByOwner(inputUTXO.owner);
+        console.log('📋 All UTXOs for owner from contract:', ownerUTXOs);
+        
+        let foundUTXO = false;
+        let contractUTXOInfo = null;
+        
+        // Check each UTXO returned by the contract
+        for (const contractUTXOId of ownerUTXOs) {
+          try {
+            const utxoInfo = await this.contract!.getUTXOInfo(contractUTXOId);
+            console.log(`� Contract UTXO ${contractUTXOId}:`, utxoInfo);
+            
+            // Check if this matches our UTXO by value and owner
+            if (utxoInfo[0] && // exists
+                !utxoInfo[5] && // !isSpent 
+                utxoInfo[3].toLowerCase() === inputUTXO.owner.toLowerCase()) { // owner matches
+              
+              // Try to get the commitment for this UTXO
+              try {
+                const contractCommitment = await this.contract!.getUTXOCommitment(contractUTXOId);
+                console.log(`📋 Contract commitment for ${contractUTXOId}: ${contractCommitment}`);
+                
+                if (contractCommitment === commitment) {
+                  console.log('✅ Found matching UTXO by commitment!');
+                  foundUTXO = true;
+                  contractUTXOInfo = {
+                    exists: utxoInfo[0],
+                    commitment: utxoInfo[1],
+                    tokenAddress: utxoInfo[2],
+                    owner: utxoInfo[3],
+                    timestamp: utxoInfo[4],
+                    isSpent: utxoInfo[5],
+                    parentUTXO: utxoInfo[6],
+                    utxoType: utxoInfo[7],
+                    nullifierHash: utxoInfo[8]
+                  };
+                  
+                  // If the IDs don't match, we need to update our local ID
+                  if (contractUTXOId !== inputUTXO.id) {
+                    console.warn('⚠️ UTXO ID mismatch - updating local ID');
+                    console.warn(`Local ID: ${inputUTXO.id}`);
+                    console.warn(`Contract ID: ${contractUTXOId}`);
+                    // Update the input UTXO ID to match the contract
+                    inputUTXO.id = contractUTXOId;
+                  }
+                  break;
+                }
+              } catch (commitmentError) {
+                console.warn(`⚠️ Could not get commitment for UTXO ${contractUTXOId}:`, commitmentError);
+              }
+            }
+          } catch (infoError) {
+            console.warn(`⚠️ Could not get info for UTXO ${contractUTXOId}:`, infoError);
+          }
+        }
+        
+        if (!foundUTXO) {
+          console.error('🚨 UTXO NOT FOUND ON CONTRACT!');
+          console.error('Available UTXOs on contract:', ownerUTXOs);
+          console.error('Looking for commitment:', commitment);
+          throw new Error(`UTXO with commitment ${commitment} not found on contract. Available UTXOs: ${ownerUTXOs.join(', ')}`);
+        }
+        
+        console.log('✅ UTXO verified successfully on contract');
+        
+      } catch (contractError) {
+        console.error('❌ Contract UTXO verification failed:', contractError);
+        throw new Error(`Cannot verify UTXO on contract: ${(contractError as any)?.message || contractError}`);
+      }
+
+      // Test contract method exists and encode call data
+      try {
+        console.log('🔍 Testing contract interface...');
+        
+        // Try to encode the function call to see if it works
+        const encodedData = this.contract!.interface.encodeFunctionData('splitPrivateUTXO', [
+          validatedInputCommitment,
+          validatedOutputCommitments,
+          validatedBBSProof,
+          validatedEqualityProof,
+          validatedNullifierHash
+        ]);
+        
+        console.log('✅ Function encoding successful:', {
+          encodedDataLength: encodedData.length,
+          encodedDataPrefix: encodedData.substring(0, 10)
+        });
+        
+      } catch (encodeError) {
+        console.error('❌ Function encoding failed:', encodeError);
+        throw new Error(`Parameter encoding failed: ${encodeError}`);
+      }
+
+      // For splitPrivateUTXO, use a higher gas limit due to complex cryptographic operations
+      // We'll use a conservative approach since gas estimation might fail due to the complexity
+      const baseGasLimit = BigInt(800000); // Higher base gas for complex operations
+      const gasWithBuffer = (baseGasLimit * BigInt(120)) / BigInt(100); // Add 20% buffer
+      
+      console.log('⛽ Using conservative gas limit for splitPrivateUTXO:', gasWithBuffer.toString());
+
+      // Enhanced debugging before transaction
+      console.log('🔍 === SPLIT TRANSACTION DEBUG INFO ===');
+      console.log('📝 Input UTXO:', {
+        id: inputUTXO.id,
+        value: inputUTXO.value.toString(),
+        owner: inputUTXO.owner,
+        isSpent: inputUTXO.isSpent,
+        commitment: inputUTXO.commitment,
+        exists: inputUTXO.exists
+      });
+      
+      console.log('📝 Output configuration:', {
+        outputCount: outputValues.length,
+        outputValues: outputValues.map(v => v.toString()),
+        outputOwners: outputOwners,
+        totalOutput: outputValues.reduce((a, b) => a + b, BigInt(0)).toString(),
+        inputValue: inputUTXO.value.toString()
+      });
+      
+      console.log('📝 Proof data sizes:', {
+        bbsProofLength: validatedBBSProof.proof.length,
+        disclosedAttributesCount: validatedBBSProof.disclosedAttributes.length,
+        disclosureIndexesCount: validatedBBSProof.disclosureIndexes.length,
+        equalityProofLength: validatedEqualityProof.length,
+        nullifierHashLength: validatedNullifierHash.length
+      });
+      
+      console.log('📝 Contract info:', {
+        address: this.contract!.target,
+        hasMethod: typeof this.contract!.splitPrivateUTXO === 'function'
+      });
+      
+      // Ejecutar transacción usando splitPrivateUTXO
+      console.log('🚀 Calling contract splitPrivateUTXO...');
+      console.log('📝 Transaction parameters:', {
+        inputCommitment: validatedInputCommitment,
+        outputCommitmentsCount: validatedOutputCommitments.length,
+        proofSize: validatedBBSProof.proof.length,
+        equalityProofSize: validatedEqualityProof.length,
+        nullifierHash: validatedNullifierHash,
+        gasLimit: gasWithBuffer.toString()
+      });
+      
+      let tx: any;
+      try {
+        tx = await this.contract!.splitPrivateUTXO(
+          validatedInputCommitment,
+          validatedOutputCommitments,
+          validatedBBSProof,
+          validatedEqualityProof,
+          validatedNullifierHash,
+          { 
+            gasLimit: gasWithBuffer 
+          }
+        );
+        
+        console.log('✅ Transaction sent successfully:', tx.hash);
+      } catch (transactionError) {
+        console.error('❌ Transaction failed:', transactionError);
+        
+        // Enhanced error handling
+        if (transactionError && typeof transactionError === 'object') {
+          const errorInfo = {
+            message: (transactionError as any).message,
+            code: (transactionError as any).code,
+            action: (transactionError as any).action,
+            reason: (transactionError as any).reason,
+            shortMessage: (transactionError as any).shortMessage,
+            data: (transactionError as any).data
+          };
+          console.error('💥 Detailed transaction error:', errorInfo);
+          
+          // Check for specific error types
+          if ((transactionError as any).code === -32603) {
+            throw new Error(`RPC Error: The transaction failed during execution. This could be due to insufficient gas, contract revert, or invalid parameters. Original error: ${errorInfo.message}`);
+          } else if ((transactionError as any).code === 'UNPREDICTABLE_GAS_LIMIT') {
+            throw new Error(`Gas estimation failed - the contract would revert. Check your parameters and try again. Reason: ${errorInfo.reason || 'Unknown'}`);
+          } else if ((transactionError as any).shortMessage?.includes('revert')) {
+            throw new Error(`Contract reverted: ${errorInfo.shortMessage || errorInfo.reason || 'Unknown reason'}`);
+          }
+        }
+        
+        // Re-throw with enhanced message
+        throw new Error(`Transaction failed: ${(transactionError as any).message || transactionError}`);
+      }
 
       const receipt = await tx.wait();
 
@@ -1040,6 +1335,7 @@ export class PrivateUTXOManager extends UTXOLibrary {
         };
 
         this.utxos.set(outputId, outputUTXO);
+        this.privateUTXOs.set(outputId, outputUTXO);
         this.privateCredentials.set(outputId, outputCredentials[i]);
         createdUTXOIds.push(outputId);
         
@@ -1081,8 +1377,8 @@ export class PrivateUTXOManager extends UTXOLibrary {
       const { utxoId, recipient } = params;
       
       // Obtener UTXO privado
-      const utxo = this.utxos.get(utxoId) as PrivateUTXO;
-      if (!utxo?.isPrivate) {
+      const utxo = this.privateUTXOs.get(utxoId) as PrivateUTXO;
+      if (!utxo || !utxo.isPrivate) {
         throw new Error('UTXO is not private or does not exist');
       }
 
@@ -1271,8 +1567,13 @@ export class PrivateUTXOManager extends UTXOLibrary {
       
       // 4. Cargar UTXOs en cache
       this.privateUTXOs.clear();
+      this.privateCredentials.clear();
       for (const utxo of localUTXOs) {
         this.privateUTXOs.set(utxo.id, utxo);
+        // También cargar la credencial BBS+ si existe
+        if (utxo.bbsCredential) {
+          this.privateCredentials.set(utxo.id, utxo.bbsCredential);
+        }
       }
 
       // 4.5. Auto-configurar claves BBS+ para tokens de UTXOs si no existen
@@ -1326,8 +1627,13 @@ export class PrivateUTXOManager extends UTXOLibrary {
         const localUTXOs = PrivateUTXOStorage.getPrivateUTXOs(this.currentEOA.address);
         
         this.privateUTXOs.clear();
+        this.privateCredentials.clear();
         for (const utxo of localUTXOs) {
           this.privateUTXOs.set(utxo.id, utxo);
+          // También cargar la credencial BBS+ si existe
+          if (utxo.bbsCredential) {
+            this.privateCredentials.set(utxo.id, utxo.bbsCredential);
+          }
         }
         
         console.log(`📱 Loaded ${localUTXOs.length} UTXOs from localStorage (offline mode)`);
@@ -1651,6 +1957,7 @@ export class PrivateUTXOManager extends UTXOLibrary {
       // 6. Almacenar en cache y localStorage
       this.utxos.set(utxoId, privateUTXO);
       this.privateUTXOs.set(utxoId, privateUTXO);
+      this.privateCredentials.set(utxoId, privateUTXO.bbsCredential);
 
       // 7. Guardar en localStorage para preservar privacidad
       const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');

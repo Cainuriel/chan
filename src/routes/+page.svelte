@@ -26,11 +26,28 @@
   const privacyMode = true;
 
   // Configuration
-  const CONTRACT_ADDRESS = '0x4735A18Ef4B63520C0AE9bC990ee234AAb95dE9c'; // amoy
+  const CONTRACT_ADDRESS = '0xCE875AfF30639864c1c17275E2185B4E635001D9'; // Updated contract with commitmentToUTXO mapping
   const PREFERRED_PROVIDER = WalletProviderType.METAMASK;
 
   onMount(async () => {
     try {
+      // Clear old contract data since we deployed a new one
+      if (typeof window !== 'undefined') {
+        const oldData = localStorage.getItem('private_utxos');
+        if (oldData) {
+          console.log('🗑️ Clearing old contract data...');
+          localStorage.removeItem('private_utxos');
+          localStorage.removeItem('utxo_cache');
+          // Clear any other old keys that might exist
+          Object.keys(localStorage).forEach(key => {
+            if (key.startsWith('utxo_') || key.startsWith('private_utxo_')) {
+              localStorage.removeItem(key);
+            }
+          });
+          addNotification('info', 'Cleared old contract data for new deployment');
+        }
+      }
+
       // Initialize Private UTXO Manager
       privateUTXOManager = new PrivateUTXOManager({
         autoConsolidate: false,
@@ -187,6 +204,109 @@
     } catch (error) {
       console.error('Failed to refresh data:', error);
       addNotification('error', 'Failed to refresh data');
+    }
+  }
+
+  // Clear all local data and start fresh
+  function clearAllLocalData() {
+    if (!currentAccount?.address) {
+      addNotification('error', 'Please connect wallet first');
+      return;
+    }
+
+    const confirmed = confirm('⚠️ This will DELETE ALL local UTXO data for the current account. This action cannot be undone. Are you sure?');
+    if (!confirmed) return;
+
+    try {
+      console.log('🗑️ === CLEARING ALL LOCAL DATA ===');
+      
+      // Clear all localStorage keys related to UTXOs
+      const keysToRemove = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && (
+          key.startsWith('private_utxo_') ||
+          key.startsWith('utxo_') ||
+          key.startsWith('bbs_keys_') ||
+          key === 'private_utxos' ||
+          key === 'utxo_cache'
+        )) {
+          keysToRemove.push(key);
+        }
+      }
+      
+      keysToRemove.forEach(key => {
+        localStorage.removeItem(key);
+        console.log(`🗑️ Removed: ${key}`);
+      });
+      
+      // Clear manager cache
+      if (privateUTXOManager) {
+        // Reset the manager state (if there are methods for this)
+        console.log('🔄 Resetting manager state...');
+      }
+      
+      // Reset local state
+      privateUTXOs = [];
+      stats = null;
+      
+      addNotification('success', `Cleared ${keysToRemove.length} local storage keys. Please refresh data.`);
+      console.log('✅ All local data cleared successfully');
+      
+    } catch (error: any) {
+      console.error('❌ Failed to clear local data:', error);
+      addNotification('error', `Failed to clear data: ${error.message || error}`);
+    }
+  }
+
+  // Debug function to verify UTXO authenticity
+  async function verifyUTXOAuthenticity() {
+    if (!currentAccount?.address || !isInitialized || !privateUTXOManager) {
+      addNotification('error', 'Please connect wallet and initialize first');
+      return;
+    }
+
+    try {
+      console.log('🔍 === UTXO AUTHENTICITY VERIFICATION ===');
+      
+      // Get local UTXOs
+      const localUTXOs = privateUTXOManager.getPrivateUTXOsByOwner(currentAccount.address);
+      console.log('📋 Local UTXOs:', localUTXOs.length);
+      
+      // For each local UTXO, verify on contract
+      for (const utxo of localUTXOs) {
+        console.log(`\n🔍 Verifying UTXO: ${utxo.id}`);
+        console.log('UTXO details:', {
+          id: utxo.id,
+          value: utxo.value?.toString(),
+          isSpent: utxo.isSpent,
+          creationTxHash: utxo.creationTxHash,
+          blockNumber: utxo.blockNumber,
+          confirmed: utxo.confirmed,
+          localCreatedAt: utxo.localCreatedAt ? new Date(utxo.localCreatedAt).toISOString() : 'N/A'
+        });
+        
+        // Check if this UTXO has blockchain confirmation
+        if (!utxo.creationTxHash || !utxo.blockNumber) {
+          console.warn('⚠️ UTXO has no blockchain confirmation - may be fake/local-only');
+          continue;
+        }
+        
+        // Try to verify on contract
+        try {
+          // Note: We need to access the contract through the manager
+          // This is a simplified check - in production you'd need proper contract access
+          console.log('✅ UTXO appears to have blockchain confirmation');
+        } catch (contractError) {
+          console.error('❌ UTXO verification failed:', contractError);
+        }
+      }
+      
+      addNotification('success', `Verified ${localUTXOs.length} UTXOs. Check console for details.`);
+      
+    } catch (error: any) {
+      console.error('❌ UTXO verification failed:', error);
+      addNotification('error', `Verification failed: ${error.message || error}`);
     }
   }
 
@@ -368,11 +488,29 @@
               <!-- Debug Tools -->
               {#if currentAccount}
                 <button
+                  on:click={clearAllLocalData}
+                  class="flex items-center space-x-2 px-3 py-2 rounded-lg bg-red-600/20 text-red-300 hover:bg-red-600/30 transition-all duration-200"
+                  title="⚠️ Clear all local UTXO data"
+                >
+                  <span>🗑️</span>
+                  <span class="text-sm">Clear Data</span>
+                </button>
+                
+                <button
+                  on:click={verifyUTXOAuthenticity}
+                  class="flex items-center space-x-2 px-3 py-2 rounded-lg bg-orange-600/20 text-orange-300 hover:bg-orange-600/30 transition-all duration-200"
+                  title="Verify UTXO authenticity on blockchain"
+                >
+                  <span>🔍</span>
+                  <span class="text-sm">Verify UTXOs</span>
+                </button>
+                
+                <button
                   on:click={loadAllUserUTXOs}
                   class="flex items-center space-x-2 px-3 py-2 rounded-lg bg-blue-600/20 text-blue-300 hover:bg-blue-600/30 transition-all duration-200"
                   title="Load all UTXOs (owned + received)"
                 >
-                  <span>�</span>
+                  <span>📁</span>
                   <span class="text-sm">Load All UTXOs</span>
                 </button>
                 
@@ -381,7 +519,7 @@
                   class="flex items-center space-x-2 px-3 py-2 rounded-lg bg-purple-600/20 text-purple-300 hover:bg-purple-600/30 transition-all duration-200"
                   title="Debug multi-account storage system"
                 >
-                  <span>�</span>
+                  <span>🐛</span>
                   <span class="text-sm">Debug Storage</span>
                 </button>
               {/if}

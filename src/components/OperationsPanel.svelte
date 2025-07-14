@@ -572,6 +572,73 @@
     isProcessing = true;
 
     try {
+      // Debug: Log detailed split information
+      console.log('🔍 Executing split with detailed info:', {
+        selectedUTXOId: splitSelectedUTXO,
+        selectedUTXOData: utxo,
+        currentAccount: utxoManager.currentAccount?.address,
+        allAvailableUTXOs: availableUTXOs.map(u => ({ id: u.id, owner: u.owner, value: u.value.toString() })),
+        allPrivateUTXOs: privateUTXOs.map(u => ({ id: u.id, owner: u.owner, isSpent: u.isSpent, value: u.value.toString() }))
+      });
+
+      // Verify UTXO exists in manager
+      const managerPrivateUTXOs = utxoManager.getPrivateUTXOsByOwner(utxoManager.currentAccount!.address);
+      const foundInManager = managerPrivateUTXOs.find(u => u.id === splitSelectedUTXO);
+      
+      console.log('🔍 UTXO verification:', {
+        searchingForId: splitSelectedUTXO,
+        searchingForIdLength: splitSelectedUTXO.length,
+        foundInManager: foundInManager ? {
+          id: foundInManager.id,
+          idLength: foundInManager.id.length,
+          owner: foundInManager.owner,
+          isSpent: foundInManager.isSpent,
+          value: foundInManager.value.toString()
+        } : null,
+        managerUTXOsCount: managerPrivateUTXOs.length,
+        managerUTXOsIds: managerPrivateUTXOs.map(u => ({ 
+          id: u.id, 
+          idLength: u.id.length,
+          isSpent: u.isSpent,
+          owner: u.owner
+        })),
+        exactMatch: managerPrivateUTXOs.some(u => u.id === splitSelectedUTXO),
+        idComparisons: managerPrivateUTXOs.map(u => ({
+          managerId: u.id,
+          selectedId: splitSelectedUTXO,
+          equal: u.id === splitSelectedUTXO,
+          lengthMatch: u.id.length === splitSelectedUTXO.length
+        }))
+      });
+
+      // Additional debug: Check internal manager state
+      console.log('� Detailed manager state:', {
+        hasCurrentAccount: !!utxoManager.currentAccount,
+        currentAccountAddress: utxoManager.currentAccount?.address,
+        managerPrivateUTXOsInternal: managerPrivateUTXOs.map(u => ({
+          id: u.id,
+          owner: u.owner,
+          isSpent: u.isSpent,
+          value: u.value.toString(),
+          tokenAddress: u.tokenAddress
+        }))
+      });
+
+      // Check if the UTXO we found is exactly the same object or a copy
+      if (foundInManager) {
+        console.log('� Found UTXO detailed analysis:', {
+          foundUTXO: foundInManager,
+          isExactSameObject: foundInManager === utxo,
+          propertiesMatch: {
+            id: foundInManager.id === utxo.id,
+            owner: foundInManager.owner === utxo.owner,
+            value: foundInManager.value === utxo.value,
+            isSpent: foundInManager.isSpent === utxo.isSpent,
+            tokenAddress: foundInManager.tokenAddress === utxo.tokenAddress
+          }
+        });
+      }
+
       const tokenData = getTokenMetadata(utxo.tokenAddress);
       const decimals = tokenData.decimals;
       const outputValues = splitOutputs.map(output => 

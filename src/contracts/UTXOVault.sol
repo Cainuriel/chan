@@ -54,6 +54,7 @@ contract UTXOVault is ReentrancyGuard, Ownable {
     mapping(bytes32 => bool) private nullifiers;        // Prevenir double-spending
     mapping(bytes32 => bool) private usedChallenges;    // Prevenir replay attacks
     mapping(bytes32 => uint256) private commitmentValues; // Para validación interna
+    mapping(bytes32 => bytes32) private commitmentToUTXO; // Mapeo de commitment a UTXO ID
     
     // BBS+ Issuer Management
     mapping(address => bool) public authorizedIssuers;
@@ -176,6 +177,9 @@ contract UTXOVault is ReentrancyGuard, Ownable {
             bbsCredential: bbsProof.proof
         });
         
+        // Mapear commitment a UTXO ID
+        commitmentToUTXO[commitment] = utxoId;
+        
         // Marcar nullifier como usado
         nullifiers[nullifierHash] = true;
         usedChallenges[bbsProof.challenge] = true;
@@ -258,6 +262,9 @@ contract UTXOVault is ReentrancyGuard, Ownable {
                 bbsCredential: splitProof.proof
             });
             
+            // Mapear commitment a UTXO ID
+            commitmentToUTXO[outputCommitments[i]] = outputUTXOId;
+            
             utxosByOwner[msg.sender].push(outputUTXOId);
             outputUTXOIds[i] = outputUTXOId;
             
@@ -328,6 +335,9 @@ contract UTXOVault is ReentrancyGuard, Ownable {
             nullifierHash: outputNullifier,
             bbsCredential: transferProof.proof
         });
+        
+        // Mapear commitment a UTXO ID
+        commitmentToUTXO[outputCommitment] = outputUTXOId;
         
         utxosByOwner[newOwner].push(outputUTXOId);
         
@@ -668,6 +678,53 @@ contract UTXOVault is ReentrancyGuard, Ownable {
         return utxosByOwner[user].length;
     }
     
+    /**
+     * @dev Get all UTXO IDs for a user
+     * @param user Address to query UTXOs for
+     * @return Array of UTXO IDs owned by the user
+     */
+    function getUTXOsByOwner(address user) external view returns (bytes32[] memory) {
+        return utxosByOwner[user];
+    }
+    
+    /**
+     * @dev Get UTXO information by ID
+     * @param utxoId The UTXO ID to query
+     * @return exists Whether the UTXO exists
+     * @return commitment The UTXO commitment
+     * @return tokenAddress The token address
+     * @return owner The UTXO owner
+     * @return timestamp Creation timestamp
+     * @return isSpent Whether the UTXO is spent
+     * @return parentUTXO Parent UTXO ID
+     * @return utxoType Type of UTXO
+     * @return nullifierHash Nullifier hash
+     */
+    function getUTXOInfo(bytes32 utxoId) external view returns (
+        bool exists,
+        bytes32 commitment,
+        address tokenAddress,
+        address owner,
+        uint256 timestamp,
+        bool isSpent,
+        bytes32 parentUTXO,
+        UTXOType utxoType,
+        bytes32 nullifierHash
+    ) {
+        PrivateUTXO storage utxo = utxos[utxoId];
+        return (
+            utxo.exists,
+            utxo.commitment,
+            utxo.tokenAddress,
+            utxo.owner,
+            utxo.timestamp,
+            utxo.isSpent,
+            utxo.parentUTXO,
+            utxo.utxoType,
+            utxo.nullifierHash
+        );
+    }
+    
     // ========================
     // FUNCIONES AUXILIARES INTERNAS
     // ========================
@@ -679,10 +736,16 @@ contract UTXOVault is ReentrancyGuard, Ownable {
         return keccak256(abi.encodePacked(commitment, nullifier));
     }
     
-    function _findUTXOByCommitment(bytes32 commitment) internal pure returns (bytes32) {
-        // Esta función debe ser optimizada para encontrar UTXO por commitment
-        // Por ahora, implementación básica
-        return commitment; // Placeholder
+    function _findUTXOByCommitment(bytes32 commitment) internal view returns (bytes32) {
+        // Buscar UTXO por commitment usando el mapping
+        bytes32 utxoId = commitmentToUTXO[commitment];
+        
+        // Verificar que el UTXO existe y el commitment coincide
+        require(utxoId != bytes32(0), "UTXO not found");
+        require(utxos[utxoId].exists, "UTXO does not exist");
+        require(utxos[utxoId].commitment == commitment, "Commitment mismatch");
+        
+        return utxoId;
     }
     
     function _verifyCommitmentsInProof(
@@ -862,6 +925,9 @@ contract UTXOVault is ReentrancyGuard, Ownable {
             nullifierHash: nullifierHash,
             bbsCredential: hex"00" // Empty credential for testing
         });
+        
+        // Mapear commitment a UTXO ID
+        commitmentToUTXO[commitment] = utxoId;
         
         // Marcar nullifier como usado
         nullifiers[nullifierHash] = true;

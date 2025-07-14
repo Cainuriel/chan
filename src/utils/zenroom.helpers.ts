@@ -43,11 +43,9 @@ export class ZenroomHelpers {
     }
     
     // Simple Zenroom script to generate random bytes
-    const zencode = `
-Given nothing
-When I create the random 'random_bytes' of '${bits / 8}' bytes
-Then print 'random_bytes' as 'hex'
-    `;
+    const zencode = `Given nothing
+When I create the random object of '${bits / 8}' bytes  
+Then print 'random object' as 'hex'`;
 
     try {
       console.log('🔧 Generating nonce with Zenroom...');
@@ -58,7 +56,7 @@ Then print 'random_bytes' as 'hex'
       }
       
       const output = JSON.parse(result.result);
-      const hexString = output.random_bytes;
+      const hexString = output['random object'] || output.random_bytes;
       
       if (!hexString || typeof hexString !== 'string') {
         throw new Error('Invalid random bytes from Zenroom');
