@@ -4,7 +4,7 @@
   import { PrivateUTXOManager, type PrivateUTXO } from '$lib/PrivateUTXOManager';
   import { PrivateUTXOStorage } from '$lib/PrivateUTXOStorage';
   import { WalletProviderType } from '../types/ethereum.types';
-  import type { UTXOManagerStats, ExtendedUTXOData } from '../types/utxo.types';
+  import type { UTXOManagerStats } from '../types/utxo.types';
   import type { EOAData } from '../types/ethereum.types';
   
   // Components
@@ -18,12 +18,12 @@
   let privateUTXOManager: PrivateUTXOManager;
   let isInitialized = false;
   let currentAccount: EOAData | null = null;
-  let utxos: ExtendedUTXOData[] = [];
   let privateUTXOs: PrivateUTXO[] = [];
   let stats: UTXOManagerStats | null = null;
   let activeTab = 'balance';
   let notifications: Array<{id: string, type: string, message: string}> = [];
-  let privacyMode = true; // Default to privacy mode
+  // Privacy mode - always true since we only support private UTXOs
+  const privacyMode = true;
 
   // Configuration
   const CONTRACT_ADDRESS = '0x4735A18Ef4B63520C0AE9bC990ee234AAb95dE9c'; // amoy
@@ -81,26 +81,17 @@
 
     privateUTXOManager.on('wallet:disconnected', () => {
       currentAccount = null;
-      utxos = [];
       privateUTXOs = [];
       stats = null;
       isInitialized = false;
       addNotification('info', 'Wallet disconnected');
     });
 
-    // UTXO events
-    privateUTXOManager.on('utxo:created', (utxo: ExtendedUTXOData) => {
-      addNotification('success', `UTXO created: ${utxo.value.toString()} tokens`);
-      refreshData();
-      // Switch to balance tab to show the new UTXO
-      setActiveTab('balance');
-    });
-
     // Private UTXO events
     privateUTXOManager.on('private:utxo:created', (utxo: PrivateUTXO) => {
       addNotification('success', `🎉 Private UTXO created successfully! Check your balance.`);
       refreshData();
-      // Switch to balance tab to show the new private UTXO
+      // Switch to balance tab to show the new UTXO
       setActiveTab('balance');
     });
 
@@ -171,15 +162,7 @@
       const syncSuccess = await privateUTXOManager.syncWithBlockchain();
       console.log('🔄 Sync result:', syncSuccess);
       
-      // Get regular UTXOs
-      utxos = privateUTXOManager.getUTXOsByOwner(currentAccount.address);
-      console.log('🔗 Regular UTXOs after refresh:', {
-        total: utxos.length,
-        unspent: utxos.filter(u => !u.isSpent).length,
-        spent: utxos.filter(u => u.isSpent).length
-      });
-      
-      // Get private UTXOs (now from localStorage)
+      // Get private UTXOs (from localStorage)
       privateUTXOs = privateUTXOManager.getPrivateUTXOsByOwner(currentAccount.address);
       console.log('🔒 Private UTXOs after refresh:', {
         total: privateUTXOs.length,
@@ -197,8 +180,8 @@
       stats = privateUTXOManager.getStats();
       
       console.log('📊 Data refreshed successfully:', {
-        totalUTXOs: utxos.length + privateUTXOs.length,
-        availableForOperations: utxos.filter(u => !u.isSpent && u.confirmed).length + privateUTXOs.filter(u => !u.isSpent).length,
+        totalPrivateUTXOs: privateUTXOs.length,
+        availableForOperations: privateUTXOs.filter(u => !u.isSpent).length,
         stats
       });
     } catch (error) {
@@ -309,21 +292,11 @@
     activeTab = tab;
   }
 
-  function togglePrivacyMode() {
-    privacyMode = !privacyMode;
-    addNotification('info', `Privacy mode ${privacyMode ? 'enabled' : 'disabled'}`);
-    refreshData();
-  }
+  // Removed toggle function since we only support private mode
 
-  // Get combined balance (regular + private UTXOs)
+  // Get private UTXO balance
   function getTotalBalance(tokenAddress?: string): bigint {
-    const regularBalance = utxos
-      .filter(utxo => !tokenAddress || utxo.tokenAddress === tokenAddress)
-      .reduce((sum, utxo) => sum + utxo.value, BigInt(0));
-    
-    const privateBalance = privateUTXOManager?.getPrivateBalance(tokenAddress) || BigInt(0);
-    
-    return regularBalance + privateBalance;
+    return privateUTXOManager?.getPrivateBalance(tokenAddress) || BigInt(0);
   }
 
   // Expose debug function to global scope for development (optional)
@@ -386,14 +359,11 @@
         <div class="flex items-center space-x-4">
           {#if isInitialized}
             <div class="flex items-center space-x-4">
-              <!-- Privacy Mode Toggle -->
-              <button
-                on:click={togglePrivacyMode}
-                class="flex items-center space-x-2 px-3 py-2 rounded-lg transition-all duration-200 {privacyMode ? 'bg-purple-600 text-white' : 'bg-white/10 text-gray-300 hover:bg-white/20'}"
-              >
-                <span>{privacyMode ? '🔐' : '🔓'}</span>
-                <span class="text-sm">{privacyMode ? 'Private' : 'Public'}</span>
-              </button>
+              <!-- Private Mode Indicator (Always On) -->
+              <div class="flex items-center space-x-2 px-3 py-2 rounded-lg bg-purple-600 text-white">
+                <span>�</span>
+                <span class="text-sm">Private Mode</span>
+              </div>
               
               <!-- Debug Tools -->
               {#if currentAccount}
@@ -482,12 +452,7 @@
       <div class="space-y-8">
         <!-- Stats Overview -->
         {#if stats}
-          <div class="grid grid-cols-1 md:grid-cols-5 gap-6">
-            <div class="bg-white/10 backdrop-blur-sm rounded-lg p-6 border border-white/20">
-              <div class="text-purple-400 text-sm font-medium mb-1">Regular UTXOs</div>
-              <div class="text-white text-2xl font-bold">{stats.unspentUTXOs}</div>
-            </div>
-            
+          <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
             <div class="bg-white/10 backdrop-blur-sm rounded-lg p-6 border border-white/20">
               <div class="text-pink-400 text-sm font-medium mb-1">Private UTXOs</div>
               <div class="text-white text-2xl font-bold">{privateUTXOs.length}</div>
@@ -533,38 +498,31 @@
         <!-- Tab Content -->
         <div class="space-y-6">
           {#if activeTab === 'balance' }
-            {#if utxos.length === 0 && privateUTXOs.length === 0}
+            {#if privateUTXOs.length === 0}
               <div class="text-center text-gray-400">
                 No UTXOs found. Start by depositing tokens.
               </div>
             {:else}
               <UTXOBalance 
-                {utxos} 
                 {privateUTXOs}
-                {stats} 
-                {privacyMode}
                 on:refresh={refreshData} 
               />
             {/if}
           {:else if activeTab === 'deposit'}
             <DepositForm 
               utxoManager={privateUTXOManager} 
-              {privacyMode}
+              privacyMode={true}
               on:deposited={refreshData} 
             />
           {:else if activeTab === 'operations'}
             <OperationsPanel 
               utxoManager={privateUTXOManager} 
-              {utxos} 
               {privateUTXOs}
-              {privacyMode}
               on:operation={refreshData} 
             />
           {:else if activeTab === 'history'}
             <TransactionHistory 
-              {utxos} 
               {privateUTXOs}
-              {privacyMode}
             />
           {/if}
         </div>

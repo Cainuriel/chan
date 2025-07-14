@@ -1,15 +1,13 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
   import type { PrivateUTXOManager, PrivateUTXO } from '../lib/PrivateUTXOManager';
-  import type { ExtendedUTXOData } from '../types/utxo.types';
   import type { ERC20TokenData } from '../types/ethereum.types';
   import { EthereumHelpers } from '../utils/ethereum.helpers';
 
-  // Props
+  // Props - Solo private UTXOs
   export let utxoManager: PrivateUTXOManager;
-  export let utxos: ExtendedUTXOData[] = [];
   export let privateUTXOs: PrivateUTXO[] = [];
-  export let privacyMode: boolean = true;
+  
   // Event dispatcher
   const dispatch = createEventDispatcher();
 
@@ -33,14 +31,14 @@
   // Token metadata cache
   let tokenMetadataCache: Record<string, ERC20TokenData> = {};
 
-  // Watch for UTXO changes and trigger loading sequence
-  $: if (utxos.length > 0 || privateUTXOs.length > 0) {
-    handleUTXOsChanged();
+  // Watch for private UTXO changes and trigger loading sequence
+  $: if (privateUTXOs.length > 0) {
+    handlePrivateUTXOsChanged();
   }
 
-  // Handle UTXOs change - start loading sequence
-  async function handleUTXOsChanged() {
-    console.log('🔄 UTXOs changed, starting loading sequence...');
+  // Handle private UTXOs change - start loading sequence
+  async function handlePrivateUTXOsChanged() {
+    console.log('🔄 Private UTXOs changed, starting loading sequence...');
     
     // Reset states
     utxosLoaded = false;
@@ -48,8 +46,7 @@
     
     // Phase 1: Mark UTXOs as loaded (they come from props)
     isLoadingUTXOs = true;
-    console.log('📦 Phase 1: UTXOs loading...', {
-      regular: utxos.length,
+    console.log('📦 Phase 1: Private UTXOs loading...', {
       private: privateUTXOs.length
     });
     
@@ -57,7 +54,7 @@
     await new Promise(resolve => setTimeout(resolve, 100));
     isLoadingUTXOs = false;
     utxosLoaded = true;
-    console.log('✅ Phase 1: UTXOs loaded');
+    console.log('✅ Phase 1: Private UTXOs loaded');
 
     // Phase 2: Load token metadata
     await loadTokenMetadata();
@@ -74,10 +71,8 @@
     console.log('🏷️ Phase 2: Token metadata loading...');
 
     try {
-      // Get unique token addresses from both regular and private UTXOs
-      const regularTokens = utxos.map(u => u.tokenAddress);
-      const privateTokens = privateUTXOs.map(u => u.tokenAddress);
-      const uniqueTokens = [...new Set([...regularTokens, ...privateTokens])];
+      // Get unique token addresses from private UTXOs
+      const uniqueTokens = [...new Set(privateUTXOs.map(u => u.tokenAddress))];
       
       console.log('🔍 Loading token metadata for:', uniqueTokens);
       
@@ -196,25 +191,19 @@
     canSubmit: false 
   };
 
-  // Computed values - only available when data is fully loaded
-  $: availableUTXOs = isFullyLoaded ? [
-    // Regular UTXOs
-    ...utxos.filter(utxo => !utxo.isSpent && utxo.confirmed),
-    // Private UTXOs converted to compatible format
-    ...privateUTXOs.filter(utxo => !utxo.isSpent).map(privateUTXO => ({
+  // Computed values - only available private UTXOs when data is fully loaded
+  $: availableUTXOs = isFullyLoaded ? 
+    privateUTXOs.filter(utxo => !utxo.isSpent).map(privateUTXO => ({
       id: privateUTXO.id,
       value: privateUTXO.value,
       tokenAddress: privateUTXO.tokenAddress,
       owner: privateUTXO.owner,
       isSpent: privateUTXO.isSpent,
-      confirmed: true,
       timestamp: privateUTXO.timestamp,
-      utxoType: 'private' as const,
       commitment: privateUTXO.commitment,
       nullifierHash: privateUTXO.nullifierHash,
       blindingFactor: privateUTXO.blindingFactor
-    }))
-  ] : [];
+    })) : [];
   
   $: selectedUTXOData = {
     split: availableUTXOs.find(u => u.id === splitSelectedUTXO),
@@ -224,23 +213,19 @@
 
   // Debug: Log UTXOs props when they change
   $: {
-    console.log('📥 OperationsPanel received UTXOs:', {
-      regularUTXOs: utxos.length,
+    console.log('📥 OperationsPanel received private UTXOs:', {
       privateUTXOs: privateUTXOs.length,
-      regularDetails: utxos.map(u => ({ id: u.id.slice(0, 8), spent: u.isSpent, confirmed: u.confirmed })),
       privateDetails: privateUTXOs.map(u => ({ id: u.id.slice(0, 8), spent: u.isSpent }))
     });
   }
 
-  // Debug: Log available UTXOs when they change
+  // Debug: Log available private UTXOs when they change
   $: if (availableUTXOs.length > 0) {
-    console.log('🔧 Available UTXOs for operations:', {
+    console.log('🔧 Available private UTXOs for operations:', {
       total: availableUTXOs.length,
-      regular: utxos.filter(utxo => !utxo.isSpent && utxo.confirmed).length,
       private: privateUTXOs.filter(utxo => !utxo.isSpent).length,
       utxos: availableUTXOs.map(u => ({
         id: u.id.slice(0, 8),
-        type: u.utxoType || 'regular',
         value: u.value.toString(),
         tokenAddress: u.tokenAddress
       }))
@@ -563,17 +548,11 @@
       );
       const outputOwners = splitOutputs.map(output => output.owner);
 
-      // Execute split operation based on privacy mode
-      const result = privacyMode 
-        ? await utxoManager.splitPrivateUTXO({
-            inputUTXOId: splitSelectedUTXO,
-            outputValues: splitOutputs.map(o => parseAmountToBigInt(o.amount, decimals)),
-            outputOwners: splitOutputs.map(o => o.owner)
-          })
-        : await utxoManager.splitUTXO({
+      // Execute private UTXO split operation
+      const result = await utxoManager.splitPrivateUTXO({
         inputUTXOId: splitSelectedUTXO,
-        outputValues,
-        outputOwners
+        outputValues: splitOutputs.map(o => parseAmountToBigInt(o.amount, decimals)),
+        outputOwners: splitOutputs.map(o => o.owner)
       });
 
       if (result.success) {
@@ -606,13 +585,8 @@
     isProcessing = true;
 
     try {
-      // Execute withdrawal based on privacy mode
-      const result = privacyMode 
-        ? await utxoManager.withdrawPrivateUTXO({
-            utxoId: withdrawSelectedUTXO,
-            recipient: withdrawRecipient
-          })
-        : await utxoManager.withdrawFromUTXO({
+      // Execute private UTXO withdrawal
+      const result = await utxoManager.withdrawPrivateUTXO({
         utxoId: withdrawSelectedUTXO,
         recipient: withdrawRecipient
       });
@@ -824,10 +798,7 @@
           You need confirmed UTXOs to perform operations. Try depositing some tokens first.
         </div>
         <div class="text-xs text-gray-500 mt-4 bg-gray-800/50 rounded p-2">
-          Debug: Regular UTXOs: {utxos.length}, Private UTXOs: {privateUTXOs.length}
-          {#if utxos.length > 0}
-            <br/>Regular UTXOs: {utxos.map(u => `${u.id.slice(0,6)}(spent:${u.isSpent}, confirmed:${u.confirmed})`).join(', ')}
-          {/if}
+          Debug: Private UTXOs: {privateUTXOs.length}
           {#if privateUTXOs.length > 0}
             <br/>Private UTXOs: {privateUTXOs.map(u => `${u.id.slice(0,6)}(spent:${u.isSpent})`).join(', ')}
           {/if}

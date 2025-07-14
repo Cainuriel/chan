@@ -1,39 +1,34 @@
 <!-- src/lib/components/TransactionHistory.svelte -->
 <script lang="ts">
-  import type { ExtendedUTXOData } from '../types/utxo.types';
   import type { PrivateUTXO } from '../lib/PrivateUTXOManager';
-  import { UTXOType } from '../types/utxo.types';
+  import type { ERC20TokenData } from '../types/ethereum.types';
+  import { EthereumHelpers } from '../utils/ethereum.helpers';
 
-  // Props
-  export let utxos: ExtendedUTXOData[] = [];
+  // Props - Solo private UTXOs
   export let privateUTXOs: PrivateUTXO[] = [];
-  export let privacyMode: boolean = true;
 
   // Local state
-  let filterType: 'all' | UTXOType = 'all';
-  let filterStatus: 'all' | 'confirmed' | 'pending' | 'spent' = 'all';
-  let sortBy: 'timestamp' | 'value' | 'type' = 'timestamp';
+  let filterStatus: 'all' | 'confirmed' | 'spent' = 'all';
+  let sortBy: 'timestamp' | 'value' = 'timestamp';
   let sortOrder: 'asc' | 'desc' = 'desc';
   let searchQuery = '';
 
-  // Computed values
-  $: filteredUTXOs = utxos
+  // Token metadata cache
+  let tokenMetadataCache: Record<string, ERC20TokenData> = {};
+  let isLoadingMetadata = false;
+
+  // Computed values - Solo private UTXOs
+  $: filteredUTXOs = privateUTXOs
     .filter(utxo => {
-      // Type filter
-      if (filterType !== 'all' && utxo.utxoType !== filterType) return false;
-      
       // Status filter
-      if (filterStatus === 'confirmed' && !utxo.confirmed) return false;
-      if (filterStatus === 'pending' && utxo.confirmed) return false;
+      if (filterStatus === 'confirmed' && utxo.isSpent) return false;
       if (filterStatus === 'spent' && !utxo.isSpent) return false;
       
       // Search filter
       if (searchQuery) {
         const query = searchQuery.toLowerCase();
-        return utxo.id.toLowerCase().includes(query) ||
-               utxo.creationTxHash?.toLowerCase().includes(query) ||
-               utxo.tokenMetadata?.symbol?.toLowerCase().includes(query) ||
-               utxo.tokenMetadata?.name?.toLowerCase().includes(query);
+        return utxo.nullifierHash.toLowerCase().includes(query) ||
+               utxo.commitment.toLowerCase().includes(query);
       }
       
       return true;
@@ -48,26 +43,64 @@
         case 'value':
           comparison = Number(a.value - b.value);
           break;
-        case 'type':
-          comparison = a.utxoType.localeCompare(b.utxoType);
-          break;
       }
       
       return sortOrder === 'asc' ? comparison : -comparison;
     });
 
-  // Statistics
-  $: stats = {
-    total: utxos.length,
-    confirmed: utxos.filter(u => u.confirmed).length,
-    pending: utxos.filter(u => !u.confirmed).length,
-    spent: utxos.filter(u => u.isSpent).length,
-    byType: {
-      [UTXOType.DEPOSIT]: utxos.filter(u => u.utxoType === UTXOType.DEPOSIT).length,
-      [UTXOType.SPLIT]: utxos.filter(u => u.utxoType === UTXOType.SPLIT).length,
-      [UTXOType.COMBINE]: utxos.filter(u => u.utxoType === UTXOType.COMBINE).length,
-      [UTXOType.TRANSFER]: utxos.filter(u => u.utxoType === UTXOType.TRANSFER).length
+  // Load token metadata when UTXOs change
+  $: if (privateUTXOs.length > 0) {
+    const uniqueTokens = [...new Set(privateUTXOs.map(u => u.tokenAddress))];
+    loadTokenMetadata(uniqueTokens);
+  }
+
+  // Token metadata loading
+  async function loadTokenMetadata(tokenAddresses: string[]) {
+    isLoadingMetadata = true;
+    
+    for (const tokenAddress of tokenAddresses) {
+      if (!tokenMetadataCache[tokenAddress]) {
+        try {
+          const tokenData = await EthereumHelpers.getERC20TokenInfo(tokenAddress);
+          tokenMetadataCache[tokenAddress] = tokenData;
+          tokenMetadataCache = { ...tokenMetadataCache };
+        } catch (error) {
+          console.error(`Failed to load token metadata for ${tokenAddress}:`, error);
+          // Fallback metadata
+          tokenMetadataCache[tokenAddress] = {
+            address: tokenAddress,
+            symbol: 'Unknown',
+            name: 'Unknown Token',
+            decimals: 18,
+            balance: BigInt(0),
+            allowance: BigInt(0),
+            verified: false
+          };
+          tokenMetadataCache = { ...tokenMetadataCache };
+        }
+      }
     }
+    
+    isLoadingMetadata = false;
+  }
+
+  function getTokenMetadata(tokenAddress: string): ERC20TokenData {
+    return tokenMetadataCache[tokenAddress] || {
+      address: tokenAddress,
+      symbol: 'Unknown',
+      name: 'Unknown Token',
+      decimals: 18,
+      balance: BigInt(0),
+      allowance: BigInt(0),
+      verified: false
+    };
+  }
+
+  // Statistics - Solo private UTXOs
+  $: stats = {
+    total: privateUTXOs.length,
+    available: privateUTXOs.filter(u => !u.isSpent).length,
+    spent: privateUTXOs.filter(u => u.isSpent).length
   };
 
   function formatValue(value: bigint, decimals: number = 18): string {
@@ -90,289 +123,143 @@
     const now = new Date();
     const diffMs = now.getTime() - date.getTime();
     
-    // Less than 1 minute
-    if (diffMs < 60000) {
-      return 'Just now';
-    }
+    if (diffMs < 60000) return 'Just now';
+    if (diffMs < 3600000) return `${Math.floor(diffMs / 60000)}m ago`;
+    if (diffMs < 86400000) return `${Math.floor(diffMs / 3600000)}h ago`;
+    if (diffMs < 604800000) return `${Math.floor(diffMs / 86400000)}d ago`;
     
-    // Less than 1 hour
-    if (diffMs < 3600000) {
-      const minutes = Math.floor(diffMs / 60000);
-      return `${minutes}m ago`;
-    }
-    
-    // Less than 24 hours
-    if (diffMs < 86400000) {
-      const hours = Math.floor(diffMs / 3600000);
-      return `${hours}h ago`;
-    }
-    
-    // Less than 7 days
-    if (diffMs < 604800000) {
-      const days = Math.floor(diffMs / 86400000);
-      return `${days}d ago`;
-    }
-    
-    // Older than 7 days
     return date.toLocaleDateString();
   }
 
-  function getUTXOTypeIcon(type: UTXOType): string {
-    switch (type) {
-      case UTXOType.DEPOSIT: return '📥';
-      case UTXOType.SPLIT: return '✂️';
-      case UTXOType.COMBINE: return '🔗';
-      case UTXOType.TRANSFER: return '📤';
-      default: return '💫';
-    }
+  function getStatusColor(utxo: PrivateUTXO): string {
+    return utxo.isSpent ? 'text-red-400 bg-red-400/20' : 'text-green-400 bg-green-400/20';
   }
 
-  function getUTXOTypeColor(type: UTXOType): string {
-    switch (type) {
-      case UTXOType.DEPOSIT: return 'text-green-400 bg-green-400/20';
-      case UTXOType.SPLIT: return 'text-blue-400 bg-blue-400/20';
-      case UTXOType.COMBINE: return 'text-purple-400 bg-purple-400/20';
-      case UTXOType.TRANSFER: return 'text-orange-400 bg-orange-400/20';
-      default: return 'text-gray-400 bg-gray-400/20';
-    }
-  }
-
-  function getStatusColor(utxo: ExtendedUTXOData): string {
-    if (utxo.isSpent) return 'text-red-400 bg-red-400/20';
-    if (!utxo.confirmed) return 'text-yellow-400 bg-yellow-400/20';
-    return 'text-green-400 bg-green-400/20';
-  }
-
-  function getStatusText(utxo: ExtendedUTXOData): string {
-    if (utxo.isSpent) return 'SPENT';
-    if (!utxo.confirmed) return 'PENDING';
-    return 'CONFIRMED';
+  function getStatusText(utxo: PrivateUTXO): string {
+    return utxo.isSpent ? 'SPENT' : 'AVAILABLE';
   }
 
   function copyToClipboard(text: string) {
     navigator.clipboard.writeText(text);
   }
-
-  function openInExplorer(txHash: string) {
-    // This would open the transaction in a blockchain explorer
-    // Implementation depends on the network
-    const explorerUrl = `https://etherscan.io/tx/${txHash}`;
-    window.open(explorerUrl, '_blank');
-  }
 </script>
 
-<div class="space-y-6">
-  <!-- Header with Stats -->
-  <div class="bg-white/10 backdrop-blur-sm rounded-lg p-6 border border-white/20">
-    <h2 class="text-xl font-bold text-white mb-4">Transaction History</h2>
+<div class="bg-gray-800 rounded-lg p-6">
+  <h3 class="text-xl font-bold text-white mb-4 flex items-center gap-2">
+    🔒 Private UTXO History
+    <span class="text-sm font-normal text-gray-400">
+      ({privateUTXOs.length} UTXOs)
+    </span>
+    {#if isLoadingMetadata}
+      <div class="animate-spin text-purple-500 text-sm ml-2">⚡</div>
+    {/if}
+  </h3>
+
+  <!-- Quick Stats -->
+  <div class="grid grid-cols-3 gap-4 mb-6">
+    <div class="text-center bg-gray-700 rounded-lg p-3">
+      <div class="text-2xl font-bold text-white">{stats.total}</div>
+      <div class="text-gray-400 text-sm">Total UTXOs</div>
+    </div>
+    <div class="text-center bg-gray-700 rounded-lg p-3">
+      <div class="text-2xl font-bold text-green-400">{stats.available}</div>
+      <div class="text-gray-400 text-sm">Available</div>
+    </div>
+    <div class="text-center bg-gray-700 rounded-lg p-3">
+      <div class="text-2xl font-bold text-red-400">{stats.spent}</div>
+      <div class="text-gray-400 text-sm">Spent</div>
+    </div>
+  </div>
+
+  <!-- Filters -->
+  <div class="flex flex-wrap items-center gap-4 mb-6">
+    <input
+      type="text"
+      bind:value={searchQuery}
+      placeholder="Search UTXOs..."
+      class="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white placeholder-gray-400 focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20"
+    />
     
-    <!-- Quick Stats -->
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-      <div class="text-center">
-        <div class="text-2xl font-bold text-white">{stats.total}</div>
-        <div class="text-gray-400 text-sm">Total UTXOs</div>
-      </div>
-      <div class="text-center">
-        <div class="text-2xl font-bold text-green-400">{stats.confirmed}</div>
-        <div class="text-gray-400 text-sm">Confirmed</div>
-      </div>
-      <div class="text-center">
-        <div class="text-2xl font-bold text-yellow-400">{stats.pending}</div>
-        <div class="text-gray-400 text-sm">Pending</div>
-      </div>
-      <div class="text-center">
-        <div class="text-2xl font-bold text-red-400">{stats.spent}</div>
-        <div class="text-gray-400 text-sm">Spent</div>
-      </div>
-    </div>
+    <select
+      bind:value={filterStatus}
+      class="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white"
+    >
+      <option value="all">All Status</option>
+      <option value="confirmed">Available</option>
+      <option value="spent">Spent</option>
+    </select>
+
+    <select
+      bind:value={sortBy}
+      class="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white"
+    >
+      <option value="timestamp">Sort by Date</option>
+      <option value="value">Sort by Value</option>
+    </select>
+
+    <button
+      on:click={() => sortOrder = sortOrder === 'asc' ? 'desc' : 'asc'}
+      class="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white hover:bg-gray-600"
+    >
+      {sortOrder === 'asc' ? '↑' : '↓'}
+    </button>
   </div>
 
-  <!-- Filters and Search -->
-  <div class="bg-white/10 backdrop-blur-sm rounded-lg p-6 border border-white/20">
-    <div class="flex flex-wrap items-center gap-4">
-      <!-- Search -->
-      <div class="flex-1 min-w-64">
-        <input
-          type="text"
-          bind:value={searchQuery}
-          placeholder="Search by UTXO ID, tx hash, or token..."
-          class="w-full bg-white/5 border border-white/20 rounded-lg px-4 py-2 text-white placeholder-gray-400 focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 transition-all duration-200"
-        />
-      </div>
-
-      <!-- Type Filter -->
-      <select
-        bind:value={filterType}
-        class="bg-white/5 border border-white/20 rounded-lg px-3 py-2 text-white"
-      >
-        <option value="all">All Types</option>
-        <option value={UTXOType.DEPOSIT}>Deposits</option>
-        <option value={UTXOType.SPLIT}>Splits</option>
-        <option value={UTXOType.COMBINE}>Combines</option>
-        <option value={UTXOType.TRANSFER}>Transfers</option>
-      </select>
-
-      <!-- Status Filter -->
-      <select
-        bind:value={filterStatus}
-        class="bg-white/5 border border-white/20 rounded-lg px-3 py-2 text-white"
-      >
-        <option value="all">All Status</option>
-        <option value="confirmed">Confirmed</option>
-        <option value="pending">Pending</option>
-        <option value="spent">Spent</option>
-      </select>
-
-      <!-- Sort -->
-      <select
-        bind:value={sortBy}
-        class="bg-white/5 border border-white/20 rounded-lg px-3 py-2 text-white"
-      >
-        <option value="timestamp">Sort by Date</option>
-        <option value="value">Sort by Value</option>
-        <option value="type">Sort by Type</option>
-      </select>
-
-      <!-- Sort Order -->
-      <button
-        on:click={() => sortOrder = sortOrder === 'asc' ? 'desc' : 'asc'}
-        class="bg-white/5 border border-white/20 rounded-lg px-3 py-2 text-white hover:bg-white/10 transition-all duration-200"
-      >
-        {sortOrder === 'asc' ? '↑' : '↓'}
-      </button>
+  <!-- UTXO List -->
+  {#if filteredUTXOs.length === 0}
+    <div class="text-center py-8">
+      <div class="text-gray-400 text-lg mb-2">�</div>
+      <p class="text-gray-400">No private UTXOs found</p>
+      <p class="text-gray-500 text-sm">Your private transactions will appear here</p>
     </div>
-  </div>
-
-  <!-- Transaction List -->
-  <div class="bg-white/10 backdrop-blur-sm rounded-lg border border-white/20">
-    {#if filteredUTXOs.length === 0}
-      <div class="text-center py-12">
-        <div class="text-gray-400 text-6xl mb-4">📜</div>
-        <div class="text-white text-xl font-semibold mb-2">No Transactions Found</div>
-        <div class="text-gray-400">
-          {#if utxos.length === 0}
-            Your transaction history will appear here after creating UTXOs
-          {:else}
-            Try adjusting your search criteria
-          {/if}
-        </div>
-      </div>
-    {:else}
-      <!-- Table Header -->
-      <div class="grid grid-cols-12 gap-4 px-6 py-4 border-b border-white/10 text-sm font-medium text-gray-400">
-        <div class="col-span-3">UTXO / Transaction</div>
-        <div class="col-span-2">Type</div>
-        <div class="col-span-2">Amount</div>
-        <div class="col-span-2">Status</div>
-        <div class="col-span-2">Date</div>
-        <div class="col-span-1">Actions</div>
-      </div>
-
-      <!-- Transaction Rows -->
-      <div class="divide-y divide-white/10">
-        {#each filteredUTXOs as utxo (utxo.id)}
-          <div class="grid grid-cols-12 gap-4 px-6 py-4 hover:bg-white/5 transition-all duration-200">
-            <!-- UTXO Info -->
-            <div class="col-span-3">
-              <div class="text-white font-medium font-mono text-sm">
-                {utxo.id.slice(0, 8)}...{utxo.id.slice(-8)}
-              </div>
-              {#if utxo.creationTxHash}
-                <div class="text-gray-400 text-xs font-mono">
-                  Tx: {utxo.creationTxHash.slice(0, 8)}...
+  {:else}
+    <div class="space-y-4">
+      {#each filteredUTXOs as utxo, index (utxo.nullifierHash)}
+        {@const tokenData = getTokenMetadata(utxo.tokenAddress)}
+        <div class="bg-gray-700 rounded-lg p-4 border border-gray-600 hover:border-gray-500 transition-colors">
+          <div class="flex justify-between items-start mb-3">
+            <div class="flex items-center gap-3">
+              <div class="text-2xl">🔒</div>
+              <div>
+                <div class="flex items-center gap-2">
+                  <span class="font-medium text-white">Private UTXO #{index + 1}</span>
+                  <span class="px-2 py-1 rounded text-xs font-medium {getStatusColor(utxo)}">
+                    {getStatusText(utxo)}
+                  </span>
                 </div>
-              {/if}
-              {#if utxo.parentUTXO}
-                <div class="text-gray-400 text-xs">
-                  From: {utxo.parentUTXO.slice(0, 8)}...
+                <div class="text-sm text-gray-400 flex items-center gap-2 mt-1">
+                  <span>🪙 {formatValue(utxo.value, tokenData.decimals)} {tokenData.symbol}</span>
+                  <span>•</span>
+                  <span>🕒 {formatTimestamp(utxo.timestamp)}</span>
                 </div>
-              {/if}
-            </div>
-
-            <!-- Type -->
-            <div class="col-span-2">
-              <span class="inline-flex items-center space-x-1 px-2 py-1 rounded-full text-xs font-medium {getUTXOTypeColor(utxo.utxoType)}">
-                <span>{getUTXOTypeIcon(utxo.utxoType)}</span>
-                <span>{utxo.utxoType}</span>
-              </span>
-            </div>
-
-            <!-- Amount -->
-            <div class="col-span-2">
-              <div class="text-white font-semibold">
-                {formatValue(utxo.value, utxo.tokenMetadata?.decimals)}
-              </div>
-              <div class="text-gray-400 text-xs">
-                {utxo.tokenMetadata?.symbol || 'Unknown'}
               </div>
             </div>
+            
+            <button 
+              on:click={() => copyToClipboard(utxo.nullifierHash)}
+              class="text-gray-400 hover:text-white transition-colors"
+              title="Copy Nullifier Hash"
+            >
+              📋
+            </button>
+          </div>
 
-            <!-- Status -->
-            <div class="col-span-2">
-              <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium {getStatusColor(utxo)}">
-                {getStatusText(utxo)}
-              </span>
-              {#if utxo.blockNumber}
-                <div class="text-gray-400 text-xs">
-                  Block {utxo.blockNumber}
-                </div>
-              {/if}
-            </div>
-
-            <!-- Date -->
-            <div class="col-span-2">
-              <div class="text-white text-sm">
-                {formatTimestamp(utxo.timestamp)}
-              </div>
-              <div class="text-gray-400 text-xs">
-                {new Date(Number(utxo.timestamp)).toLocaleTimeString()}
+          <div class="grid grid-cols-2 gap-4 text-sm">
+            <div>
+              <span class="text-gray-400">Commitment:</span>
+              <div class="text-white font-mono text-xs break-all">
+                {utxo.commitment.slice(0, 20)}...
               </div>
             </div>
-
-            <!-- Actions -->
-            <div class="col-span-1 flex space-x-2">
-              <button
-                on:click={() => copyToClipboard(utxo.id)}
-                class="text-gray-400 hover:text-white text-sm"
-                title="Copy UTXO ID"
-              >
-                📋
-              </button>
-              {#if utxo.creationTxHash}
-                <button
-                  on:click={() => openInExplorer(utxo.creationTxHash || '')}
-                  class="text-gray-400 hover:text-white text-sm"
-                  title="View on explorer"
-                >
-                  🔗
-                </button>
-              {/if}
+            <div>
+              <span class="text-gray-400">Nullifier:</span>
+              <div class="text-white font-mono text-xs break-all">
+                {utxo.nullifierHash.slice(0, 20)}...
+              </div>
             </div>
           </div>
-        {/each}
-      </div>
-    {/if}
-  </div>
-
-  <!-- Type Distribution Chart -->
-  {#if stats.total > 0}
-    <div class="bg-white/10 backdrop-blur-sm rounded-lg p-6 border border-white/20">
-      <h3 class="text-lg font-semibold text-white mb-4">UTXO Type Distribution</h3>
-      
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {#each Object.entries(stats.byType) as [type, count]}
-          {#if count > 0}
-            <div class="text-center">
-              <div class="text-3xl mb-2">{getUTXOTypeIcon(type as UTXOType)}</div>
-              <div class="text-xl font-bold text-white">{count}</div>
-              <div class="text-gray-400 text-sm capitalize">{type}</div>
-              <div class="text-gray-500 text-xs">
-                {Math.round((count / stats.total) * 100)}%
-              </div>
-            </div>
-          {/if}
-        {/each}
-      </div>
+        </div>
+      {/each}
     </div>
   {/if}
 </div>
