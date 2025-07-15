@@ -26,7 +26,7 @@
   const privacyMode = true;
 
   // Configuration
-  const CONTRACT_ADDRESS = '0xCE875AfF30639864c1c17275E2185B4E635001D9'; // Updated contract with commitmentToUTXO mapping
+  const CONTRACT_ADDRESS = '0x512E7e19CBdb4435B2a960d4E5544192B18112EB'; // Updated contract with commitmentToUTXO mapping
   const PREFERRED_PROVIDER = WalletProviderType.METAMASK;
 
   onMount(async () => {
