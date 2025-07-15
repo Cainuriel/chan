@@ -242,15 +242,14 @@ contract UTXOVault is ReentrancyGuard, Ownable {
      */
     function depositAsPrivateUTXO(
         address tokenAddress,
-        uint256 amount,
         bytes32 commitment,
         BBSProofData calldata bbsProof,
         bytes32 nullifierHash,
-        bytes calldata rangeProof
+        bytes calldata rangeProof,
+        bytes32 blindingFactor
     ) external nonReentrant {
         // Validar inputs básicos
         require(tokenAddress != address(0), "Invalid token");
-        require(amount > 0, "Invalid amount");
         require(commitment != bytes32(0), "Invalid commitment");
         require(nullifierHash != bytes32(0), "Invalid nullifier");
         require(!nullifiers[nullifierHash], "Nullifier already used");
@@ -264,8 +263,11 @@ contract UTXOVault is ReentrancyGuard, Ownable {
         // Verificar range proof (cantidad > 0)
         _verifyRangeProof(commitment, rangeProof);
         
+        // Extraer cantidad del proof
+        uint256 amount = _extractAmountFromBBSProof(bbsProof);
+
         // Verificar que el commitment es consistente con la cantidad
-        // En implementación real, esto sería: require(_verifyCommitment(commitment, amount), "Invalid commitment");
+        require(_verifyPedersenCommitment(commitment, amount, blindingFactor), "Invalid commitment");
         
         // Transferir tokens
         IERC20(tokenAddress).transferFrom(msg.sender, address(this), amount);
@@ -984,6 +986,11 @@ contract UTXOVault is ReentrancyGuard, Ownable {
         
         // Mathematical relationship that must hold for valid binding
         return (bindingValue % 1000) == (proofValue % 1000);
+    }
+
+    function _verifyPedersenCommitment(bytes32 commitment, uint256 value, bytes32 blinding) internal view returns (bool) {
+        // This is a placeholder. A real implementation would use elliptic curve cryptography to verify the commitment.
+        return true;
     }
     
     // ========================

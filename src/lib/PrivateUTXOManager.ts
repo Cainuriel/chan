@@ -339,16 +339,6 @@ export class PrivateUTXOManager extends UTXOLibrary {
    * Crear UTXO privado con BBS+ credential usando depositAsPrivateUTXO
    */
   async createPrivateUTXO(params: CreateUTXOParams): Promise<UTXOOperationResult> {
-    // Usar la función completa con el nuevo contrato deployado
-    console.log('� Using full BBS+ function with new deployed contract...');
-    return this.createPrivateUTXO_Full(params);
-  }
-
-  /**
-   * Crear UTXO privado con BBS+ credential usando depositAsPrivateUTXO
-   * VERSIÓN COMPLETA (actualmente deshabilitada hasta redeploy del contrato)
-   */
-  async createPrivateUTXO_Full(params: CreateUTXOParams): Promise<UTXOOperationResult> {
     this.ensureInitialized();
     console.log('🔐 Creating private UTXO with BBS+ credential...');
 
@@ -434,7 +424,7 @@ export class PrivateUTXOManager extends UTXOLibrary {
       // 6. Crear prueba BBS+ para depósito (revelar solo los atributos necesarios)
       const depositProof = await this.createBBSProof({
         credential: credential,
-        reveal: ['owner', 'tokenAddress', 'utxoType'],
+        reveal: ['owner', 'tokenAddress', 'utxoType', 'value'],
         predicates: {
           'value': { gte: '0' } // Probar que value >= 0
         }
@@ -458,7 +448,7 @@ export class PrivateUTXOManager extends UTXOLibrary {
           // For other strings, convert to bytes32
           return ethers.zeroPadValue(ethers.toUtf8Bytes(stringValue), 32);
         }),
-        disclosureIndexes: [BigInt(1), BigInt(2), BigInt(5)], // indices de owner, tokenAddress, utxoType
+        disclosureIndexes: [BigInt(1), BigInt(2), BigInt(5), BigInt(0)], // indices de owner, tokenAddress, utxoType, value
         challenge: ethers.keccak256(ethers.toUtf8Bytes(`deposit:${amount}:${tokenAddress}:${owner}`)),
         timestamp: BigInt(Date.now())
       };
@@ -513,11 +503,11 @@ export class PrivateUTXOManager extends UTXOLibrary {
         const contractInterface = this.contract!.interface;
         const encodedData = contractInterface.encodeFunctionData('depositAsPrivateUTXO', [
           tokenAddress,
-          amount,  // Add the amount parameter
           commitment.pedersen_commitment,
           bbsProofData,
           nullifierHash,
-          rangeProof
+          rangeProof,
+          blindingFactor
         ]);
         console.log('✅ Function encoding successful, data length:', encodedData.length);
         console.log('🔍 Encoded data preview:', encodedData.substring(0, 100) + '...');
@@ -652,11 +642,11 @@ export class PrivateUTXOManager extends UTXOLibrary {
       
       const tx = await this.contract!.depositAsPrivateUTXO(
         tokenAddress,
-        amount,  // Add the amount parameter
         commitment.pedersen_commitment,
         bbsProofData,
         nullifierHash,
         rangeProof,
+        blindingFactor,
         {
           gasLimit: gasLimit,
           gasPrice: gasPrice

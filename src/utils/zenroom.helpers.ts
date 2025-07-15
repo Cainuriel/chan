@@ -106,17 +106,17 @@ Then print 'random object' as 'hex'`;
       if (zenroomAvailable) {
         console.log('🔒 Using Zenroom for Pedersen commitment');
         
-        // Simplified Zenroom script for commitment (using basic crypto operations)
         const zencode = `
-Given I have a 'string' named 'input_data'
-When I create the hash of 'input_data'
-Then print 'hash' as 'hex'
+Scenario 'commitment': Create a Pedersen commitment
+Given I have an 'integer' named 'value'
+and I have a 'hex' named 'blinding'
+When I create the pedersen commitment from 'value' with blinding 'blinding' on curve 'secp256k1'
+Then print the 'commitment' as 'hex'
         `;
 
-        // Concatenate value and blinding factor for hashing
-        const inputData = `${value}:${blinding}`;
         const data = JSON.stringify({
-          input_data: inputData
+          value: parseInt(value),
+          blinding: blinding
         });
 
         try {
@@ -131,7 +131,7 @@ Then print 'hash' as 'hex'
                 console.log('✅ Zenroom commitment created successfully:', output);
       
       // Ensure the hash has 0x prefix for ethers.js compatibility
-      const prefixedHash = output.hash.startsWith('0x') ? output.hash : `0x${output.hash}`;
+      const prefixedHash = output.commitment.startsWith('0x') ? output.commitment : `0x${output.commitment}`;
       // Ensure blinding factor also has 0x prefix
       const prefixedBlinding = blinding.startsWith('0x') ? blinding : `0x${blinding}`;
       
@@ -1084,17 +1084,17 @@ Then print 'hash' as 'hex'
     try {
       const zenroomAvailable = await isZenroomAvailable();
       if (zenroomAvailable) {
-        // Simplified Zenroom script using basic hash operations
         const zencode = `
-Given I have a 'string' named 'input_data'
-When I create the hash of 'input_data'
-Then print 'hash' as 'hex'
+Scenario 'bbs-plus': Sign a credential
+Given I have a 'list' of 'string' named 'attributes'
+and I have a 'hex' named 'key'
+When I create the bbs+ signature of 'attributes' with key 'key'
+Then print the 'signature' as 'hex'
         `;
 
-        // Concatenate attributes and private key for hashing
-        const inputData = `${JSON.stringify(attributes)}:${issuerPrivateKey}`;
         const data = JSON.stringify({
-          input_data: inputData
+          attributes: attributes,
+          key: issuerPrivateKey
         });
 
         console.log('🔧 Signing BBS+ credential with Zenroom...');
@@ -1105,7 +1105,7 @@ Then print 'hash' as 'hex'
         }
         
         const output = JSON.parse(result.result);
-        const signature = output.hash;
+        const signature = output.signature;
         
         if (!signature) {
           throw new Error('No signature in Zenroom result');
@@ -1155,20 +1155,19 @@ Then print 'hash' as 'hex'
     try {
       const zenroomAvailable = await isZenroomAvailable();
       if (zenroomAvailable) {
-        // Simplified Zenroom script using basic hash operations
         const zencode = `
-Given I have a 'string' named 'input_data'
-When I create the hash of 'input_data'
-Then print 'hash' as 'hex'
+Scenario 'bbs-plus': Create a proof
+Given I have a 'hex' named 'signature'
+and I have a 'list' of 'string' named 'attributes'
+and I have a 'list' of 'integer' named 'disclosed'
+When I create the bbs+ proof of 'attributes' with signature 'signature' disclosing 'disclosed'
+Then print the 'proof' as 'hex'
         `;
 
-        // Concatenate all data for hashing (signature, attributes, reveal indices, challenge)
-        const revealedAttributes = params.revealIndices.map(i => params.attributes[i]);
-        const challenge = params.challenge || ethers.keccak256(ethers.toUtf8Bytes('default_challenge'));
-        const inputData = `${params.signature}:${JSON.stringify(revealedAttributes)}:${challenge}`;
-        
         const data = JSON.stringify({
-          input_data: inputData
+          signature: params.signature,
+          attributes: params.attributes,
+          disclosed: params.revealIndices
         });
 
         console.log('🔧 Creating BBS+ proof with Zenroom...');
@@ -1179,10 +1178,10 @@ Then print 'hash' as 'hex'
         }
         
         const output = JSON.parse(result.result);
-        const proof = output.hash;
+        const proof = output.proof;
         
         if (!proof) {
-          throw new Error('No hash in Zenroom result');
+          throw new Error('No proof in Zenroom result');
         }
         
         // Ensure the proof has 0x prefix for ethers.js compatibility
@@ -1233,26 +1232,24 @@ Then print 'hash' as 'hex'
       const zenroomAvailable = await isZenroomAvailable();
       if (zenroomAvailable) {
         const zencode = `
-          Scenario 'bbs': Verify BBS+ proof
-          Given I have a 'hex' named 'proof'
-          Given I have a 'string dictionary' named 'revealed_attributes'
-          Given I have a 'hex' named 'public_key'
-          Given I have a 'hex' named 'challenge'
-          When I verify the BBS+ proof 'proof' with 'revealed_attributes' and 'public_key' and 'challenge'
-          Then print the 'verification result' as 'string'
+Scenario 'bbs-plus': Verify a proof
+Given I have a 'hex' named 'proof'
+and I have a 'list' of 'string' named 'attributes'
+and I have a 'hex' named 'key'
+When I verify the bbs+ proof 'proof' of 'attributes' with key 'key'
+Then print the 'result' as 'string'
         `;
 
-        const keys = JSON.stringify({
+        const data = JSON.stringify({
           proof: params.proof,
-          revealed_attributes: params.revealedAttributes,
-          public_key: params.issuerPublicKey,
-          challenge: params.challenge || ethers.keccak256(ethers.toUtf8Bytes('default_challenge'))
+          attributes: Object.values(params.revealedAttributes),
+          key: params.issuerPublicKey
         });
 
-        const result = await zencode_exec(zencode, { keys });
+        const result = await zencode_exec(zencode, { data });
         const output = JSON.parse(result.result);
         
-        const isValid = output['verification result'] === 'true' || output.verification_result === 'true';
+        const isValid = output.result === 'true';
         console.log(`✅ BBS+ proof verification result: ${isValid}`);
         return isValid;
       }
