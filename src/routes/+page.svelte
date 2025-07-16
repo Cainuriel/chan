@@ -1,80 +1,74 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { privateUTXOManager } from '$lib/PrivateUTXOManager'; // ✅ Sin 'type' para la instancia
-  import type { PrivateUTXO } from '$lib/PrivateUTXOManager'; // ✅ Solo el tipo
+  import { privateUTXOManager } from '$lib/PrivateUTXOManager';
+  import type { PrivateUTXO } from '$lib/PrivateUTXOManager'; 
   import { PrivateUTXOStorage } from '$lib/PrivateUTXOStorage';
   import { WalletProviderType } from '../types/ethereum.types';
-  import type { UTXOManagerStats, UTXOManagerConfig } from '../types/utxo.types'; // ✅ Desde utxo.types
+  import type { UTXOManagerStats, UTXOManagerConfig } from '../types/utxo.types';
   import type { EOAData } from '../types/ethereum.types';
-
-  // ========================
-  // STATE MANAGEMENT
-  // ========================
   
+  // Components
+  import WalletConnection from '../components/WalletConnection.svelte';
+  import UTXOBalance from '../components/UTXOBalance.svelte';
+  import DepositForm from '../components/DepositForm.svelte';
+  import OperationsPanel from '../components/OperationsPanel.svelte';
+  import TransactionHistory from '../components/TransactionHistory.svelte';
+
+  // State
   let isInitialized = false;
   let currentAccount: EOAData | null = null;
   let privateUTXOs: PrivateUTXO[] = [];
   let stats: UTXOManagerStats | null = null;
+  let activeTab = 'balance';
   let notifications: Array<{id: string, type: string, message: string}> = [];
-  let config: UTXOManagerConfig = {
-    autoConsolidate: false,
-    consolidationThreshold: 5,
-    maxUTXOAge: 7 * 24 * 60 * 60,
-    privacyMode: true,
-    defaultGasLimit: BigInt(500000),
-    cacheTimeout: 30000,
-    enableBackup: true
-  };
-
-  // Operation states
-  let isConnecting = false;
-  let isCreatingUTXO = false;
-  let isTransferring = false;
-  let isSplitting = false;
-  let isWithdrawing = false;
-
-  // Form data
-  let createForm = {
-    amount: '',
-    tokenAddress: ''
-  };
-  let transferForm = {
-    utxoId: '',
-    newOwner: ''
-  };
-  let splitForm = {
-    utxoId: '',
-    outputValues: ['', '']
-  };
-
-  // ========================
-  // NOTIFICATION SYSTEM
-  // ========================
   
-  function addNotification(type: 'success' | 'error' | 'info' | 'warning', message: string) {
-    const id = Math.random().toString(36).substr(2, 9);
-    notifications = [...notifications, { id, type, message }];
-    
-    // Auto-remove after 5 seconds
-    setTimeout(() => {
-      notifications = notifications.filter(n => n.id !== id);
-    }, 5000);
-  }
+  // Privacy mode - always true since we only support private UTXOs
+  const privacyMode = true;
 
-  function removeNotification(id: string) {
-    notifications = notifications.filter(n => n.id !== id);
-  }
+  // Configuration
+  const CONTRACT_ADDRESS = '0x3c2A6aA03743A2D8220ade79e242A042fB9E576b';
+  const PREFERRED_PROVIDER = WalletProviderType.METAMASK;
 
-  // ========================
-  // EVENT LISTENERS
-  // ========================
-  
+  onMount(async () => {
+    try {
+      // Clear old contract data since we deployed a new one
+      if (typeof window !== 'undefined') {
+        const oldData = localStorage.getItem('private_utxos');
+        if (oldData) {
+          console.log('🗑️ Clearing old contract data...');
+          localStorage.removeItem('private_utxos');
+          localStorage.removeItem('utxo_cache');
+          // Clear any other old keys that might exist
+          Object.keys(localStorage).forEach(key => {
+            if (key.startsWith('utxo_') || key.startsWith('private_utxo_') || key.startsWith('bbs_')) {
+              localStorage.removeItem(key);
+            }
+          });
+          addNotification('info', 'Cleared old contract data for new deployment');
+        }
+      }
+
+      // Setup event listeners
+      setupEventListeners();
+
+      console.log('🔐 Private UTXO Manager initialized with REAL cryptography only');
+      
+      // Auto-initialize library and reconnect if possible
+      await initializeLibrary();
+      
+    } catch (error) {
+      console.error('❌ Failed to initialize Private UTXO Manager:', error);
+      addNotification('error', 'Failed to initialize Private UTXO Manager');
+    }
+  });
+
   function setupEventListeners() {
     // UTXO events
     privateUTXOManager.on('private:utxo:created', (utxo: PrivateUTXO) => {
       console.log('🔐 Private UTXO created:', utxo);
-      addNotification('success', `Private UTXO created: ${utxo.value.toString()}`);
+      addNotification('success', `🎉 Private UTXO created successfully! Check your balance.`);
       refreshData();
+      setActiveTab('balance');
     });
 
     privateUTXOManager.on('private:utxo:transferred', (data: any) => {
@@ -105,50 +99,30 @@
       console.error('❌ Blockchain sync failed:', error);
       addNotification('error', 'Failed to sync with blockchain');
     });
-  }
-
-  // ========================
-  // WALLET CONNECTION
-  // ========================
-  
-  async function connectWallet() {
-    if (isConnecting) return;
     
-    isConnecting = true;
-    try {
-      console.log('🔌 Connecting wallet...');
+    // Wallet connection events
+    privateUTXOManager.on('wallet:connected', (account: EOAData) => {
+      console.log('🔌 Wallet connected:', account);
+      currentAccount = account;
+      isInitialized = true;
+      addNotification('success', `Wallet connected: ${account.address.slice(0, 6)}...${account.address.slice(-4)}`);
+      refreshData();
       
-      await privateUTXOManager.connectWallet(WalletProviderType.METAMASK);
-      const account = privateUTXOManager.currentAccount;
-      
-      if (account) {
-        currentAccount = account;
-        isInitialized = true;
-        addNotification('success', 'Wallet connected successfully');
-        await refreshData();
-      } else {
-        throw new Error('No account found after connection');
+      // If no private UTXOs loaded, try loading all user UTXOs
+      if (privateUTXOs.length === 0) {
+        console.log('🔄 No UTXOs from sync, trying to load stored UTXOs...');
+        loadAllUserUTXOs();
       }
-    } catch (error) {
-      console.error('❌ Wallet connection failed:', error);
-      addNotification('error', 'Failed to connect wallet');
-    } finally {
-      isConnecting = false;
-    }
-  }
-
-  async function disconnectWallet() {
-    try {
-      await privateUTXOManager.disconnect();
+    });
+    
+    privateUTXOManager.on('wallet:disconnected', () => {
+      console.log('🔌 Wallet disconnected');
       currentAccount = null;
       isInitialized = false;
       privateUTXOs = [];
       stats = null;
       addNotification('info', 'Wallet disconnected');
-    } catch (error) {
-      console.error('❌ Disconnect failed:', error);
-      addNotification('error', 'Failed to disconnect wallet');
-    }
+    });
   }
 
   // ========================
@@ -168,6 +142,19 @@
           await refreshData();
         }
         addNotification('success', 'Library initialized successfully');
+        
+        // Try to auto-reconnect if MetaMask is already connected
+        if (typeof window !== 'undefined' && window.ethereum) {
+          try {
+            const accounts = await window.ethereum.request({ method: 'eth_accounts' });
+            if (accounts && accounts.length > 0) {
+              console.log('🔄 Auto-reconnecting to existing wallet session...');
+              await privateUTXOManager.connectWallet(PREFERRED_PROVIDER);
+            }
+          } catch (autoConnectError: any) {
+            console.log('ℹ️ Auto-reconnect not available:', autoConnectError.message || autoConnectError);
+          }
+        }
       } else {
         throw new Error('Library initialization failed');
       }
@@ -214,8 +201,7 @@
       console.log('📊 Data refreshed successfully:', {
         totalPrivateUTXOs: privateUTXOs.length,
         availableForOperations: privateUTXOs.filter(u => !u.isSpent).length,
-        stats,
-        config
+        stats
       });
     } catch (error) {
       console.error('Failed to refresh data:', error);
@@ -224,452 +210,556 @@
   }
 
   // ========================
-  // UTXO OPERATIONS
+  // DEBUG FUNCTIONS
   // ========================
-  
-  async function createPrivateUTXO() {
-    if (!createForm.amount || !createForm.tokenAddress || isCreatingUTXO) return;
-    
-    isCreatingUTXO = true;
-    try {
-      const amount = BigInt(createForm.amount);
-      
-      const result = await privateUTXOManager.createPrivateUTXO({
-        amount,
-        tokenAddress: createForm.tokenAddress,
-        owner: currentAccount!.address
-      });
 
-      if (result.success) {
-        addNotification('success', 'Private UTXO created successfully');
-        createForm.amount = '';
-        createForm.tokenAddress = '';
-        await refreshData();
-      } else {
-        throw new Error(result.error || 'Failed to create private UTXO');
-      }
-    } catch (error) {
-      console.error('❌ Create UTXO failed:', error);
-      addNotification('error', error instanceof Error ? error.message : 'Failed to create private UTXO');
-    } finally {
-      isCreatingUTXO = false;
-    }
-  }
-
-  async function transferPrivateUTXO() {
-    if (!transferForm.utxoId || !transferForm.newOwner || isTransferring) return;
-    
-    isTransferring = true;
-    try {
-      const result = await privateUTXOManager.transferPrivateUTXO({
-        utxoId: transferForm.utxoId,
-        newOwner: transferForm.newOwner
-      });
-
-      if (result.success) {
-        addNotification('success', 'Private UTXO transferred successfully');
-        transferForm.utxoId = '';
-        transferForm.newOwner = '';
-        await refreshData();
-      } else {
-        throw new Error(result.error || 'Failed to transfer private UTXO');
-      }
-    } catch (error) {
-      console.error('❌ Transfer failed:', error);
-      addNotification('error', error instanceof Error ? error.message : 'Failed to transfer private UTXO');
-    } finally {
-      isTransferring = false;
-    }
-  }
-
-  async function splitPrivateUTXO() {
-    if (!splitForm.utxoId || isSplitting) return;
-    
-    const outputValues = splitForm.outputValues
-      .filter(v => v.trim() !== '')
-      .map(v => BigInt(v.trim()));
-    
-    if (outputValues.length < 2) {
-      addNotification('error', 'Need at least 2 output values for split');
+  // Clear all local data and start fresh
+  function clearAllLocalData() {
+    if (!currentAccount?.address) {
+      addNotification('error', 'Please connect wallet first');
       return;
     }
-    
-    isSplitting = true;
+
+    const confirmed = confirm('⚠️ This will DELETE ALL local UTXO data for the current account. This action cannot be undone. Are you sure?');
+    if (!confirmed) return;
+
     try {
-      const result = await privateUTXOManager.splitPrivateUTXO({
-        inputUTXOId: splitForm.utxoId,
-        outputValues,
-        outputOwners: new Array(outputValues.length).fill(currentAccount!.address)
-      });
-
-      if (result.success) {
-        addNotification('success', `Private UTXO split into ${outputValues.length} outputs`);
-        splitForm.utxoId = '';
-        splitForm.outputValues = ['', ''];
-        await refreshData();
-      } else {
-        throw new Error(result.error || 'Failed to split private UTXO');
-      }
-    } catch (error) {
-      console.error('❌ Split failed:', error);
-      addNotification('error', error instanceof Error ? error.message : 'Failed to split private UTXO');
-    } finally {
-      isSplitting = false;
-    }
-  }
-
-  async function withdrawPrivateUTXO(utxoId: string) {
-    if (isWithdrawing) return;
-    
-    isWithdrawing = true;
-    try {
-      const result = await privateUTXOManager.withdrawPrivateUTXO({
-        utxoId,
-        recipient: currentAccount!.address
-      });
-
-      if (result.success) {
-        addNotification('success', 'Private UTXO withdrawn successfully');
-        await refreshData();
-      } else {
-        throw new Error(result.error || 'Failed to withdraw private UTXO');
-      }
-    } catch (error) {
-      console.error('❌ Withdraw failed:', error);
-      addNotification('error', error instanceof Error ? error.message : 'Failed to withdraw private UTXO');
-    } finally {
-      isWithdrawing = false;
-    }
-  }
-
-  // ========================
-  // LIFECYCLE
-  // ========================
-  
-  onMount(async () => {
-    try {
-      // Clear old contract data since we deployed a new one
-      if (typeof window !== 'undefined') {
-        const oldData = localStorage.getItem('private_utxos');
-        if (oldData) {
-          console.log('🗑️ Clearing old contract data...');
-          localStorage.removeItem('private_utxos');
-          localStorage.removeItem('utxo_cache');
-          // Clear any other old keys that might exist
-          Object.keys(localStorage).forEach(key => {
-            if (key.startsWith('utxo_') || key.startsWith('private_utxo_') || key.startsWith('bbs_')) {
-              localStorage.removeItem(key);
-            }
-          });
-          addNotification('info', 'Cleared old contract data for new deployment');
+      console.log('🗑️ === CLEARING ALL LOCAL DATA ===');
+      
+      // Clear all localStorage keys related to UTXOs
+      const keysToRemove = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && (
+          key.startsWith('private_utxo_') ||
+          key.startsWith('utxo_') ||
+          key.startsWith('bbs_keys_') ||
+          key === 'private_utxos' ||
+          key === 'utxo_cache'
+        )) {
+          keysToRemove.push(key);
         }
       }
-
-      // Setup event listeners
-      setupEventListeners();
-
-      console.log('🔐 Private UTXO Manager initialized with REAL cryptography only');
       
-      // Auto-initialize library and reconnect if possible
-      await initializeLibrary();
+      keysToRemove.forEach(key => {
+        localStorage.removeItem(key);
+        console.log(`🗑️ Removed: ${key}`);
+      });
       
-    } catch (error) {
-      console.error('❌ Failed to initialize Private UTXO Manager:', error);
-      addNotification('error', 'Failed to initialize Private UTXO Manager');
+      // Reset local state
+      privateUTXOs = [];
+      stats = null;
+      
+      addNotification('success', `Cleared ${keysToRemove.length} local storage keys. Please refresh data.`);
+      console.log('✅ All local data cleared successfully');
+      
+    } catch (error: any) {
+      console.error('❌ Failed to clear local data:', error);
+      addNotification('error', `Failed to clear data: ${error.message || error}`);
     }
-  });
+  }
+
+  // Debug function to verify UTXO authenticity
+  async function verifyUTXOAuthenticity() {
+    if (!currentAccount?.address || !isInitialized || !privateUTXOManager) {
+      addNotification('error', 'Please connect wallet and initialize first');
+      return;
+    }
+
+    try {
+      console.log('🔍 === UTXO AUTHENTICITY VERIFICATION ===');
+      
+      // Get local UTXOs
+      const localUTXOs = privateUTXOManager.getPrivateUTXOsByOwner(currentAccount.address);
+      console.log('📋 Local UTXOs:', localUTXOs.length);
+      
+      // For each local UTXO, verify blockchain confirmation
+      for (const utxo of localUTXOs) {
+        console.log(`\n🔍 Verifying UTXO: ${utxo.id}`);
+        console.log('UTXO details:', {
+          id: utxo.id,
+          value: utxo.value?.toString(),
+          isSpent: utxo.isSpent,
+          creationTxHash: utxo.creationTxHash,
+          blockNumber: utxo.blockNumber,
+          confirmed: utxo.confirmed,
+          localCreatedAt: utxo.localCreatedAt ? new Date(utxo.localCreatedAt).toISOString() : 'N/A'
+        });
+        
+        // Check if this UTXO has blockchain confirmation
+        if (!utxo.creationTxHash || !utxo.blockNumber) {
+          console.warn('⚠️ UTXO has no blockchain confirmation - may be fake/local-only');
+          continue;
+        }
+        
+        console.log('✅ UTXO appears to have blockchain confirmation');
+      }
+      
+      addNotification('success', `Verified ${localUTXOs.length} UTXOs. Check console for details.`);
+      
+    } catch (error: any) {
+      console.error('❌ UTXO verification failed:', error);
+      addNotification('error', `Verification failed: ${error.message || error}`);
+    }
+  }
+
+  // Debug function for multi-account storage
+  function debugMultiAccountStorage() {
+    if (!currentAccount?.address) {
+      addNotification('error', 'Please connect wallet first');
+      return;
+    }
+
+    try {
+      console.log('🔍 === MULTI-ACCOUNT STORAGE DEBUG ===');
+      
+      // Current account detailed info
+      console.log(`\n👤 Current Account: ${currentAccount.address}`);
+      PrivateUTXOStorage.debugStorage(currentAccount.address);
+      
+      // All accounts in system
+      const allAccounts = PrivateUTXOStorage.getAllStoredAccounts();
+      console.log(`\n👥 All accounts with data (${allAccounts.length}):`);
+      allAccounts.forEach((account, i) => {
+        console.log(`${i + 1}. ${account}`);
+        const stats = PrivateUTXOStorage.getEnhancedUserStats(account);
+        console.log(`   - Owned: ${stats.ownedCount} UTXOs, Received: ${stats.receivedCount} UTXOs`);
+        console.log(`   - Total Balance: ${stats.totalBalance.toString()}`);
+      });
+      
+      // Enhanced stats for current user
+      const enhancedStats = PrivateUTXOStorage.getEnhancedUserStats(currentAccount.address);
+      console.log(`\n📊 Enhanced Stats for ${currentAccount.address}:`);
+      console.log(`- Owned UTXOs: ${enhancedStats.breakdown.owned.count} (${enhancedStats.breakdown.owned.balance.toString()})`);
+      console.log(`- Received UTXOs: ${enhancedStats.breakdown.received.count} (${enhancedStats.breakdown.received.balance.toString()})`);
+      console.log(`- Total: ${enhancedStats.totalCount} UTXOs (${enhancedStats.totalBalance.toString()})`);
+      
+      addNotification('success', `Debug complete! Found ${allAccounts.length} accounts with data. Check console for details.`);
+      
+    } catch (error: any) {
+      console.error('❌ Multi-account debug failed:', error);
+      addNotification('error', `Debug failed: ${error.message || error}`);
+    }
+  }
+
+  // Load UTXOs with enhanced multi-account support
+  function loadAllUserUTXOs() {
+    if (!currentAccount?.address) {
+      addNotification('error', 'Please connect wallet first');
+      return;
+    }
+
+    try {
+      console.log('🔄 Loading all UTXOs (owned + received)...');
+      
+      // Get all UTXOs for current user
+      const { owned, received, all } = PrivateUTXOStorage.getAllUserUTXOs(currentAccount.address);
+      
+      console.log(`🔄 Found UTXOs:`);
+      console.log(`  - Owned: ${owned.length}`);
+      console.log(`  - Received: ${received.length}`);
+      console.log(`  - Total: ${all.length}`);
+      
+      // Update the UI with all UTXOs
+      privateUTXOs = all;
+      
+      // Show result
+      if (all.length > 0) {
+        addNotification('success', `Loaded ${all.length} UTXOs (${owned.length} owned + ${received.length} received)`);
+        console.log('🔄 UTXO breakdown:', all.map((u: any) => ({ 
+          id: u.id, 
+          value: u.value, 
+          owner: u.owner,
+          type: typeof u.value,
+          isOwned: u.owner.toLowerCase() === currentAccount?.address.toLowerCase()
+        })));
+      } else {
+        addNotification('info', 'No UTXOs found. Create some deposits first.');
+      }
+      
+    } catch (error: any) {
+      console.error('❌ Failed to load all UTXOs:', error);
+      addNotification('error', `Failed to load UTXOs: ${error.message || error}`);
+    }
+  }
+
+  // Variable para generar IDs únicos
+  let notificationCounter = 0;
+
+  function addNotification(type: string, message: string) {
+    // Crear ID único combinando timestamp con contador incremental
+    const uniqueId = `${Date.now()}_${notificationCounter++}`;
+    
+    const notification = {
+      id: uniqueId,
+      type,
+      message
+    };
+    notifications = [notification, ...notifications];
+    
+    // Auto remove after 5 seconds
+    setTimeout(() => {
+      notifications = notifications.filter(n => n.id !== notification.id);
+    }, 5000);
+  }
+
+  function removeNotification(id: string) {
+    notifications = notifications.filter(n => n.id !== id);
+  }
+
+  function setActiveTab(tab: string) {
+    activeTab = tab;
+  }
+
+  // Handle events from components
+  function handleDepositCreated(event: CustomEvent) {
+    console.log('Deposit created:', event.detail);
+    refreshData();
+    setActiveTab('balance');
+  }
+  
+  function handleOperationCompleted(event: CustomEvent) {
+    console.log('Operation completed:', event.detail);
+    refreshData();
+  }
+  
+  // Expose debug function to global scope for development (optional)
+  if (typeof window !== 'undefined') {
+    (window as any).debugUTXOStorage = () => {
+      if (currentAccount?.address) {
+        debugMultiAccountStorage();
+      } else {
+        console.warn('No account connected. Connect wallet first.');
+      }
+    };
+  }
 </script>
 
-<!-- ======================== -->
-<!-- NOTIFICATIONS -->
-<!-- ======================== -->
-{#if notifications.length > 0}
-  <div class="fixed top-4 right-4 z-50 space-y-2">
-    {#each notifications as notification (notification.id)}
-      <div 
-        class="alert alert-{notification.type} shadow-lg max-w-sm"
-        class:alert-success={notification.type === 'success'}
-        class:alert-error={notification.type === 'error'}
-        class:alert-info={notification.type === 'info'}
-        class:alert-warning={notification.type === 'warning'}
-      >
-        <div class="flex justify-between items-center">
-          <span class="text-sm">{notification.message}</span>
-          <button 
-            on:click={() => removeNotification(notification.id)}
-            class="btn btn-ghost btn-xs"
-          >✕</button>
+<svelte:head>
+  <title>UTXO Manager - Privacy-First Token Management</title>
+  <meta name="description" content="Manage ERC20 tokens with privacy using UTXOs and Zenroom cryptography" />
+</svelte:head>
+
+<div class="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900">
+  <!-- Notifications -->
+  {#if notifications.length > 0}
+    <div class="fixed top-4 right-4 z-50 space-y-2">
+      {#each notifications as notification (notification.id)}
+        <div 
+          class="p-4 rounded-lg shadow-lg max-w-sm animate-slide-in"
+          class:bg-green-600={notification.type === 'success'}
+          class:bg-red-600={notification.type === 'error'}
+          class:bg-blue-600={notification.type === 'info'}
+          class:bg-yellow-600={notification.type === 'warning'}
+        >
+          <div class="flex items-center justify-between text-white">
+            <span class="text-sm">{notification.message}</span>
+            <button 
+              on:click={() => removeNotification(notification.id)}
+              class="ml-2 text-white hover:text-gray-200"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      {/each}
+    </div>
+  {/if}
+
+  <!-- Header -->
+  <header class="bg-black/20 backdrop-blur-sm border-b border-white/10">
+    <div class="container mx-auto px-4 py-6">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center space-x-4">
+          <div class="w-10 h-10 bg-gradient-to-r from-purple-500 to-blue-500 rounded-lg flex items-center justify-center">
+            <span class="text-white font-bold text-xl">U</span>
+          </div>
+          <div>
+            <h1 class="text-2xl font-bold text-white">UTXO Manager</h1>
+            <p class="text-gray-300 text-sm">Privacy-First Token Management</p>
+          </div>
+        </div>
+        
+        <div class="flex items-center space-x-4">
+          {#if isInitialized}
+            <div class="flex items-center space-x-4">
+              <!-- Private Mode Indicator (Always On) -->
+              <div class="flex items-center space-x-2 px-3 py-2 rounded-lg bg-purple-600 text-white">
+                <span>🔐</span>
+                <span class="text-sm">Private Mode</span>
+              </div>
+              
+              <!-- Debug Tools -->
+              {#if currentAccount}
+                <button
+                  on:click={clearAllLocalData}
+                  class="flex items-center space-x-2 px-3 py-2 rounded-lg bg-red-600/20 text-red-300 hover:bg-red-600/30 transition-all duration-200"
+                  title="⚠️ Clear all local UTXO data"
+                >
+                  <span>🗑️</span>
+                  <span class="text-sm">Clear Data</span>
+                </button>
+                
+                <button
+                  on:click={verifyUTXOAuthenticity}
+                  class="flex items-center space-x-2 px-3 py-2 rounded-lg bg-orange-600/20 text-orange-300 hover:bg-orange-600/30 transition-all duration-200"
+                  title="Verify UTXO authenticity on blockchain"
+                >
+                  <span>🔍</span>
+                  <span class="text-sm">Verify UTXOs</span>
+                </button>
+                
+                <button
+                  on:click={loadAllUserUTXOs}
+                  class="flex items-center space-x-2 px-3 py-2 rounded-lg bg-blue-600/20 text-blue-300 hover:bg-blue-600/30 transition-all duration-200"
+                  title="Load all UTXOs (owned + received)"
+                >
+                  <span>📁</span>
+                  <span class="text-sm">Load All UTXOs</span>
+                </button>
+                
+                <button
+                  on:click={debugMultiAccountStorage}
+                  class="flex items-center space-x-2 px-3 py-2 rounded-lg bg-purple-600/20 text-purple-300 hover:bg-purple-600/30 transition-all duration-200"
+                  title="Debug multi-account storage system"
+                >
+                  <span>🐛</span>
+                  <span class="text-sm">Debug Storage</span>
+                </button>
+              {/if}
+              
+              <!-- Connection Status -->
+              <div class="flex items-center space-x-2 text-green-400">
+                <div class="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+                <span class="text-sm">Connected</span>
+              </div>
+            </div>
+          {/if}
+          
+          <!-- Wallet Connection Component -->
+          <WalletConnection
+            utxoManager={privateUTXOManager}
+            {currentAccount}
+            {isInitialized}
+          />
         </div>
       </div>
-    {/each}
-  </div>
-{/if}
-
-<!-- ======================== -->
-<!-- MAIN CONTENT -->
-<!-- ======================== -->
-<div class="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
-  <div class="container mx-auto px-4 py-8">
-    <div class="text-center mb-8">
-      <h1 class="text-4xl font-bold text-white mb-2">Private UTXO Manager</h1>
-      <p class="text-slate-300">Real BN254 Cryptography • Zero-Knowledge Proofs • Full Privacy</p>
     </div>
+  </header>
 
-    <!-- Connection Status -->
-    {#if !currentAccount}
-      <div class="card bg-base-200 shadow-xl mb-8">
-        <div class="card-body text-center">
-          <h2 class="card-title justify-center text-2xl mb-4">Connect Your Wallet</h2>
-          <p class="text-base-content/70 mb-6">Connect your wallet to start using private UTXOs with real BN254 cryptography</p>
+  <!-- Main Content -->
+  <main class="container mx-auto px-4 py-8">
+    {#if !isInitialized}
+      <!-- Welcome Screen -->
+      <div class="text-center py-20">
+        <div class="max-w-2xl mx-auto">
+          <h2 class="text-4xl font-bold text-white mb-6">
+            Welcome to UTXO Manager
+          </h2>
+          <p class="text-xl text-gray-300 mb-8">
+            Transform your ERC20 tokens into privacy-preserving UTXOs using Zenroom cryptography
+          </p>
+          
+          <div class="grid md:grid-cols-3 gap-6 mb-8">
+            <div class="bg-white/10 backdrop-blur-sm rounded-lg p-6 border border-white/20">
+              <div class="text-purple-400 text-2xl mb-3">🔒</div>
+              <h3 class="text-white font-semibold mb-2">Privacy First</h3>
+              <p class="text-gray-300 text-sm">Your transactions are private using Zenroom zero-knowledge proofs</p>
+            </div>
+            
+            <div class="bg-white/10 backdrop-blur-sm rounded-lg p-6 border border-white/20">
+              <div class="text-blue-400 text-2xl mb-3">⚡</div>
+              <h3 class="text-white font-semibold mb-2">UTXO Model</h3>
+              <p class="text-gray-300 text-sm">Efficient transaction model with better privacy and scalability</p>
+            </div>
+            
+            <div class="bg-white/10 backdrop-blur-sm rounded-lg p-6 border border-white/20">
+              <div class="text-green-400 text-2xl mb-3">🔗</div>
+              <h3 class="text-white font-semibold mb-2">ERC20 Compatible</h3>
+              <p class="text-gray-300 text-sm">Use any ERC20 token with seamless conversion to UTXOs</p>
+            </div>
+          </div>
+
           <button 
-            class="btn btn-primary btn-lg"
-            class:loading={isConnecting}
-            on:click={connectWallet}
-            disabled={isConnecting}
+            on:click={initializeLibrary}
+            class="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white px-8 py-3 rounded-lg font-semibold transition-all duration-200 shadow-lg hover:shadow-xl"
           >
-            {isConnecting ? 'Connecting...' : 'Connect Wallet'}
+            Get Started
           </button>
         </div>
       </div>
     {:else}
-      <!-- Connected Wallet Info -->
-      <div class="card bg-base-200 shadow-xl mb-8">
-        <div class="card-body">
-          <div class="flex justify-between items-center">
-            <div>
-              <h2 class="card-title">Connected Account</h2>
-              <p class="text-sm text-base-content/70">{currentAccount.address}</p>
+      <!-- Dashboard -->
+      <div class="space-y-8">
+        <!-- Stats Overview -->
+        {#if stats}
+          <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
+            <div class="bg-white/10 backdrop-blur-sm rounded-lg p-6 border border-white/20">
+              <div class="text-pink-400 text-sm font-medium mb-1">Private UTXOs</div>
+              <div class="text-white text-2xl font-bold">{privateUTXOs.length}</div>
             </div>
-            <button class="btn btn-outline btn-sm" on:click={disconnectWallet}>
-              Disconnect
-            </button>
+            
+            <div class="bg-white/10 backdrop-blur-sm rounded-lg p-6 border border-white/20">
+              <div class="text-blue-400 text-sm font-medium mb-1">Unique Tokens</div>
+              <div class="text-white text-2xl font-bold">{stats.uniqueTokens}</div>
+            </div>
+            
+            <div class="bg-white/10 backdrop-blur-sm rounded-lg p-6 border border-white/20">
+              <div class="text-green-400 text-sm font-medium mb-1">BN254 UTXOs</div>
+              <div class="text-white text-2xl font-bold">{stats.bn254UTXOs || 0}</div>
+            </div>
+            
+            <div class="bg-white/10 backdrop-blur-sm rounded-lg p-6 border border-white/20">
+              <div class="text-yellow-400 text-sm font-medium mb-1">BN254 Operations</div>
+              <div class="text-white text-2xl font-bold">{stats.bn254Operations || 0}</div>
+            </div>
           </div>
-        </div>
-      </div>
+        {/if}
 
-      <!-- Debug info para configuración -->
-      {#if config.privacyMode}
-        <div class="bg-purple-600/20 border border-purple-500/30 rounded-lg p-4 mb-4">
-          <div class="flex items-center space-x-2 text-purple-300">
-            <span>🔐</span>
-            <span class="text-sm">Privacy Mode: ON - Using real BN254 cryptography</span>
-          </div>
-        </div>
-      {/if}
-
-      <!-- Stats Display -->
-      {#if stats}
-        <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
-          <div class="stat bg-base-200 rounded-lg">
-            <div class="stat-title">Private UTXOs</div>
-            <div class="stat-value text-primary">{privateUTXOs.length}</div>
-          </div>
-          
-          <div class="stat bg-base-200 rounded-lg">
-            <div class="stat-title">Unspent</div>
-            <div class="stat-value text-secondary">{stats.unspentUTXOs}</div>
-          </div>
-          
-          <div class="stat bg-base-200 rounded-lg">
-            <div class="stat-title">Unique Tokens</div>
-            <div class="stat-value text-accent">{stats.uniqueTokens}</div>
-          </div>
-          
-          <div class="stat bg-base-200 rounded-lg">
-            <div class="stat-title">Total Balance</div>
-            <div class="stat-value text-info">{stats.totalBalance.toString()}</div>
-          </div>
-          
-          <div class="stat bg-base-200 rounded-lg">
-            <div class="stat-title">BN254 UTXOs</div>
-            <div class="stat-value text-success">{stats.bn254UTXOs || 0}</div>
-          </div>
-          
-          <div class="stat bg-base-200 rounded-lg">
-            <div class="stat-title">BN254 Ops</div>
-            <div class="stat-value text-warning">{stats.bn254Operations || 0}</div>
-          </div>
-        </div>
-      {/if}
-
-      <!-- Operations Tabs -->
-      <div class="tabs tabs-bordered mb-6">
-        <input type="radio" name="tabs" role="tab" class="tab" aria-label="Create" checked />
-        <div role="tabpanel" class="tab-content bg-base-100 border-base-300 rounded-box p-6">
-          <h3 class="text-lg font-semibold mb-4">Create Private UTXO</h3>
-          <div class="form-control w-full mb-4">
-            <label class="label" for="create-amount">
-              <span class="label-text">Amount</span>
-            </label>
-            <input 
-              id="create-amount"
-              type="number" 
-              placeholder="Enter amount" 
-              class="input input-bordered w-full" 
-              bind:value={createForm.amount}
-            />
-          </div>
-          <div class="form-control w-full mb-4">
-            <label class="label" for="create-token">
-              <span class="label-text">Token Address</span>
-            </label>
-            <input 
-              id="create-token"
-              type="text" 
-              placeholder="0x..." 
-              class="input input-bordered w-full" 
-              bind:value={createForm.tokenAddress}
-            />
-          </div>
-          <button 
-            class="btn btn-primary"
-            class:loading={isCreatingUTXO}
-            on:click={createPrivateUTXO}
-            disabled={isCreatingUTXO || !createForm.amount || !createForm.tokenAddress}
-          >
-            {isCreatingUTXO ? 'Creating...' : 'Create Private UTXO'}
-          </button>
-        </div>
-
-        <input type="radio" name="tabs" role="tab" class="tab" aria-label="Transfer" />
-        <div role="tabpanel" class="tab-content bg-base-100 border-base-300 rounded-box p-6">
-          <h3 class="text-lg font-semibold mb-4">Transfer Private UTXO</h3>
-          <div class="form-control w-full mb-4">
-            <label class="label" for="transfer-utxo">
-              <span class="label-text">UTXO ID</span>
-            </label>
-            <select 
-              id="transfer-utxo"
-              class="select select-bordered w-full" 
-              bind:value={transferForm.utxoId}
-            >
-              <option value="">Select UTXO</option>
-              {#each privateUTXOs.filter(u => !u.isSpent) as utxo}
-                <option value={utxo.id}>{utxo.id.slice(0, 16)}... ({utxo.value.toString()})</option>
-              {/each}
-            </select>
-          </div>
-          <div class="form-control w-full mb-4">
-            <label class="label" for="transfer-owner">
-              <span class="label-text">New Owner Address</span>
-            </label>
-            <input 
-              id="transfer-owner"
-              type="text" 
-              placeholder="0x..." 
-              class="input input-bordered w-full" 
-              bind:value={transferForm.newOwner}
-            />
-          </div>
-          <button 
-            class="btn btn-secondary"
-            class:loading={isTransferring}
-            on:click={transferPrivateUTXO}
-            disabled={isTransferring || !transferForm.utxoId || !transferForm.newOwner}
-          >
-            {isTransferring ? 'Transferring...' : 'Transfer Private UTXO'}
-          </button>
-        </div>
-
-        <input type="radio" name="tabs" role="tab" class="tab" aria-label="Split" />
-        <div role="tabpanel" class="tab-content bg-base-100 border-base-300 rounded-box p-6">
-          <h3 class="text-lg font-semibold mb-4">Split Private UTXO</h3>
-          <div class="form-control w-full mb-4">
-            <label class="label" for="split-utxo">
-              <span class="label-text">UTXO to Split</span>
-            </label>
-            <select 
-              id="split-utxo"
-              class="select select-bordered w-full" 
-              bind:value={splitForm.utxoId}
-            >
-              <option value="">Select UTXO</option>
-              {#each privateUTXOs.filter(u => !u.isSpent) as utxo}
-                <option value={utxo.id}>{utxo.id.slice(0, 16)}... ({utxo.value.toString()})</option>
-              {/each}
-            </select>
-          </div>
-          <div class="form-control w-full mb-4">
-            <label class="label">
-              <span class="label-text">Output Values</span>
-            </label>
-            <div class="space-y-2">
-              {#each splitForm.outputValues as outputValue, i}
-                <input 
-                  type="number" 
-                  placeholder="Output {i + 1} amount" 
-                  class="input input-bordered w-full" 
-                  bind:value={splitForm.outputValues[i]}
-                />
-              {/each}
-              <button 
-                class="btn btn-ghost btn-sm"
-                on:click={() => splitForm.outputValues = [...splitForm.outputValues, '']}
+        <!-- Tab Navigation -->
+        <div class="bg-white/10 backdrop-blur-sm rounded-lg border border-white/20">
+          <div class="flex space-x-1 p-1">
+            {#each [
+              { id: 'balance', label: 'Balance', icon: '💰' },
+              { id: 'deposit', label: 'Deposit', icon: '📥' },
+              { id: 'operations', label: 'Operations', icon: '⚡' },
+              { id: 'history', label: 'History', icon: '📜' }
+            ] as tab}
+              <button
+                on:click={() => setActiveTab(tab.id)}
+                class="flex-1 flex items-center justify-center space-x-2 py-3 px-4 rounded-lg font-medium transition-all duration-200 {activeTab === tab.id ? 'bg-white/20 text-white' : 'text-gray-300 hover:bg-white/10'}"
               >
-                Add Output
+                <span>{tab.icon}</span>
+                <span>{tab.label}</span>
               </button>
-            </div>
+            {/each}
           </div>
-          <button 
-            class="btn btn-accent"
-            class:loading={isSplitting}
-            on:click={splitPrivateUTXO}
-            disabled={isSplitting || !splitForm.utxoId}
-          >
-            {isSplitting ? 'Splitting...' : 'Split Private UTXO'}
-          </button>
+        </div>
+
+        <!-- Tab Content -->
+        <div class="space-y-6">
+          {#if activeTab === 'balance'}
+            {#if privateUTXOs.length === 0}
+              <div class="bg-white/10 backdrop-blur-sm rounded-lg p-8 border border-white/20 text-center">
+                <div class="text-gray-400 mb-4">
+                  <span class="text-4xl">📦</span>
+                </div>
+                <h3 class="text-white text-lg font-semibold mb-2">No UTXOs Found</h3>
+                <p class="text-gray-400 mb-4">Start by depositing tokens to create your first private UTXO.</p>
+                <button 
+                  on:click={() => setActiveTab('deposit')}
+                  class="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white px-6 py-2 rounded-lg font-semibold transition-all duration-200"
+                >
+                  Create Deposit
+                </button>
+              </div>
+            {:else}
+              <UTXOBalance 
+                {privateUTXOs}
+                on:refresh={refreshData} 
+              />
+            {/if}
+          {:else if activeTab === 'deposit'}
+            <!-- Deposit Form Component -->
+            <DepositForm 
+              utxoManager={privateUTXOManager}
+              privacyMode={true}
+              on:deposit={handleDepositCreated}
+            />
+          {:else if activeTab === 'operations'}
+            <OperationsPanel 
+              utxoManager={privateUTXOManager} 
+              {privateUTXOs}
+              on:operation={handleOperationCompleted} 
+            />
+          {:else if activeTab === 'history'}
+            <TransactionHistory 
+              {privateUTXOs}
+            />
+          {/if}
         </div>
       </div>
-
-      <!-- Private UTXOs List -->
-      {#if privateUTXOs.length > 0}
-        <div class="card bg-base-200 shadow-xl">
-          <div class="card-body">
-            <h2 class="card-title">Your Private UTXOs</h2>
-            <div class="overflow-x-auto">
-              <table class="table table-zebra">
-                <thead>
-                  <tr>
-                    <th>ID</th>
-                    <th>Value</th>
-                    <th>Token</th>
-                    <th>Status</th>
-                    <th>Created</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {#each privateUTXOs as utxo}
-                    <tr>
-                      <td class="font-mono text-xs">{utxo.id.slice(0, 16)}...</td>
-                      <td>{utxo.value.toString()}</td>
-                      <td class="font-mono text-xs">{utxo.tokenAddress.slice(0, 10)}...</td>
-                      <td>
-                        <div class="badge" class:badge-success={!utxo.isSpent} class:badge-error={utxo.isSpent}>
-                          {utxo.isSpent ? 'Spent' : 'Unspent'}
-                        </div>
-                      </td>
-                      <td>{new Date(utxo.localCreatedAt).toLocaleString()}</td>
-                      <td>
-                        {#if !utxo.isSpent}
-                          <button 
-                            class="btn btn-error btn-sm"
-                            class:loading={isWithdrawing}
-                            on:click={() => withdrawPrivateUTXO(utxo.id)}
-                            disabled={isWithdrawing}
-                          >
-                            Withdraw
-                          </button>
-                        {/if}
-                      </td>
-                    </tr>
-                  {/each}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      {/if}
     {/if}
-  </div>
+  </main>
 </div>
+
+<style>
+  @keyframes slide-in {
+    from {
+      transform: translateX(100%);
+      opacity: 0;
+    }
+    to {
+      transform: translateX(0);
+      opacity: 1;
+    }
+  }
+  
+  @keyframes pulse {
+    0%, 100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.5;
+    }
+  }
+  
+  .animate-slide-in {
+    animation: slide-in 0.3s ease-out;
+  }
+  
+  .animate-pulse {
+    animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+  
+  /* Custom scrollbar */
+  :global(::-webkit-scrollbar) {
+    width: 8px;
+  }
+  
+  :global(::-webkit-scrollbar-track) {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+  }
+  
+  :global(::-webkit-scrollbar-thumb) {
+    background: rgba(255, 255, 255, 0.3);
+    border-radius: 4px;
+  }
+  
+  :global(::-webkit-scrollbar-thumb:hover) {
+    background: rgba(255, 255, 255, 0.4);
+  }
+  
+  /* Focus styles for accessibility */
+  :global(button:focus, input:focus, select:focus) {
+    outline: 2px solid #8b5cf6;
+    outline-offset: 2px;
+  }
+  
+  /* Mobile responsive improvements */
+  @media (max-width: 768px) {
+    .container {
+      padding-left: 1rem;
+      padding-right: 1rem;
+    }
+    
+    .grid {
+      gap: 1rem;
+    }
+    
+    .text-4xl {
+      font-size: 2rem;
+    }
+    
+    .text-2xl {
+      font-size: 1.5rem;
+    }
+  }
+  
+  /* Dark mode optimizations */
+  :global(body) {
+    background: #0f0f23;
+    color: white;
+  }
+</style>

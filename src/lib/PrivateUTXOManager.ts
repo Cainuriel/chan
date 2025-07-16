@@ -17,9 +17,9 @@ import {
   type UTXOManagerStats,
   type UTXOManagerConfig,
   UTXOOperationError,
-  UTXONotFoundError,           // ✅ AÑADIR
-  InsufficientFundsError,      // ✅ AÑADIR
-  UTXOAlreadySpentError,       // ✅ AÑADIR
+  UTXONotFoundError,          
+  InsufficientFundsError,      
+  UTXOAlreadySpentError,       
   UTXOType
 } from '../types/utxo.types';
 
@@ -300,9 +300,10 @@ export class PrivateUTXOManager extends UTXOLibrary {
       // 6. Generar range proof (Bulletproof structure)
       console.log('🔍 Generating BN254 range proof...');
       const rangeProof = await ZenroomHelpers.generateRangeProof(
-        amount.toString(),
-        blindingFactor,
-        64 // 64-bit range
+        BigInt(amount),
+        ZenroomHelpers.toBigInt('0x' + blindingFactor),
+        0n,                  // min value (0)
+        2n ** 64n - 1n       // max value (64-bit range)
       );
       console.log('✅ BN254 range proof generated:', rangeProof.slice(0, 20) + '...');
 
@@ -516,8 +517,8 @@ export class PrivateUTXOManager extends UTXOLibrary {
       console.log('🔍 Verifying existing BN254 commitment...');
       const isValidCommitment = await ZenroomHelpers.verifyPedersenCommitment(
         utxo.commitment,
-        utxo.value.toString(),
-        utxo.blindingFactor
+        BigInt(utxo.value),
+        ZenroomHelpers.toBigInt('0x' + utxo.blindingFactor)
       );
       
       if (!isValidCommitment) {
@@ -715,8 +716,8 @@ export class PrivateUTXOManager extends UTXOLibrary {
       console.log('🔍 Verifying input BN254 commitment...');
       const isValidInputCommitment = await ZenroomHelpers.verifyPedersenCommitment(
         inputUTXO.commitment,
-        inputUTXO.value.toString(),
-        inputUTXO.blindingFactor
+        BigInt(inputUTXO.value),
+        ZenroomHelpers.toBigInt('0x' + inputUTXO.blindingFactor)
       );
       
       if (!isValidInputCommitment) {
@@ -759,11 +760,10 @@ export class PrivateUTXOManager extends UTXOLibrary {
       // 6. Generar split proof para demostrar conservación de valor
       console.log('🔍 Generating BN254 split proof...');
       const splitProof = await ZenroomHelpers.generateSplitProof(
-        inputUTXO.commitment,
-        inputUTXO.value.toString(),
-        inputUTXO.blindingFactor,
-        outputValues.map(v => v.toString()),
-        outputBlindingFactors
+        BigInt(inputUTXO.value),
+        outputValues.map(v => BigInt(v)),
+        ZenroomHelpers.toBigInt('0x' + inputUTXO.blindingFactor),
+        outputBlindingFactors.map(bf => ZenroomHelpers.toBigInt('0x' + bf))
       );
       console.log('✅ BN254 split proof generated');
 
@@ -946,8 +946,8 @@ export class PrivateUTXOManager extends UTXOLibrary {
       console.log('🔍 Verifying BN254 commitment before withdrawal...');
       const isValidCommitment = await ZenroomHelpers.verifyPedersenCommitment(
         utxo.commitment,
-        utxo.value.toString(),
-        utxo.blindingFactor
+        BigInt(utxo.value),
+        ZenroomHelpers.toBigInt('0x' + utxo.blindingFactor)
       );
       
       if (!isValidCommitment) {
@@ -1155,7 +1155,7 @@ export class PrivateUTXOManager extends UTXOLibrary {
    * Sincronizar con blockchain (solo datos públicos + localStorage para BN254 privacy)
    */
   async syncWithBlockchain(): Promise<boolean> {
-    if (!this.contract || !this.currentEOA) {
+    if (!this.contract || !this.currentAccount) {
       return false;
     }
 
@@ -1163,13 +1163,13 @@ export class PrivateUTXOManager extends UTXOLibrary {
 
     try {
       // 1. Verificar conexión con contrato
-      const userUTXOCount = await this.contract.getUserUTXOCount(this.currentEOA.address);
+      const userUTXOCount = await this.contract.getUserUTXOCount(this.currentAccount.address);
       console.log(`📊 User has ${userUTXOCount} UTXOs in contract (BN254 mode)`);
 
       // 2. Cargar UTXOs privados BN254 desde localStorage (preserva privacidad total)
       try {
         const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
-        const localUTXOs = PrivateUTXOStorage.getPrivateUTXOs(this.currentEOA.address);
+        const localUTXOs = PrivateUTXOStorage.getPrivateUTXOs(this.currentAccount.address);
         
         // Filtrar solo UTXOs BN254
         const bn254UTXOs = localUTXOs.filter(utxo => 
@@ -1200,8 +1200,8 @@ export class PrivateUTXOManager extends UTXOLibrary {
             try {
               const isValid = await ZenroomHelpers.verifyPedersenCommitment(
                 utxo.commitment,
-                utxo.value.toString(),
-                utxo.blindingFactor
+                BigInt(utxo.value),
+                ZenroomHelpers.toBigInt('0x' + utxo.blindingFactor)
               );
               
               if (isValid) {

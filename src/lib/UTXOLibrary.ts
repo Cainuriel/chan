@@ -130,7 +130,6 @@ export class UTXOLibrary extends EventEmitter {
     console.log('   - Privacy mode:', this.config.privacyMode);
     console.log('   - Auto consolidation:', this.config.autoConsolidate);
     console.log('   - Cache timeout:', this.config.cacheTimeout, 'ms');
-    console.log('   - Zenroom available:', ZenroomHelpers.isZenroomAvailable());
   }
 
   // ========================
@@ -143,78 +142,37 @@ export class UTXOLibrary extends EventEmitter {
    * @param preferredProvider - Preferred wallet provider
    * @returns Promise resolving to initialization success
    */
-  async initialize(
-    contractAddress: string,
-    preferredProvider: WalletProviderType = WalletProviderType.METAMASK
-  ): Promise<boolean> {
-    try {
-      console.log('🔧 Initializing UTXOLibrary with REAL BN254 cryptography...');
-
-      // Connect wallet
-      const connectionResult = await this.connectWallet(preferredProvider);
-      if (!connectionResult.success) {
-        throw new Error(`Wallet connection failed: ${connectionResult.error}`);
-      }
-
-      // Initialize smart contract
-      const signer = this.ethereum.getSigner();
-      console.log('🔗 Connecting to UTXO contract at:', contractAddress);
-      this.contract = createUTXOVaultContract(contractAddress, signer);
-
-      // Verify contract is accessible
-      console.log('🔍 Verifying contract accessibility...');
-      try {
-        const code = await this.ethereum.getProvider().getCode(contractAddress);
-        if (code === '0x') {
-          console.warn('⚠️ No contract code found at address, but continuing initialization');
-        } else {
-          console.log('✅ Contract code found at address');
-          try {
-            const count = await this.contract.getUserUTXOCount(this.currentEOA?.address || ethers.ZeroAddress);
-            console.log('✅ Contract verification successful, UTXO count:', count.toString());
-          } catch (methodError) {
-            console.warn('⚠️ Contract method call failed, but contract exists:', methodError);
-          }
-        }
-      } catch (verificationError) {
-        console.warn('⚠️ Contract verification failed, but continuing initialization:', verificationError);
-      }
-
-      // Test BN254 cryptography initialization
-      console.log('🔐 Testing BN254 cryptography...');
-      try {
-        const testBlinding = await this.zenroom.generateSecureBlindingFactor();
-        const testCommitment = await this.zenroom.createPedersenCommitment("100", testBlinding);
-        console.log('✅ BN254 cryptography test successful:', testCommitment.pedersen_commitment.slice(0, 20) + '...');
-      } catch (cryptoError) {
-        console.error('❌ BN254 cryptography test failed:', cryptoError);
-        throw new Error('BN254 cryptography initialization failed');
-      }
-
-      // Initial sync with blockchain
-      await this.syncWithBlockchain();
-
-      this.isInitialized = true;
-      console.log('✅ UTXOLibrary initialized successfully with REAL BN254 cryptography');
-
-      this.emit('library:initialized', {
-        contractAddress,
-        eoa: this.currentEOA,
-        utxoCount: this.utxos.size,
-        cryptographyType: 'BN254'
-      });
-
-      return true;
-    } catch (error) {
-      console.error('❌ Failed to initialize UTXOLibrary:', error);
-      throw new UTXOOperationError(
-        'Initialization failed',
-        'initialize',
-        undefined,
-        error
-      );
+ async initialize(contractAddressOrProvider: string): Promise<boolean> {
+  try {
+    console.log('🚀 Initializing UTXOLibrary with BN254 cryptography...');
+    
+    // Test BN254 cryptography ANTES de hacer otras operaciones
+    console.log('🔬 Testing BN254 cryptography...');
+    const cryptoTestPassed = await ZenroomHelpers.testBN254Operations();
+    
+    if (!cryptoTestPassed) {
+      console.error('❌ BN254 cryptography test failed');
+      throw new Error('BN254 cryptography initialization failed');
     }
+    
+    console.log('✅ BN254 cryptography test passed');
+    
+    // Solo marcar como inicializado después del test
+    this.isInitialized = true;
+    this.emit('library:initialized', { 
+      cryptography: 'BN254',
+      status: 'ready'
+    });
+    
+    console.log('🎉 UTXOLibrary initialized successfully with BN254 cryptography');
+    return true;
+    
+  } catch (error) {
+    console.error('❌ Failed to initialize UTXOLibrary:', error);
+    this.isInitialized = false;
+    return false;
   }
+}
 
   /**
    * Connect wallet
@@ -304,9 +262,8 @@ export class UTXOLibrary extends EventEmitter {
       // 4. Generate range proof (Bulletproof structure)
       console.log('🔍 Generating range proof...');
       const rangeProof = await this.zenroom.generateRangeProof(
-        amount.toString(),
-        blindingFactor,
-        64 // 64-bit range
+        BigInt(amount),
+        ZenroomHelpers.toBigInt('0x' + blindingFactor)
       );
 
       // 5. Get BN254 generators (standard points)
@@ -483,11 +440,10 @@ export class UTXOLibrary extends EventEmitter {
       // 5. Generate split proof (validates homomorphic property)
       console.log('🔍 Generating split proof...');
       const splitProof = await this.zenroom.generateSplitProof(
-        inputUTXO.commitment,
-        inputUTXO.value.toString(),
-        inputUTXO.blindingFactor!,
-        outputValues.map(v => v.toString()),
-        outputBlindings
+        BigInt(inputUTXO.value),
+        outputValues.map(v => BigInt(v)),
+        ZenroomHelpers.toBigInt('0x' + inputUTXO.blindingFactor!),
+        outputBlindings.map(b => ZenroomHelpers.toBigInt('0x' + b))
       );
 
       // 6. Generate nullifier hash for input
@@ -610,8 +566,8 @@ export class UTXOLibrary extends EventEmitter {
       console.log('🔍 Verifying UTXO commitment...');
       const isValidCommitment = await this.zenroom.verifyPedersenCommitment(
         utxo.commitment,
-        utxo.value.toString(),
-        utxo.blindingFactor!
+        BigInt(utxo.value),
+        ZenroomHelpers.toBigInt('0x' + utxo.blindingFactor!)
       );
       
       if (!isValidCommitment) {
