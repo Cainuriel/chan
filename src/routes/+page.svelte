@@ -27,7 +27,7 @@
   const privacyMode = true;
 
   // Configuration
-  const CONTRACT_ADDRESS = '0x3c2A6aA03743A2D8220ade79e242A042fB9E576b'; // Updated contract with real cryptography
+  const CONTRACT_ADDRESS = '0x4ee971be5ff4019be21937eFEbe15116EE3093C0'; // Updated contract with real cryptography
   const PREFERRED_PROVIDER = WalletProviderType.METAMASK;
 
   onMount(async () => {
@@ -194,8 +194,18 @@
         }))
       });
       
-      // Get stats - usar solo las propiedades que existen
-      stats = privateUTXOManager.getUTXOStats();
+      // Get stats - ensure all required properties are present
+      const rawStats = privateUTXOManager.getUTXOStats();
+      stats = {
+        autoConsolidate: false,
+        consolidationThreshold: 5,
+        maxUTXOAge: 7 * 24 * 60 * 60,
+        privacyMode: true,
+        defaultGasLimit: BigInt(500000),
+        cacheTimeout: 30000,
+        enableBackup: true,
+        ...rawStats
+      };
       
       console.log('📊 Data refreshed successfully:', {
         totalPrivateUTXOs: privateUTXOs.length,
