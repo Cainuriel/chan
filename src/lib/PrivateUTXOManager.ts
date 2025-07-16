@@ -335,9 +335,9 @@ export class PrivateUTXOManager extends UTXOLibrary {
       
       const commitmentHex = commitmentResult.pedersen_commitment.substring(2);
       
-      // Un punto de curva elíptica BN254 tiene coordenadas x,y que ocupan 64 bytes (128 caracteres hex sin prefijo)
-      // Pero aquí estamos comprobando solo la mitad (32 bytes / 64 caracteres) porque es un formato específico 
-      if (!ZenroomHelpers.isValidHex(commitmentHex, 64)) {
+      // El contrato espera bytes32 (64 caracteres hex sin prefijo)
+      // Pero el punto completo de la curva elíptica tiene 128 caracteres - debemos tomar solo los primeros 64 (coordenada X)
+      if (commitmentHex.length !== 128) {
         console.error('Commitment format error:', {
           original: commitmentResult.pedersen_commitment,
           cleaned: commitmentHex,
@@ -347,11 +347,24 @@ export class PrivateUTXOManager extends UTXOLibrary {
         throw new Error(`Invalid BN254 commitment format: expected 128 hex chars, got ${commitmentHex.length}`);
       }
       
+      // El formato para el contrato es bytes32 (sólo coordenada X)
+      const contractCommitmentHex = commitmentHex.substring(0, 64);
+      
+      if (!ZenroomHelpers.isValidHex(contractCommitmentHex, 32)) {
+        console.error('Contract commitment format error:', {
+          original: commitmentHex.slice(0, 10) + '...',
+          contractFormat: contractCommitmentHex,
+          length: contractCommitmentHex.length
+        });
+        throw new Error('Invalid BN254 contract commitment format');
+      }
+      
       // Log detallado para depuración
       console.log('✅ Validated commitment format:', {
-        withPrefix: commitmentResult.pedersen_commitment.slice(0, 10) + '...',
-        withoutPrefix: commitmentHex.slice(0, 8) + '...',
-        length: commitmentHex.length
+        fullCommitment: commitmentResult.pedersen_commitment.slice(0, 10) + '...',
+        contractCommitment: '0x' + contractCommitmentHex.slice(0, 10) + '...',
+        fullLength: commitmentHex.length,
+        contractLength: contractCommitmentHex.length
       });
       
       // Validar nullifier hash con manejo estricto de formato
@@ -381,12 +394,34 @@ export class PrivateUTXOManager extends UTXOLibrary {
         length: nullifierHex.length
       });
 
+      // Extraer solo la coordenada X para el commitment del contrato (bytes32)
+      // Utilizamos el contractCommitmentHex que ya se definió arriba
+      const contractCommitment = '0x' + contractCommitmentHex;
+      
+      console.log('📊 Preparing contract parameters:', {
+        fullCommitment: commitmentResult.pedersen_commitment.slice(0, 15) + '...',
+        contractCommitment: contractCommitment.slice(0, 15) + '...'
+      });
+      
       const depositParams: DepositParams = {
         tokenAddress: tokenAddress,
-        commitment: commitmentResult.pedersen_commitment,
+        commitment: contractCommitment, // Usamos solo la coordenada X como bytes32
         nullifierHash: nullifierHash,
         blindingFactor: ZenroomHelpers.toBigInt('0x' + blindingFactor)
       };
+
+      // Validar que el rangeProof es un valor hexadecimal válido con prefijo 0x
+      if (!rangeProof.startsWith('0x')) {
+        console.error('Range proof is not in hexadecimal format with 0x prefix:', rangeProof.slice(0, 20) + '...');
+        throw new Error('Invalid range proof format: missing 0x prefix');
+      }
+      
+      // Verificar que es un valor hexadecimal válido
+      const rangeProofHex = rangeProof.substring(2); // sin 0x
+      if (!/^[0-9a-f]+$/i.test(rangeProofHex)) {
+        console.error('Range proof contains invalid hexadecimal characters');
+        throw new Error('Invalid range proof format: contains non-hexadecimal characters');
+      }
 
       const proofParams: ProofParams = {
         rangeProof: rangeProof
@@ -399,6 +434,7 @@ export class PrivateUTXOManager extends UTXOLibrary {
         blindingFactor: depositParams.blindingFactor.toString().slice(0, 10) + '...',
         amount: amount.toString(),
         rangeProofLength: proofParams.rangeProof.length,
+        rangeProofFormat: `0x${rangeProofHex.slice(0, 20)}...`,
         generatorType: 'BN254-standard'
       });
 
@@ -436,7 +472,7 @@ export class PrivateUTXOManager extends UTXOLibrary {
         if (gasError.reason === 'Invalid commitment point') {
           throw new Error('BN254 commitment point validation failed. Please try again.');
         }
-        gasLimit = BigInt(1200000); // 1.2M gas conservador para BN254
+        gasLimit = BigInt(2000000); // 2M gas conservador para BN254
       }
 
       // Validar límites de gas para BN254

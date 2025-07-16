@@ -317,22 +317,36 @@ export class UTXOLibrary extends EventEmitter {
       const generatorParams = this.getBN254Generators();
 
       // 6. Prepare contract parameters with validation and formato normalizado
-      // Aseguramos que tanto el commitment como el nullifier tienen formato 0x
-      const normalizedCommitment = commitmentResult.pedersen_commitment.startsWith('0x') ? 
+      // El commitment completo tiene formato 0x + 128 caracteres (coordenadas X e Y)
+      const fullCommitment = commitmentResult.pedersen_commitment.startsWith('0x') ? 
         commitmentResult.pedersen_commitment : '0x' + commitmentResult.pedersen_commitment;
+      
+      // Para el contrato necesitamos solo los primeros 32 bytes (coordenada X) como bytes32
+      const fullCommitmentHex = fullCommitment.substring(2); // sin 0x
+      const contractCommitmentHex = fullCommitmentHex.substring(0, 64); // primeros 64 caracteres (32 bytes)
+      const normalizedCommitment = '0x' + contractCommitmentHex;
         
       const normalizedNullifier = nullifierHash.startsWith('0x') ? 
         nullifierHash : '0x' + nullifierHash;
         
       // Validar formato correcto
-      console.log('🔍 Validando formato de commitment y nullifier...');
-      if (!normalizedCommitment.startsWith('0x') || !ZenroomHelpers.isValidHex(normalizedCommitment.substring(2), 64)) {
+      console.log('🔍 Validando formato de commitment y nullifier para contrato...');
+      
+      // El commitment para el contrato debe ser bytes32 (64 caracteres hex)
+      if (!normalizedCommitment.startsWith('0x') || !ZenroomHelpers.isValidHex(normalizedCommitment.substring(2), 32)) {
         throw new Error(`Invalid commitment format for contract: ${normalizedCommitment.slice(0, 10)}...`);
       }
       
+      // El nullifier también debe ser bytes32 (64 caracteres hex)
       if (!normalizedNullifier.startsWith('0x') || !ZenroomHelpers.isValidHex(normalizedNullifier.substring(2), 32)) {
         throw new Error(`Invalid nullifier format for contract: ${normalizedNullifier.slice(0, 10)}...`);
       }
+      
+      console.log('✅ Commitment convertido para contrato:', {
+        original: fullCommitment.slice(0, 15) + '...',
+        paraContrato: normalizedCommitment.slice(0, 15) + '...',
+        longitud: normalizedCommitment.length - 2
+      });
       
       const depositParams: DepositParams = {
         tokenAddress,

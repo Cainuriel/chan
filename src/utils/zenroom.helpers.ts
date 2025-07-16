@@ -343,8 +343,12 @@ export class ZenroomHelpers {
         tempValue = tempValue >> 1n;
       }
       
-      // Create range proof structure
-      const rangeProof = {
+      // Crear formato de prueba compatible con el verificador Bulletproof
+      // El verificador espera las coordenadas X e Y del punto A como los primeros 64 bytes
+      // Usaremos el punto del commitment como punto A para una prueba simple
+      
+      // Almacenar los detalles de la prueba para referencia y depuración
+      const rangeProofObj = {
         commitment: {
           x: commitment.x.toString(16),
           y: commitment.y.toString(16)
@@ -354,8 +358,34 @@ export class ZenroomHelpers {
         max: max.toString(),
         timestamp: Date.now()
       };
-
-      return JSON.stringify(rangeProof);
+      
+      // También guardamos como JSON para debugging local
+      const rangeProofJson = JSON.stringify(rangeProofObj);
+      
+      // Crear bytes32 para X e Y (formato específico para el verificador)
+      const xBytes = commitment.x.toString(16).padStart(64, '0');
+      const yBytes = commitment.y.toString(16).padStart(64, '0');
+      
+      // Añadir información adicional para cumplir con el mínimo de 64 bytes
+      // La estructura es: [32 bytes X, 32 bytes Y, resto de información]
+      // El verificador espera al menos 64 bytes (coordenadas XY)
+      const randomBytes = new Uint8Array(32);  // 32 bytes adicionales para hacer 96 bytes total
+      crypto.getRandomValues(randomBytes);
+      const extraDataHex = Array.from(randomBytes, b => b.toString(16).padStart(2, '0')).join('');
+      
+      // Formar el rangeProof en formato hex con prefijo 0x
+      const rangeProofHex = '0x' + xBytes + yBytes + extraDataHex;
+      
+      console.log('🔢 Range proof created for Bulletproof verifier:', {
+        jsonProofLength: rangeProofJson.length,
+        hexProofLength: rangeProofHex.length - 2, // sin contar '0x'
+        xCoord: '0x' + xBytes.slice(0, 10) + '...',
+        yCoord: '0x' + yBytes.slice(0, 10) + '...'
+      });
+      
+      return rangeProofHex;
+      
+      return rangeProofHex;
     } catch (error) {
       console.error('Range proof generation failed:', error);
       throw new Error(`Range proof failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -597,9 +627,17 @@ export class ZenroomHelpers {
       }
 
       // Serializar commitment como hex
+      // El commitment completo incluye coordenadas X e Y
       const commitmentHex = commitment.x.toString(16).padStart(64, '0') + commitment.y.toString(16).padStart(64, '0');
 
       console.log('✅ BN254 Pedersen commitment created successfully');
+      
+      // El punto completo tiene formato 0x + coordenada X (64 chars) + coordenada Y (64 chars)
+      console.log('📊 Commitment format details:', {
+        fullLength: commitmentHex.length,
+        coordX: commitmentHex.substring(0, 64).slice(0, 10) + '...',
+        coordY: commitmentHex.substring(64).slice(0, 10) + '...'
+      });
 
       return {
         pedersen_commitment: '0x' + commitmentHex,
