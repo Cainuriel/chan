@@ -467,6 +467,8 @@ export interface UTXOVaultInterface {
 /**
  * Type-safe contract instance (simplified)
  */
+// ...existing code...
+
 export interface UTXOVaultContract {
   // Contract metadata
   readonly address: string;
@@ -494,16 +496,24 @@ export interface UTXOVaultContract {
   getTokenSymbol(tokenAddress: string): Promise<string>;
   getTokenDecimals(tokenAddress: string): Promise<number>;
   
-  // Private UTXO functions (simplified)
-  depositAsPrivateUTXO(
+  // Private UTXO functions (simplified) with gas estimation
+  depositAsPrivateUTXO: ((
     depositParams: DepositParams,
     proofParams: ProofParams,
     generators: GeneratorParams,
     amount: bigint,
     overrides?: ContractCallOptions
-  ): Promise<ContractTransactionResponse>;
-  
-  splitPrivateUTXO(
+  ) => Promise<ContractTransactionResponse>) & {
+    estimateGas(
+      depositParams: DepositParams,
+      proofParams: ProofParams,
+      generators: GeneratorParams,
+      amount: bigint,
+      overrides?: ContractCallOptions
+    ): Promise<bigint>;
+  };
+
+  splitPrivateUTXO: ((
     inputCommitment: string,
     outputCommitments: string[],
     outputAmounts: bigint[],
@@ -512,9 +522,20 @@ export interface UTXOVaultContract {
     nullifierHash: string,
     generators: GeneratorParams,
     overrides?: ContractCallOptions
-  ): Promise<ContractTransactionResponse>;
-  
-  transferPrivateUTXO(
+  ) => Promise<ContractTransactionResponse>) & {
+    estimateGas(
+      inputCommitment: string,
+      outputCommitments: string[],
+      outputAmounts: bigint[],
+      outputBlindings: bigint[],
+      equalityProof: string,
+      nullifierHash: string,
+      generators: GeneratorParams,
+      overrides?: ContractCallOptions
+    ): Promise<bigint>;
+  };
+
+  transferPrivateUTXO: ((
     inputCommitment: string,
     outputCommitment: string,
     newOwner: string,
@@ -523,16 +544,39 @@ export interface UTXOVaultContract {
     nullifierHash: string,
     generators: GeneratorParams,
     overrides?: ContractCallOptions
-  ): Promise<ContractTransactionResponse>;
-  
-  withdrawFromPrivateUTXO(
+  ) => Promise<ContractTransactionResponse>) & {
+    estimateGas(
+      inputCommitment: string,
+      outputCommitment: string,
+      newOwner: string,
+      amount: bigint,
+      outputBlinding: bigint,
+      nullifierHash: string,
+      generators: GeneratorParams,
+      overrides?: ContractCallOptions
+    ): Promise<bigint>;
+  };
+
+  withdrawFromPrivateUTXO: ((
     commitment: string,
     amount: bigint,
     blindingFactor: bigint,
     nullifierHash: string,
     generators: GeneratorParams,
     overrides?: ContractCallOptions
-  ): Promise<ContractTransactionResponse>;
+  ) => Promise<ContractTransactionResponse>) & {
+    estimateGas(
+      commitment: string,
+      amount: bigint,
+      blindingFactor: bigint,
+      nullifierHash: string,
+      generators: GeneratorParams,
+      overrides?: ContractCallOptions
+    ): Promise<bigint>;
+  };
+
+  // Método para obtener funciones específicas (Ethers v6)
+  getFunction(name: string): ethers.BaseContractMethod<any[], any, any>;
   
   // Event methods
   on(event: string, listener: (...args: any[]) => void): UTXOVaultContract;
@@ -549,6 +593,8 @@ export interface UTXOVaultContract {
   getEvent(eventName: string): ethers.EventFragment;
   queryFilter(event: string | ethers.EventFilter, fromBlock?: number, toBlock?: number): Promise<ethers.EventLog[]>;
 }
+
+// ...existing code...
 
 /**
  * Type guards for contract data validation (simplified)

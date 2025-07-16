@@ -6,27 +6,29 @@
 /**
  * Core UTXO data structure (matches smart contract)
  */
-export interface UTXOData {
-  /** Unique UTXO identifier */
-  id: string;
-  /** Whether the UTXO exists */
-  exists: boolean;
-  /** Value in tokens (may be hidden in production) */
-  value: bigint;
-  /** ERC20 token contract address */
-  tokenAddress: string;
-  /** Current owner EOA address */
-  owner: string;
-  /** Creation timestamp */
-  timestamp: bigint;
-  /** Whether the UTXO has been spent */
-  isSpent: boolean;
-  /** Pedersen commitment (Zenroom generated) */
-  commitment: string;
-  /** Parent UTXO ID (for tracking lineage) */
-  parentUTXO: string;
-  /** Type of UTXO creation */
-  utxoType: UTXOType;
+export interface PrivateUTXO extends ExtendedUTXOData {
+  // ===========================
+  // CAMPOS REQUERIDOS PARA BN254 PRIVATE UTXOs
+  // ===========================
+  
+  /** Blinding factor for commitment (requerido, no opcional) */
+  blindingFactor: string;
+  
+  /** Nullifier hash para prevenir double-spending (requerido) */
+  nullifierHash: string;
+  
+  /** Siempre true para PrivateUTXO */
+  isPrivate: true;
+  
+  /** Siempre BN254 para PrivateUTXO */
+  cryptographyType: 'BN254';
+  
+  // ===========================
+  // CAMPOS OPCIONALES BN254
+  // ===========================
+  
+  /** Range proof (Bulletproof format) - opcional */
+  rangeProof?: string;
 }
 
 /**
@@ -40,25 +42,98 @@ export enum UTXOType {
 }
 
 /**
+ * Core UTXO data structure (matches smart contract PrivateUTXO struct)
+ */
+export interface UTXOData {
+  /** Unique UTXO identifier */
+  id: string;
+  /** Whether UTXO exists on-chain */
+  exists: boolean;
+  /** Value in wei or token units */
+  value: bigint;
+  /** ERC20 token address */
+  tokenAddress: string;
+  /** Owner's address */
+  owner: string;
+  /** Creation timestamp */
+  timestamp: bigint;
+  /** Whether UTXO is spent */
+  isSpent: boolean;
+  
+  // ===========================
+  // BN254 COMMITMENT FIELDS
+  // ===========================
+  
+  /** BN254 Pedersen commitment (required for private UTXOs) */
+  commitment: string;
+  /** Parent UTXO ID (for splits/combines) */
+  parentUTXO: string;
+  /** Type of UTXO operation */
+  utxoType: UTXOType;
+}
+
+/**
+ * Configuration for UTXO manager
+ */
+export interface UTXOManagerConfig {
+  /** Auto-consolidate small UTXOs */
+  autoConsolidate: boolean;
+  /** Threshold for auto-consolidation (number of UTXOs) */
+  consolidationThreshold: number;
+  /** Maximum UTXO age in seconds before considered for consolidation */
+  maxUTXOAge: number;
+  /** Enable privacy mode for all operations */
+  privacyMode: boolean;
+  /** Default gas limit for transactions */
+  defaultGasLimit: bigint;
+  /** Cache timeout in milliseconds */
+  cacheTimeout: number;
+  /** Enable automatic backup of private UTXOs to localStorage */
+  enableBackup: boolean;
+}
+/**
  * Enhanced UTXO with local metadata
  */
 export interface ExtendedUTXOData extends UTXOData {
-  /** Blinding factor for commitment (keep secret) */
+  /** Blinding factor for commitment (keep secret) - opcional en ExtendedUTXOData */
   blindingFactor?: string;
+  
   /** Local creation timestamp */
   localCreatedAt: number;
+  
   /** Whether this UTXO is confirmed on-chain */
   confirmed: boolean;
+  
   /** Transaction hash where this UTXO was created */
   creationTxHash?: string;
+  
   /** Block number where confirmed */
   blockNumber?: number;
+  
   /** Local tags for organization */
   tags?: string[];
+  
   /** Notes about this UTXO */
   notes?: string;
+  
   /** Cached token metadata */
   tokenMetadata?: TokenMetadata;
+  
+  // ===========================
+  // BN254 CRYPTOGRAPHY FIELDS (opcionales en ExtendedUTXOData)
+  // ===========================
+  
+  /** Cryptography type used (BN254, etc.) */
+  cryptographyType?: 'BN254' | 'Other';
+  
+  /** Nullifier hash for preventing double-spending */
+  nullifierHash?: string;
+  
+  /** Range proof (Bulletproof format) */
+  rangeProof?: string;
+  
+  /** Whether this is a private UTXO */
+  isPrivate?: boolean;
 }
 
 /**
@@ -221,7 +296,7 @@ export interface UTXOSelectionResult {
 }
 
 /**
- * UTXO manager statistics
+ * UTXO manager statistics with BN254 cryptography support
  */
 export interface UTXOManagerStats {
   totalUTXOs: number;
@@ -229,32 +304,25 @@ export interface UTXOManagerStats {
   uniqueTokens: number;
   totalBalance: bigint;
   privateUTXOs: number;
-  // Añadir las propiedades faltantes
   spentUTXOs: number;
   confirmedUTXOs: number;
   balanceByToken: { [tokenAddress: string]: bigint };
   averageUTXOValue: bigint;
   creationDistribution: Array<{ date: string; count: number }>;
-}
-
-/**
- * UTXO manager configuration
- */
-export interface UTXOManagerConfig {
-  /** Enable automatic UTXO consolidation */
-  autoConsolidate: boolean;
-  /** Minimum number of UTXOs to trigger consolidation */
-  consolidationThreshold: number;
-  /** Maximum UTXO age before auto-consolidation (seconds) */
-  maxUTXOAge: number;
-  /** Enable privacy mode (generate new commitments on transfers) */
-  privacyMode: boolean;
-  /** Default gas limit for operations */
-  defaultGasLimit: bigint;
-  /** Cache duration for blockchain queries (ms) */
-  cacheTimeout: number;
-  /** Enable local backup of UTXO data */
-  enableBackup: boolean;
+  
+  // ===========================
+  // BN254 CRYPTOGRAPHY STATS
+  // ===========================
+  
+  /** Number of BN254 UTXOs */
+  bn254UTXOs: number;
+  /** Number of BN254 operations performed */
+  bn254Operations: number;
+  /** Distribution by cryptography type */
+  cryptographyDistribution: {
+    BN254: number;
+    Other: number;
+  };
 }
 
 /**

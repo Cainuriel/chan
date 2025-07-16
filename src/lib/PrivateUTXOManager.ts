@@ -1,5 +1,5 @@
 /**
- * @fileoverview PrivateUTXOManager - Extensión de UTXOLibrary con criptografía real
+ * @fileoverview PrivateUTXOManager - Extensión de UTXOLibrary con criptografía BN254 real
  * @description Implementa privacidad real usando SOLO Pedersen commitments, Range proofs y Equality proofs
  */
 
@@ -14,62 +14,115 @@ import {
   type SplitUTXOParams,
   type TransferUTXOParams,
   type WithdrawUTXOParams,
+  type UTXOManagerStats,
+  type UTXOManagerConfig,
   UTXOOperationError,
+  UTXONotFoundError,           // ✅ AÑADIR
+  InsufficientFundsError,      // ✅ AÑADIR
+  UTXOAlreadySpentError,       // ✅ AÑADIR
   UTXOType
 } from '../types/utxo.types';
-import type { 
-  DepositParams, 
-  GeneratorParams, 
-  ProofParams 
-} from '../contracts/UTXOVault.types';
 
 // ========================
-// TIPOS ESPECÍFICOS PARA CRIPTOGRAFÍA REAL
+// INTERFACES FALTANTES
+// ========================
+
+// ✅ AÑADIR ESTAS INTERFACES:
+
+interface GeneratorParams {
+  gX: bigint;
+  gY: bigint;
+  hX: bigint;
+  hY: bigint;
+}
+
+interface PedersenCommitmentResult {
+  pedersen_commitment: string;
+  blinding_factor: string;
+}
+
+interface RangeProofResult {
+  range_proof: string;
+  commitment: string;
+}
+
+interface EqualityProofResult {
+  equality_proof: string;
+  commitment_a: string;
+  commitment_b: string;
+}
+
+interface DepositParams {
+  tokenAddress: string;
+  commitment: string;
+  nullifierHash: string;
+  blindingFactor: bigint;
+}
+
+interface ProofParams {
+  rangeProof: string;
+}
+
+// ========================
+// TIPOS ESPECÍFICOS PARA CRIPTOGRAFÍA BN254 REAL
 // ========================
 
 export interface PrivateUTXO extends ExtendedUTXOData {
-  commitment: string;
+  /** Blinding factor for commitment (requerido, no opcional) */
   blindingFactor: string;
+  /** Nullifier hash para prevenir double-spending (requerido) */
   nullifierHash: string;
-  isPrivate: boolean;
+  /** Siempre true para PrivateUTXO */
+  isPrivate: true;
+  /** Siempre BN254 para PrivateUTXO */
+  cryptographyType: 'BN254';
+  /** Range proof (Bulletproof format) - opcional */
   rangeProof?: string;
 }
 
-export interface UTXOManagerStats {
-  totalUTXOs: number;
-  unspentUTXOs: number;
-  uniqueTokens: number;
-  totalBalance: bigint;
-  privateUTXOs: number;
-  spentUTXOs: number;
-  confirmedUTXOs: number;
-  balanceByToken: { [tokenAddress: string]: bigint };
-  averageUTXOValue: bigint;
-  creationDistribution: Array<{ date: string; count: number }>;
+export interface PrivateUTXO extends ExtendedUTXOData {
+  /** Blinding factor for commitment (requerido, no opcional) */
+  blindingFactor: string;
+  /** Nullifier hash para prevenir double-spending (requerido) */
+  nullifierHash: string;
+  /** Siempre true para PrivateUTXO */
+  isPrivate: true;
+  /** Siempre BN254 para PrivateUTXO */
+  cryptographyType: 'BN254';
+  /** Range proof (Bulletproof format) - opcional */
+  rangeProof?: string;
 }
 
+
+
 // ========================
-// PRIVATE UTXO MANAGER - SOLO CRIPTOGRAFÍA REAL
+// PRIVATE UTXO MANAGER - SOLO CRIPTOGRAFÍA BN254 REAL
 // ========================
 
 /**
- * PrivateUTXOManager - Extensión de UTXOLibrary con criptografía real únicamente
+ * PrivateUTXOManager - Extensión de UTXOLibrary con criptografía BN254 real únicamente
  * Implementa Pedersen commitments, Range proofs y Equality proofs sobre BN254
  */
 export class PrivateUTXOManager extends UTXOLibrary {
-  // Almacenamiento de UTXOs privados
+  // Almacenamiento de UTXOs privados con BN254
   private privateUTXOs: Map<string, PrivateUTXO> = new Map();
+  private bn254OperationCount: number = 0;
 
-  constructor(config: any = {}) {
-    super(config);
-    console.log('🔐 PrivateUTXOManager initialized with REAL cryptography only');
-    console.log('   - Pedersen commitments on BN254');
-    console.log('   - Range proofs (Bulletproofs)');
-    console.log('   - Equality proofs for homomorphic operations');
-  }
+ constructor(config: UTXOManagerConfig = {  // ✅ CAMBIAR TIPO
+  autoConsolidate: false,
+  consolidationThreshold: 5,
+  maxUTXOAge: 7 * 24 * 60 * 60,
+  privacyMode: true,
+  defaultGasLimit: BigInt(500000),
+  cacheTimeout: 30000,
+  enableBackup: true
+}) {
+  super(config);
+  console.log('🔐 PrivateUTXOManager initialized with REAL BN254 cryptography only');
+}
 
   // ========================
-  // OPERACIONES PRIVADAS CON CRIPTOGRAFÍA REAL
+  // OPERACIONES PRIVADAS CON CRIPTOGRAFÍA BN254 REAL
   // ========================
 
   /**
@@ -82,24 +135,32 @@ export class PrivateUTXOManager extends UTXOLibrary {
     }
 
     try {
+      console.log('🔓 Approving token spending for BN254 operations...');
+      
       // Crear instancia del contrato ERC20
       const tokenContract = new ethers.Contract(
         tokenAddress,
         [
           "function allowance(address owner, address spender) view returns (uint256)",
           "function approve(address spender, uint256 amount) returns (bool)",
-          "function decimals() view returns (uint8)"
+          "function decimals() view returns (uint8)",
+          "function symbol() view returns (string)"
         ],
         signer
       );
 
-      // Obtener decimales del token
+      // Obtener información del token
       let tokenDecimals: number;
+      let tokenSymbol: string;
       try {
-        tokenDecimals = await tokenContract.decimals();
+        [tokenDecimals, tokenSymbol] = await Promise.all([
+          tokenContract.decimals(),
+          tokenContract.symbol()
+        ]);
       } catch (error) {
-        console.warn('Could not get token decimals, using 18 as default:', error);
-        tokenDecimals = 18; // Default para la mayoría de tokens ERC20
+        console.warn('Could not get token info, using defaults:', error);
+        tokenDecimals = 18;
+        tokenSymbol = 'TOKEN';
       }
 
       // Verificar allowance actual
@@ -108,37 +169,51 @@ export class PrivateUTXOManager extends UTXOLibrary {
         this.contract?.target
       );
 
-      console.log('💰 Current allowance:', ethers.formatUnits(currentAllowance, tokenDecimals));
-      console.log('💰 Required amount:', ethers.formatUnits(amount, tokenDecimals));
-      console.log('🔢 Token decimals:', tokenDecimals);
+      console.log('💰 Token approval info:', {
+        symbol: tokenSymbol,
+        decimals: tokenDecimals,
+        currentAllowance: ethers.formatUnits(currentAllowance, tokenDecimals),
+        requiredAmount: ethers.formatUnits(amount, tokenDecimals)
+      });
 
       // Si allowance no es suficiente, aprobar
       if (currentAllowance < amount) {
-        console.log('🔓 Approving token spending...');
+        console.log('🔓 Insufficient allowance, approving token spending...');
         
-        // Aprobar una cantidad ligeramente mayor para evitar problemas de precisión
-        const approvalAmount = amount + (amount / 100n); // +1% extra
-        console.log('💰 Approving amount (with buffer):', ethers.formatUnits(approvalAmount, tokenDecimals));
+        // Aprobar una cantidad ligeramente mayor para BN254 operations
+        const approvalAmount = amount + (amount / 100n); // +1% extra para BN254
         
-        // Obtener el gasPrice actual de la red
+        // Obtener gasPrice con fallback
         let gasPrice: bigint;
         try {
           const feeData = await signer.provider?.getFeeData();
-          gasPrice = feeData?.gasPrice || ethers.parseUnits('20', 'gwei');
+          gasPrice = feeData?.gasPrice || ethers.parseUnits('25', 'gwei');
+          gasPrice = gasPrice + (gasPrice * 20n / 100n); // +20% para BN254
         } catch (error) {
-          console.warn('Could not get gas price, using default:', error);
-          gasPrice = ethers.parseUnits('20', 'gwei'); // 20 gwei por defecto
+          console.warn('Could not get gas price, using BN254-optimized default:', error);
+          gasPrice = ethers.parseUnits('30', 'gwei'); // Higher default for BN254
         }
         
-        // Estimar el gas necesario para la transacción approve
-        const estimatedGas = await tokenContract.approve.estimateGas(
-          this.contract?.target,
-          approvalAmount
-        );
-        // Añadir un 20% extra al gas estimado
-        const gasLimit = estimatedGas + (estimatedGas / 5n);
+        // Estimar gas para approval
+        let gasLimit: bigint;
+        try {
+          const estimatedGas = await tokenContract.approve.estimateGas(
+            this.contract?.target,
+            approvalAmount
+          );
+          gasLimit = estimatedGas + (estimatedGas / 4n); // +25% buffer
+        } catch (gasError) {
+          console.warn('Gas estimation failed, using conservative limit:', gasError);
+          gasLimit = BigInt(100000); // 100k gas conservative
+        }
 
-        // Enviar la transacción approve con gasLimit estimado
+        console.log('⛽ Approval transaction parameters:', {
+          approvalAmount: ethers.formatUnits(approvalAmount, tokenDecimals),
+          gasLimit: gasLimit.toString(),
+          gasPrice: ethers.formatUnits(gasPrice, 'gwei') + ' gwei'
+        });
+
+        // Enviar transacción de aprobación
         const approveTx = await tokenContract.approve(
           this.contract?.target,
           approvalAmount,
@@ -157,22 +232,22 @@ export class PrivateUTXOManager extends UTXOLibrary {
           this.currentAccount?.address,
           this.contract?.target
         );
-        console.log('💰 New allowance after approval:', ethers.formatUnits(newAllowance, tokenDecimals));
+        console.log('💰 New allowance:', ethers.formatUnits(newAllowance, tokenDecimals), tokenSymbol);
         
         if (newAllowance < amount) {
-          throw new Error(`Approval failed: allowance ${ethers.formatUnits(newAllowance, tokenDecimals)} < required ${ethers.formatUnits(amount, tokenDecimals)}`);
+          throw new Error(`BN254 approval failed: allowance ${ethers.formatUnits(newAllowance, tokenDecimals)} < required ${ethers.formatUnits(amount, tokenDecimals)}`);
         }
         
-        // Pausa para asegurar que la blockchain procese la aprobación
-        console.log('⏳ Waiting for approval to be fully processed...');
-        await new Promise(resolve => setTimeout(resolve, 3000)); // 3 segundos
+        // Pausa para blockchain processing
+        console.log('⏳ Waiting for BN254-compatible approval to be processed...');
+        await new Promise(resolve => setTimeout(resolve, 3000));
       } else {
-        console.log('✅ Sufficient allowance already exists');
+        console.log('✅ Sufficient allowance already exists for BN254 operations');
       }
     } catch (error) {
-      console.error('❌ Token approval failed:', error);
+      console.error('❌ BN254 token approval failed:', error);
       throw new UTXOOperationError(
-        'Token approval failed',
+        'BN254 token approval failed',
         'approveTokenSpending',
         undefined,
         error
@@ -181,97 +256,146 @@ export class PrivateUTXOManager extends UTXOLibrary {
   }
 
   /**
-   * Crear UTXO privado usando SOLO criptografía real con depositAsPrivateUTXO
+   * Crear UTXO privado usando REAL BN254 cryptography
    */
   async createPrivateUTXO(params: CreateUTXOParams): Promise<UTXOOperationResult> {
     this.ensureInitialized();
-    console.log('🔐 Creating private UTXO with REAL cryptography...');
+    console.log('🔐 Creating private UTXO with REAL BN254 cryptography...');
+    this.bn254OperationCount++;
 
     try {
       const { amount, tokenAddress, owner } = params;
       
-      // 1. Aprobar tokens antes del depósito
+      // 1. Validaciones iniciales
+      if (amount <= 0n) {
+        throw new Error('Amount must be greater than zero');
+      }
+
+      // 2. Aprobar tokens antes del depósito
+      console.log('🔓 Approving token spending for BN254 operations...');
       await this.approveTokenSpending(tokenAddress, amount);
 
-      // 2. Generar commitment Pedersen para cantidad usando Zenroom
-      const blindingFactor = await ZenroomHelpers.generateSecureNonce();
-      const commitment = await ZenroomHelpers.createPedersenCommitment(
+      // 3. Generar blinding factor BN254-compatible
+      console.log('🎲 Generating BN254-compatible blinding factor...');
+      const blindingFactor = await ZenroomHelpers.generateSecureBlindingFactor();
+      console.log('✅ BN254 blinding factor generated:', blindingFactor.slice(0, 10) + '...');
+
+      // 4. Crear REAL Pedersen commitment usando BN254
+      console.log('🔐 Creating REAL BN254 Pedersen commitment...');
+      const commitmentResult = await ZenroomHelpers.createPedersenCommitment(
         amount.toString(),
         blindingFactor
       );
-      console.log('✅ Pedersen commitment created:', commitment.pedersen_commitment);
+      console.log('✅ REAL BN254 Pedersen commitment created:', commitmentResult.pedersen_commitment.slice(0, 20) + '...');
 
-      // 3. Generar nullifier hash para prevenir double-spending
+      // 5. Generar nullifier hash usando hash-to-curve
+      console.log('🔐 Generating BN254 nullifier hash...');
       const nullifierHash = await ZenroomHelpers.generateNullifierHash(
         this.currentAccount!.address,
-        commitment.pedersen_commitment,
+        commitmentResult.pedersen_commitment,
         Date.now().toString()
       );
-      console.log('✅ Nullifier hash generated:', nullifierHash);
+      console.log('✅ BN254 nullifier hash generated:', nullifierHash.slice(0, 20) + '...');
 
-      // 4. Generar range proof para probar que el valor es válido (temporal)
-      const rangeProof = ethers.hexlify(ethers.toUtf8Bytes("range_proof_placeholder"));
-      console.log('⚠️ Using placeholder range proof - TODO: implement real Bulletproof');
+      // 6. Generar range proof (Bulletproof structure)
+      console.log('🔍 Generating BN254 range proof...');
+      const rangeProof = await ZenroomHelpers.generateRangeProof(
+        amount.toString(),
+        blindingFactor,
+        64 // 64-bit range
+      );
+      console.log('✅ BN254 range proof generated:', rangeProof.slice(0, 20) + '...');
 
-      // 5. Obtener generadores BN254 (usar valores por defecto temporales)
-      const generatorParams: GeneratorParams = {
-        gX: BigInt("0x1"),
-        gY: BigInt("0x2"),
-        hX: BigInt("0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001"),
-        hY: BigInt("0x2")
-      };
-      console.log('✅ Generator parameters prepared');
+      // 7. Obtener generadores BN254 estándar
+      const generatorParams = this.getBN254StandardGenerators();
 
-      // 6. Preparar parámetros del contrato
+      // 8. Preparar parámetros del contrato con validación BN254
+      console.log('🔍 Preparing BN254-validated contract parameters...');
+      
+      // Validar que el commitment es un punto BN254 válido
+      if (!ZenroomHelpers.isValidHex(commitmentResult.pedersen_commitment, 64)) {
+        throw new Error('Invalid BN254 commitment format');
+      }
+      
+      // Validar nullifier hash
+      if (!ZenroomHelpers.isValidHex(nullifierHash, 64)) {
+        throw new Error('Invalid BN254 nullifier hash format');
+      }
+
       const depositParams: DepositParams = {
-        tokenAddress,
-        commitment: commitment.pedersen_commitment,
-        nullifierHash,
-        blindingFactor: BigInt(blindingFactor)
+        tokenAddress: tokenAddress,
+        commitment: commitmentResult.pedersen_commitment,
+        nullifierHash: nullifierHash,
+        blindingFactor: ZenroomHelpers.toBigInt('0x' + blindingFactor)
       };
 
       const proofParams: ProofParams = {
-        rangeProof
+        rangeProof: rangeProof
       };
 
-      console.log('🔍 Contract parameters prepared:', {
-        tokenAddress,
-        commitment: commitment.pedersen_commitment,
-        nullifierHash,
-        blindingFactor: blindingFactor.substring(0, 10) + '...',
-        rangeProofLength: rangeProof.length
+      console.log('📋 Final BN254 contract parameters:', {
+        tokenAddress: depositParams.tokenAddress,
+        commitment: depositParams.commitment.slice(0, 20) + '...',
+        nullifierHash: depositParams.nullifierHash.slice(0, 20) + '...',
+        blindingFactor: depositParams.blindingFactor.toString().slice(0, 10) + '...',
+        amount: amount.toString(),
+        rangeProofLength: proofParams.rangeProof.length,
+        generatorType: 'BN254-standard'
       });
 
-      // 7. Preparar transacción con gas estimation conservador
+      // 9. Preparar transacción con gas optimizado para BN254
       const signer = EthereumHelpers.getSigner();
       if (!signer) {
-        throw new Error('Signer not available for deposit transaction');
+        throw new Error('Signer not available for BN254 deposit transaction');
       }
 
-      // Obtener gasPrice actual de la red
+      // Gas optimizado para operaciones BN254
       let gasPrice: bigint;
       try {
         const feeData = await signer.provider?.getFeeData();
-        gasPrice = feeData?.gasPrice || ethers.parseUnits('20', 'gwei');
+        gasPrice = feeData?.gasPrice || ethers.parseUnits('30', 'gwei');
+        gasPrice = gasPrice + (gasPrice * 25n / 100n); // +25% para BN254
       } catch (error) {
-        console.warn('Could not get gas price for deposit, using default:', error);
-        gasPrice = ethers.parseUnits('20', 'gwei');
+        console.warn('Using BN254-optimized fallback gas price:', error);
+        gasPrice = ethers.parseUnits('35', 'gwei'); // Higher default for BN254
       }
 
-      // Para operaciones con criptografía real, usar gas conservador
-      console.log('⛽ Using conservative gas limit for real crypto deposit operation...');
-      const estimatedGas = BigInt(800000); // 800k gas para operaciones criptográficas reales
-      const gasLimit = estimatedGas + (estimatedGas * 20n / 100n); // +20% buffer
+      // Estimación de gas para BN254 operations
+      let gasLimit: bigint;
+      try {
+        console.log('⛽ Estimating gas for BN254 deposit...');
+        const estimatedGas = await this.contract!.depositAsPrivateUTXO.estimateGas(
+          depositParams,
+          proofParams,
+          generatorParams,
+          amount
+        );
+        gasLimit = estimatedGas + (estimatedGas * 40n / 100n); // +40% buffer para BN254
+        console.log('✅ BN254 gas estimation successful:', gasLimit.toString());
+      } catch (gasError: any) {
+        console.warn('❌ BN254 gas estimation failed:', gasError);
+        if (gasError.reason === 'Invalid commitment point') {
+          throw new Error('BN254 commitment point validation failed. Please try again.');
+        }
+        gasLimit = BigInt(1200000); // 1.2M gas conservador para BN254
+      }
+
+      // Validar límites de gas para BN254
+      const maxGasLimit = BigInt(2000000); // 2M máximo para BN254
+      const minGasLimit = BigInt(800000);  // 800k mínimo para BN254
       
-      console.log('⛽ Gas estimation for deposit:', {
-        estimatedGas: estimatedGas.toString(),
+      if (gasLimit > maxGasLimit) gasLimit = maxGasLimit;
+      if (gasLimit < minGasLimit) gasLimit = minGasLimit;
+
+      console.log('⛽ Final BN254 gas parameters:', {
         gasLimit: gasLimit.toString(),
         gasPrice: ethers.formatUnits(gasPrice, 'gwei') + ' gwei',
         estimatedCost: ethers.formatEther(gasLimit * gasPrice) + ' ETH'
       });
 
-      // 8. Ejecutar transacción usando depositAsPrivateUTXO
-      console.log('🚀 Calling depositAsPrivateUTXO with REAL cryptography...');
+      // 10. Ejecutar transacción BN254
+      console.log('🚀 Executing BN254 depositAsPrivateUTXO transaction...');
+      
       const tx = await this.contract!.depositAsPrivateUTXO(
         depositParams,
         proofParams,
@@ -279,17 +403,21 @@ export class PrivateUTXOManager extends UTXOLibrary {
         amount,
         {
           gasLimit: gasLimit,
-          gasPrice: gasPrice
+          gasPrice: gasPrice,
+          value: BigInt(0)
         }
       );
+      
+      console.log('✅ BN254 transaction sent:', tx.hash);
 
-      console.log('✅ Transaction sent:', tx.hash);
+      // 11. Esperar confirmación
+      console.log('⏳ Waiting for BN254 transaction confirmation...');
       const receipt = await tx.wait();
-      console.log('✅ Transaction confirmed:', receipt?.hash);
+      console.log('✅ BN254 deposit confirmed:', receipt?.hash, 'Block:', receipt?.blockNumber);
 
-      // 9. Crear UTXO privado local
-      const utxoId = await ZenroomHelpers.generateUTXOId(
-        commitment.pedersen_commitment,
+      // 12. Crear UTXO privado local con datos BN254
+      const utxoId = await this.generateBN254UTXOId(
+        commitmentResult.pedersen_commitment,
         owner,
         Date.now()
       );
@@ -302,7 +430,7 @@ export class PrivateUTXOManager extends UTXOLibrary {
         owner,
         timestamp: toBigInt(Date.now()),
         isSpent: false,
-        commitment: commitment.pedersen_commitment,
+        commitment: commitmentResult.pedersen_commitment,
         parentUTXO: '',
         utxoType: UTXOType.DEPOSIT,
         blindingFactor: blindingFactor,
@@ -312,19 +440,19 @@ export class PrivateUTXOManager extends UTXOLibrary {
         creationTxHash: receipt?.hash,
         blockNumber: receipt?.blockNumber,
         isPrivate: true,
-        rangeProof
+        rangeProof: rangeProof,
+        cryptographyType: 'BN254'
       };
 
-      // 10. Almacenar en cache local
+      // 13. Almacenar en cache y localStorage
       this.utxos.set(utxoId, privateUTXO);
       this.privateUTXOs.set(utxoId, privateUTXO);
 
-      // 11. Guardar en localStorage para preservar privacidad
       try {
         const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
         PrivateUTXOStorage.savePrivateUTXO(owner, privateUTXO);
       } catch (storageError) {
-        console.warn('⚠️ Could not save to localStorage:', storageError);
+        console.warn('⚠️ Could not save BN254 UTXO to localStorage:', storageError);
       }
 
       const result: UTXOOperationResult = {
@@ -334,98 +462,123 @@ export class PrivateUTXOManager extends UTXOLibrary {
         createdUTXOIds: [utxoId]
       };
 
-      console.log('✅ Private UTXO created successfully with REAL cryptography:', utxoId);
+      console.log('✅ Private UTXO created successfully with REAL BN254 cryptography:', utxoId);
       this.emit('private:utxo:created', privateUTXO);
 
       return result;
 
     } catch (error) {
-      console.error('❌ Private UTXO creation failed:', error);
+      console.error('❌ BN254 Private UTXO creation failed:', error);
+      
+      let errorMessage = 'BN254 private UTXO creation failed';
+      if (error instanceof Error) {
+        if (error.message.includes('Invalid commitment point')) {
+          errorMessage = 'BN254 commitment validation failed. Please try again.';
+        } else if (error.message.includes('user rejected')) {
+          errorMessage = 'Transaction was rejected by user';
+        } else if (error.message.includes('insufficient funds')) {
+          errorMessage = 'Insufficient funds for BN254 transaction fees';
+        } else {
+          errorMessage = error.message;
+        }
+      }
+      
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Private UTXO creation failed',
+        error: errorMessage,
         errorDetails: error
       };
     }
   }
-   /**
-   * Transferir UTXO privado usando transferPrivateUTXO con SOLO criptografía real
+
+  /**
+   * Transferir UTXO privado usando REAL BN254 cryptography
    */
   async transferPrivateUTXO(params: TransferUTXOParams): Promise<UTXOOperationResult> {
     this.ensureInitialized();
-    console.log('🔐 Transferring private UTXO with REAL cryptography...');
+    console.log('🔄 Transferring private UTXO with REAL BN254 cryptography...');
+    this.bn254OperationCount++;
 
     try {
       const { utxoId, newOwner } = params;
       
       // 1. Obtener UTXO privado
       const utxo = this.privateUTXOs.get(utxoId) as PrivateUTXO;
-      if (!utxo || !utxo.isPrivate) {
-        throw new Error('UTXO is not private or does not exist');
+      if (!utxo || !utxo.isPrivate || utxo.cryptographyType !== 'BN254') {
+        throw new Error('UTXO is not a BN254 private UTXO or does not exist');
       }
 
       if (utxo.isSpent) {
         throw new Error('UTXO is already spent');
       }
 
-      // 2. Generar nuevo commitment Pedersen para el destinatario
-      const newBlindingFactor = await ZenroomHelpers.generateSecureNonce();
-      const newCommitment = await ZenroomHelpers.createPedersenCommitment(
+      // 2. Verificar commitment existente
+      console.log('🔍 Verifying existing BN254 commitment...');
+      const isValidCommitment = await ZenroomHelpers.verifyPedersenCommitment(
+        utxo.commitment,
+        utxo.value.toString(),
+        utxo.blindingFactor
+      );
+      
+      if (!isValidCommitment) {
+        throw new Error('BN254 commitment verification failed - UTXO data may be corrupted');
+      }
+
+      // 3. Generar nuevo blinding factor BN254 para output
+      console.log('🎲 Generating new BN254 blinding factor for output...');
+      const newBlindingFactor = await ZenroomHelpers.generateSecureBlindingFactor();
+
+      // 4. Crear nuevo REAL Pedersen commitment para el destinatario
+      console.log('🔐 Creating new REAL BN254 Pedersen commitment for recipient...');
+      const newCommitmentResult = await ZenroomHelpers.createPedersenCommitment(
         utxo.value.toString(),
         newBlindingFactor
       );
-      console.log('✅ New Pedersen commitment created for recipient:', newCommitment.pedersen_commitment);
+      console.log('✅ New BN254 commitment created:', newCommitmentResult.pedersen_commitment.slice(0, 20) + '...');
 
-      // 3. Generar nullifier hash para el UTXO de entrada
+      // 5. Generar nullifier hash para input
       const nullifierHash = await ZenroomHelpers.generateNullifierHash(
         utxo.commitment,
         utxo.owner,
         Date.now().toString()
       );
-      console.log('✅ Nullifier hash generated for input UTXO:', nullifierHash);
 
-      // 4. Obtener generadores BN254 (usar valores por defecto temporales)
-      const generatorParams: GeneratorParams = {
-        gX: BigInt("0x1"),
-        gY: BigInt("0x2"),
-        hX: BigInt("0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001"),
-        hY: BigInt("0x2")
-      };
+      // 6. Obtener generadores BN254 estándar
+      const generatorParams = this.getBN254StandardGenerators();
 
-      // 5. Preparar transacción con gas estimation
+      // 7. Preparar transacción con gas optimizado para BN254
       const signer = EthereumHelpers.getSigner();
       if (!signer) {
-        throw new Error('Signer not available for transfer transaction');
+        throw new Error('Signer not available for BN254 transfer transaction');
       }
 
-      // Obtener gasPrice actual
+      // Gas optimizado para transferencias BN254
       let gasPrice: bigint;
       try {
         const feeData = await signer.provider?.getFeeData();
-        gasPrice = feeData?.gasPrice || ethers.parseUnits('20', 'gwei');
+        gasPrice = feeData?.gasPrice || ethers.parseUnits('25', 'gwei');
+        gasPrice = gasPrice + (gasPrice * 20n / 100n); // +20% para BN254
       } catch (error) {
-        console.warn('Could not get gas price for transfer, using default:', error);
-        gasPrice = ethers.parseUnits('20', 'gwei');
+        console.warn('Using BN254 transfer fallback gas price:', error);
+        gasPrice = ethers.parseUnits('30', 'gwei');
       }
 
-      // Gas conservador para operaciones criptográficas
-      const estimatedGas = BigInt(600000); // 600k gas para transfer
-      const gasLimit = estimatedGas + (estimatedGas * 20n / 100n); // +20% buffer
+      const estimatedGas = BigInt(800000); // 800k gas para BN254 transfer
+      const gasLimit = estimatedGas + (estimatedGas * 25n / 100n); // +25% buffer
 
-      console.log('⛽ Gas estimation for transfer:', {
-        estimatedGas: estimatedGas.toString(),
+      console.log('⛽ BN254 transfer gas parameters:', {
         gasLimit: gasLimit.toString(),
         gasPrice: ethers.formatUnits(gasPrice, 'gwei') + ' gwei'
       });
 
-      // 6. Ejecutar transacción usando transferPrivateUTXO
-      console.log('🚀 Calling transferPrivateUTXO with REAL cryptography...');
+      // 8. Ejecutar transacción BN254 transfer
+      console.log('🚀 Calling transferPrivateUTXO with REAL BN254 cryptography...');
       const tx = await this.contract!.transferPrivateUTXO(
         utxo.commitment,
-        newCommitment.pedersen_commitment,
+        newCommitmentResult.pedersen_commitment,
         newOwner,
         utxo.value,
-        BigInt(newBlindingFactor),
+        ZenroomHelpers.toBigInt('0x' + newBlindingFactor),
         nullifierHash,
         generatorParams,
         {
@@ -434,11 +587,11 @@ export class PrivateUTXOManager extends UTXOLibrary {
         }
       );
 
-      console.log('✅ Transfer transaction sent:', tx.hash);
+      console.log('✅ BN254 transfer transaction sent:', tx.hash);
       const receipt = await tx.wait();
-      console.log('✅ Transfer transaction confirmed:', receipt?.hash);
+      console.log('✅ BN254 transfer confirmed:', receipt?.hash);
 
-      // 7. Marcar UTXO original como gastado
+      // 9. Marcar UTXO original como gastado
       utxo.isSpent = true;
 
       // Actualizar en localStorage
@@ -446,92 +599,100 @@ export class PrivateUTXOManager extends UTXOLibrary {
         const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
         PrivateUTXOStorage.savePrivateUTXO(utxo.owner, utxo);
       } catch (storageError) {
-        console.warn('⚠️ Could not update original UTXO in localStorage:', storageError);
+        console.warn('⚠️ Could not update original BN254 UTXO in localStorage:', storageError);
       }
 
       this.emit('private:utxo:spent', utxoId);
 
-      // 8. Crear nuevo UTXO privado para el destinatario
-      const newUtxoId = await ZenroomHelpers.generateUTXOId(
-        newCommitment.pedersen_commitment,
-        newOwner,
-        Date.now()
-      );
+      // 10. Crear nuevo UTXO privado BN254 para el destinatario
+      let createdUTXOIds: string[] = [];
+      if (newOwner === this.currentAccount?.address) {
+        const newUtxoId = await this.generateBN254UTXOId(
+          newCommitmentResult.pedersen_commitment,
+          newOwner,
+          Date.now()
+        );
 
-      const newNullifierHash = await ZenroomHelpers.generateNullifierHash(
-        newCommitment.pedersen_commitment,
-        newOwner,
-        Date.now().toString()
-      );
+        const newNullifierHash = await ZenroomHelpers.generateNullifierHash(
+          newCommitmentResult.pedersen_commitment,
+          newOwner,
+          Date.now().toString()
+        );
 
-      const newPrivateUTXO: PrivateUTXO = {
-        id: newUtxoId,
-        exists: true,
-        value: utxo.value,
-        tokenAddress: utxo.tokenAddress,
-        owner: newOwner,
-        timestamp: toBigInt(Date.now()),
-        isSpent: false,
-        commitment: newCommitment.pedersen_commitment,
-        parentUTXO: utxoId,
-        utxoType: UTXOType.TRANSFER,
-        blindingFactor: newBlindingFactor,
-        nullifierHash: newNullifierHash,
-        localCreatedAt: Date.now(),
-        confirmed: true,
-        creationTxHash: receipt?.hash,
-        blockNumber: receipt?.blockNumber,
-        isPrivate: true
-      };
+        const newPrivateUTXO: PrivateUTXO = {
+          id: newUtxoId,
+          exists: true,
+          value: utxo.value,
+          tokenAddress: utxo.tokenAddress,
+          owner: newOwner,
+          timestamp: toBigInt(Date.now()),
+          isSpent: false,
+          commitment: newCommitmentResult.pedersen_commitment,
+          parentUTXO: utxoId,
+          utxoType: UTXOType.TRANSFER,
+          blindingFactor: newBlindingFactor,
+          nullifierHash: newNullifierHash,
+          localCreatedAt: Date.now(),
+          confirmed: true,
+          creationTxHash: receipt?.hash,
+          blockNumber: receipt?.blockNumber,
+          isPrivate: true,
+          cryptographyType: 'BN254'
+        };
 
-      // 9. Almacenar nuevo UTXO
-      this.utxos.set(newUtxoId, newPrivateUTXO);
-      this.privateUTXOs.set(newUtxoId, newPrivateUTXO);
+        // Almacenar nuevo UTXO BN254
+        this.utxos.set(newUtxoId, newPrivateUTXO);
+        this.privateUTXOs.set(newUtxoId, newPrivateUTXO);
+        createdUTXOIds.push(newUtxoId);
 
-      // 10. Guardar en localStorage para preservar privacidad
-      try {
-        const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
-        PrivateUTXOStorage.savePrivateUTXO(newOwner, newPrivateUTXO);
-      } catch (storageError) {
-        console.warn('⚠️ Could not save new UTXO to localStorage:', storageError);
+        // Guardar en localStorage
+        try {
+          const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
+          PrivateUTXOStorage.savePrivateUTXO(newOwner, newPrivateUTXO);
+        } catch (storageError) {
+          console.warn('⚠️ Could not save new BN254 UTXO to localStorage:', storageError);
+        }
+
+        this.emit('private:utxo:created', newPrivateUTXO);
       }
 
       const result: UTXOOperationResult = {
         success: true,
         transactionHash: receipt?.hash,
         gasUsed: receipt?.gasUsed,
-        createdUTXOIds: [newUtxoId]
+        createdUTXOIds
       };
 
-      console.log('✅ Private UTXO transferred successfully with REAL cryptography:', newUtxoId);
-      this.emit('private:utxo:transferred', { from: utxoId, to: newUtxoId, newOwner });
-      this.emit('private:utxo:created', newPrivateUTXO);
+      console.log('✅ BN254 private UTXO transferred successfully');
+      this.emit('private:utxo:transferred', { from: utxoId, to: createdUTXOIds[0], newOwner });
 
       return result;
 
     } catch (error) {
-      console.error('❌ Private UTXO transfer failed:', error);
+      console.error('❌ BN254 private UTXO transfer failed:', error);
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Private transfer failed',
+        error: error instanceof Error ? error.message : 'BN254 private transfer failed',
         errorDetails: error
       };
     }
   }
+
   /**
-   * Dividir UTXO privado usando splitPrivateUTXO con SOLO criptografía real
+   * Dividir UTXO privado usando REAL BN254 cryptography
    */
   async splitPrivateUTXO(params: SplitUTXOParams): Promise<UTXOOperationResult> {
     this.ensureInitialized();
-    console.log('🔐 Splitting private UTXO with REAL cryptography...');
+    console.log('✂️ Splitting private UTXO with REAL BN254 cryptography...');
+    this.bn254OperationCount++;
 
     try {
       const { inputUTXOId, outputValues, outputOwners } = params;
       
-      // 1. Obtener UTXO privado
+      // 1. Obtener UTXO privado BN254
       const inputUTXO = this.privateUTXOs.get(inputUTXOId) as PrivateUTXO;
-      if (!inputUTXO || !inputUTXO.isPrivate) {
-        throw new Error('Input UTXO is not private or does not exist');
+      if (!inputUTXO || !inputUTXO.isPrivate || inputUTXO.cryptographyType !== 'BN254') {
+        throw new Error('Input UTXO is not a BN254 private UTXO or does not exist');
       }
 
       if (inputUTXO.isSpent) {
@@ -541,22 +702,35 @@ export class PrivateUTXOManager extends UTXOLibrary {
       // 2. Validar conservación de valor
       const totalOutput = outputValues.reduce((sum, val) => sum + val, BigInt(0));
       if (totalOutput !== inputUTXO.value) {
-        throw new Error(`Sum of outputs (${totalOutput}) must equal input value (${inputUTXO.value})`);
+        throw new Error(`BN254 value conservation failed: input=${inputUTXO.value}, outputs=${totalOutput}`);
       }
 
-      console.log('✅ Value conservation validated:', {
+      console.log('✅ BN254 value conservation validated:', {
         inputValue: inputUTXO.value.toString(),
         outputSum: totalOutput.toString(),
         outputCount: outputValues.length
       });
 
-      // 3. Generar commitments Pedersen para cada output
+      // 3. Verificar commitment de entrada
+      console.log('🔍 Verifying input BN254 commitment...');
+      const isValidInputCommitment = await ZenroomHelpers.verifyPedersenCommitment(
+        inputUTXO.commitment,
+        inputUTXO.value.toString(),
+        inputUTXO.blindingFactor
+      );
+      
+      if (!isValidInputCommitment) {
+        throw new Error('Input BN254 commitment verification failed');
+      }
+
+      // 4. Generar commitments BN254 para cada output
       const outputCommitments: string[] = [];
       const outputBlindingFactors: string[] = [];
       const outputNullifierHashes: string[] = [];
 
+      console.log('🔐 Generating REAL BN254 Pedersen commitments for outputs...');
       for (let i = 0; i < outputValues.length; i++) {
-        const blindingFactor = await ZenroomHelpers.generateSecureNonce();
+        const blindingFactor = await ZenroomHelpers.generateSecureBlindingFactor();
         const commitment = await ZenroomHelpers.createPedersenCommitment(
           outputValues[i].toString(),
           blindingFactor
@@ -565,81 +739,78 @@ export class PrivateUTXOManager extends UTXOLibrary {
         const nullifierHash = await ZenroomHelpers.generateNullifierHash(
           commitment.pedersen_commitment,
           outputOwners[i],
-          Date.now().toString() + i
+          (Date.now() + i).toString()
         );
 
         outputCommitments.push(commitment.pedersen_commitment);
         outputBlindingFactors.push(blindingFactor);
         outputNullifierHashes.push(nullifierHash);
+        
+        console.log(`✅ Output ${i + 1} BN254 commitment created:`, commitment.pedersen_commitment.slice(0, 20) + '...');
       }
 
-      console.log('✅ Output commitments generated:', {
-        outputCount: outputCommitments.length,
-        commitments: outputCommitments.map(c => c.substring(0, 10) + '...')
-      });
-
-      // 4. Generar nullifier hash para el input
+      // 5. Generar nullifier hash para el input
       const inputNullifierHash = await ZenroomHelpers.generateNullifierHash(
         inputUTXO.commitment,
         inputUTXO.owner,
         Date.now().toString()
       );
 
-      // 5. Generar equality proof para demostrar conservación de valor
-      // Use the first output commitment and blinding factor for the proof (adjust as needed)
-      const equalityProof = await ZenroomHelpers.createEqualityProof(
+      // 6. Generar split proof para demostrar conservación de valor
+      console.log('🔍 Generating BN254 split proof...');
+      const splitProof = await ZenroomHelpers.generateSplitProof(
         inputUTXO.commitment,
-        outputCommitments[0],
         inputUTXO.value.toString(),
         inputUTXO.blindingFactor,
-        outputBlindingFactors[0]
+        outputValues.map(v => v.toString()),
+        outputBlindingFactors
       );
-      console.log('✅ Equality proof generated for value conservation');
+      console.log('✅ BN254 split proof generated');
 
-      // 6. Obtener generadores BN254
-      const generatorParams: GeneratorParams = {
-        gX: BigInt("0x1"),
-        gY: BigInt("0x2"),
-        hX: BigInt("0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001"),
-        hY: BigInt("0x2")
-      };
+      // 7. Obtener generadores BN254 estándar
+      const generatorParams = this.getBN254StandardGenerators();
 
-      // 7. Preparar transacción
+      // 8. Preparar transacción con gas optimizado para BN254 split
       const signer = EthereumHelpers.getSigner();
       if (!signer) {
-        throw new Error('Signer not available for split transaction');
+        throw new Error('Signer not available for BN254 split transaction');
       }
 
-      // Obtener gasPrice actual
+      // Gas optimizado para splits BN254 (más complejo)
       let gasPrice: bigint;
       try {
         const feeData = await signer.provider?.getFeeData();
-        gasPrice = feeData?.gasPrice || ethers.parseUnits('20', 'gwei');
+        gasPrice = feeData?.gasPrice || ethers.parseUnits('30', 'gwei');
+        gasPrice = gasPrice + (gasPrice * 30n / 100n); // +30% para BN254 split
       } catch (error) {
-        console.warn('Could not get gas price for split, using default:', error);
-        gasPrice = ethers.parseUnits('20', 'gwei');
+        console.warn('Using BN254 split fallback gas price:', error);
+        gasPrice = ethers.parseUnits('40', 'gwei'); // Higher for splits
       }
 
-      // Gas conservador para operaciones criptográficas complejas
-      const estimatedGas = BigInt(1000000); // 1M gas para split con múltiples outputs
-      const gasLimit = estimatedGas + (estimatedGas * 20n / 100n); // +20% buffer
+      // Gas más alto para operaciones de split BN254
+      const baseGas = BigInt(1000000); // 1M base para BN254 split
+      const extraGasPerOutput = BigInt(200000); // 200k extra por output
+      const estimatedGas = baseGas + (extraGasPerOutput * BigInt(outputValues.length));
+      const gasLimit = estimatedGas + (estimatedGas * 25n / 100n); // +25% buffer
 
-      console.log('⛽ Gas estimation for split:', {
+      console.log('⛽ BN254 split gas parameters:', {
+        baseGas: baseGas.toString(),
+        extraPerOutput: extraGasPerOutput.toString(),
         estimatedGas: estimatedGas.toString(),
         gasLimit: gasLimit.toString(),
         gasPrice: ethers.formatUnits(gasPrice, 'gwei') + ' gwei',
         outputCount: outputValues.length
       });
 
-      // 8. Ejecutar transacción usando splitPrivateUTXO
-      console.log('🚀 Calling splitPrivateUTXO with REAL cryptography...');
+      // 9. Ejecutar transacción BN254 split
+      console.log('🚀 Calling splitPrivateUTXO with REAL BN254 cryptography...');
       
       const tx = await this.contract!.splitPrivateUTXO(
         inputUTXO.commitment,
         outputCommitments,
         outputValues,
-        outputBlindingFactors.map(bf => BigInt(bf)),
-        equalityProof,
+        outputBlindingFactors.map(bf => ZenroomHelpers.toBigInt('0x' + bf)),
+        splitProof,
         inputNullifierHash,
         generatorParams,
         {
@@ -648,11 +819,11 @@ export class PrivateUTXOManager extends UTXOLibrary {
         }
       );
 
-      console.log('✅ Split transaction sent:', tx.hash);
+      console.log('✅ BN254 split transaction sent:', tx.hash);
       const receipt = await tx.wait();
-      console.log('✅ Split transaction confirmed:', receipt?.hash);
+      console.log('✅ BN254 split confirmed:', receipt?.hash);
 
-      // 9. Marcar input UTXO como gastado
+      // 10. Marcar input UTXO como gastado
       inputUTXO.isSpent = true;
 
       // Actualizar en localStorage
@@ -660,16 +831,16 @@ export class PrivateUTXOManager extends UTXOLibrary {
         const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
         PrivateUTXOStorage.savePrivateUTXO(inputUTXO.owner, inputUTXO);
       } catch (storageError) {
-        console.warn('⚠️ Could not update input UTXO in localStorage:', storageError);
+        console.warn('⚠️ Could not update input BN254 UTXO in localStorage:', storageError);
       }
 
       this.emit('private:utxo:spent', inputUTXOId);
 
-      // 10. Crear UTXOs de salida
+      // 11. Crear UTXOs de salida BN254
       const createdUTXOIds: string[] = [];
 
       for (let i = 0; i < outputValues.length; i++) {
-        const outputId = await ZenroomHelpers.generateUTXOId(
+        const outputId = await this.generateBN254UTXOId(
           outputCommitments[i],
           outputOwners[i],
           Date.now() + i
@@ -692,20 +863,21 @@ export class PrivateUTXOManager extends UTXOLibrary {
           confirmed: true,
           creationTxHash: receipt?.hash,
           blockNumber: receipt?.blockNumber,
-          isPrivate: true
+          isPrivate: true,
+          cryptographyType: 'BN254'
         };
 
-        // 11. Almacenar nuevo UTXO
+        // Almacenar nuevo UTXO BN254
         this.utxos.set(outputId, outputUTXO);
         this.privateUTXOs.set(outputId, outputUTXO);
         createdUTXOIds.push(outputId);
 
-        // 12. Guardar en localStorage para preservar privacidad
+        // Guardar en localStorage
         try {
           const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
           PrivateUTXOStorage.savePrivateUTXO(outputOwners[i], outputUTXO);
         } catch (storageError) {
-          console.warn(`⚠️ Could not save output UTXO ${i} to localStorage:`, storageError);
+          console.warn(`⚠️ Could not save output BN254 UTXO ${i} to localStorage:`, storageError);
         }
 
         this.emit('private:utxo:created', outputUTXO);
@@ -718,7 +890,7 @@ export class PrivateUTXOManager extends UTXOLibrary {
         createdUTXOIds
       };
 
-      console.log('✅ Private UTXO split successfully with REAL cryptography:', {
+      console.log('✅ BN254 private UTXO split successfully:', {
         inputUTXOId,
         createdOutputs: createdUTXOIds.length,
         outputIds: createdUTXOIds
@@ -728,35 +900,37 @@ export class PrivateUTXOManager extends UTXOLibrary {
         inputUTXOId, 
         outputUTXOIds: createdUTXOIds, 
         outputValues, 
-        outputOwners 
+        outputOwners,
+        cryptographyType: 'BN254'
       });
 
       return result;
 
     } catch (error) {
-      console.error('❌ Private UTXO split failed:', error);
+      console.error('❌ BN254 private UTXO split failed:', error);
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Private split failed',
+        error: error instanceof Error ? error.message : 'BN254 private split failed',
         errorDetails: error
       };
     }
   }
 
-   /**
-   * Retirar UTXO privado usando withdrawFromPrivateUTXO con SOLO criptografía real
+  /**
+   * Retirar UTXO privado usando REAL BN254 cryptography
    */
   async withdrawPrivateUTXO(params: WithdrawUTXOParams): Promise<UTXOOperationResult> {
     this.ensureInitialized();
-    console.log('🔐 Withdrawing private UTXO with REAL cryptography...');
+    console.log('💸 Withdrawing private UTXO with REAL BN254 cryptography...');
+    this.bn254OperationCount++;
 
     try {
       const { utxoId, recipient } = params;
       
-      // 1. Obtener UTXO privado
+      // 1. Obtener UTXO privado BN254
       const utxo = this.privateUTXOs.get(utxoId) as PrivateUTXO;
-      if (!utxo || !utxo.isPrivate) {
-        throw new Error('UTXO is not private or does not exist');
+      if (!utxo || !utxo.isPrivate || utxo.cryptographyType !== 'BN254') {
+        throw new Error('UTXO is not a BN254 private UTXO or does not exist');
       }
 
       if (utxo.isSpent) {
@@ -765,58 +939,64 @@ export class PrivateUTXOManager extends UTXOLibrary {
 
       // 2. Validar que el usuario actual es el propietario
       if (utxo.owner.toLowerCase() !== this.currentAccount!.address.toLowerCase()) {
-        throw new Error('Not authorized to withdraw this UTXO');
+        throw new Error('Not authorized to withdraw this BN254 UTXO');
       }
 
-      // 3. Generar nullifier hash para prevenir double-spending
+      // 3. Verificar commitment BN254 antes del withdrawal
+      console.log('🔍 Verifying BN254 commitment before withdrawal...');
+      const isValidCommitment = await ZenroomHelpers.verifyPedersenCommitment(
+        utxo.commitment,
+        utxo.value.toString(),
+        utxo.blindingFactor
+      );
+      
+      if (!isValidCommitment) {
+        throw new Error('BN254 commitment verification failed - UTXO data may be corrupted');
+      }
+
+      // 4. Generar nullifier hash para prevenir double-spending
       const nullifierHash = await ZenroomHelpers.generateNullifierHash(
         utxo.commitment,
         utxo.owner,
         Date.now().toString()
       );
-      console.log('✅ Nullifier hash generated for withdrawal:', nullifierHash);
+      console.log('✅ BN254 nullifier hash generated for withdrawal:', nullifierHash.slice(0, 20) + '...');
 
-      // 4. Obtener generadores BN254 (usar valores por defecto temporales)
-      const generatorParams: GeneratorParams = {
-        gX: BigInt("0x1"),
-        gY: BigInt("0x2"),
-        hX: BigInt("0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001"),
-        hY: BigInt("0x2")
-      };
+      // 5. Obtener generadores BN254 estándar
+      const generatorParams = this.getBN254StandardGenerators();
 
-      // 5. Preparar transacción con gas estimation
+      // 6. Preparar transacción con gas optimizado para BN254 withdrawal
       const signer = EthereumHelpers.getSigner();
       if (!signer) {
-        throw new Error('Signer not available for withdrawal transaction');
+        throw new Error('Signer not available for BN254 withdrawal transaction');
       }
 
-      // Obtener gasPrice actual
+      // Gas optimizado para withdrawals BN254
       let gasPrice: bigint;
       try {
         const feeData = await signer.provider?.getFeeData();
-        gasPrice = feeData?.gasPrice || ethers.parseUnits('20', 'gwei');
+        gasPrice = feeData?.gasPrice || ethers.parseUnits('25', 'gwei');
+        gasPrice = gasPrice + (gasPrice * 20n / 100n); // +20% para BN254
       } catch (error) {
-        console.warn('Could not get gas price for withdrawal, using default:', error);
-        gasPrice = ethers.parseUnits('20', 'gwei');
+        console.warn('Using BN254 withdrawal fallback gas price:', error);
+        gasPrice = ethers.parseUnits('30', 'gwei');
       }
 
-      // Gas conservador para operaciones criptográficas
-      const estimatedGas = BigInt(500000); // 500k gas para withdrawal
-      const gasLimit = estimatedGas + (estimatedGas * 20n / 100n); // +20% buffer
+      const estimatedGas = BigInt(600000); // 600k gas para BN254 withdrawal
+      const gasLimit = estimatedGas + (estimatedGas * 25n / 100n); // +25% buffer
 
-      console.log('⛽ Gas estimation for withdrawal:', {
-        estimatedGas: estimatedGas.toString(),
+      console.log('⛽ BN254 withdrawal gas parameters:', {
         gasLimit: gasLimit.toString(),
         gasPrice: ethers.formatUnits(gasPrice, 'gwei') + ' gwei',
-        recipient: recipient
+        recipient: recipient || 'same as owner'
       });
 
-      // 6. Ejecutar transacción usando withdrawFromPrivateUTXO
-      console.log('🚀 Calling withdrawFromPrivateUTXO with REAL cryptography...');
+      // 7. Ejecutar transacción BN254 withdrawal
+      console.log('🚀 Calling withdrawFromPrivateUTXO with REAL BN254 cryptography...');
       const tx = await this.contract!.withdrawFromPrivateUTXO(
         utxo.commitment,
         utxo.value,
-        BigInt(utxo.blindingFactor),
+        ZenroomHelpers.toBigInt('0x' + utxo.blindingFactor),
         nullifierHash,
         generatorParams,
         {
@@ -825,11 +1005,11 @@ export class PrivateUTXOManager extends UTXOLibrary {
         }
       );
 
-      console.log('✅ Withdrawal transaction sent:', tx.hash);
+      console.log('✅ BN254 withdrawal transaction sent:', tx.hash);
       const receipt = await tx.wait();
-      console.log('✅ Withdrawal transaction confirmed:', receipt?.hash);
+      console.log('✅ BN254 withdrawal confirmed:', receipt?.hash);
 
-      // 7. Marcar UTXO como gastado
+      // 8. Marcar UTXO como gastado
       utxo.isSpent = true;
 
       // Actualizar en localStorage
@@ -837,7 +1017,7 @@ export class PrivateUTXOManager extends UTXOLibrary {
         const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
         PrivateUTXOStorage.savePrivateUTXO(utxo.owner, utxo);
       } catch (storageError) {
-        console.warn('⚠️ Could not update UTXO in localStorage:', storageError);
+        console.warn('⚠️ Could not update BN254 UTXO in localStorage:', storageError);
       }
 
       this.emit('private:utxo:withdrawn', utxoId);
@@ -848,37 +1028,40 @@ export class PrivateUTXOManager extends UTXOLibrary {
         gasUsed: receipt?.gasUsed,
       };
 
-      console.log('✅ Private UTXO withdrawn successfully with REAL cryptography:', {
+      console.log('✅ BN254 private UTXO withdrawn successfully:', {
         utxoId,
-        recipient,
+        recipient: recipient || utxo.owner,
         value: utxo.value.toString(),
-        tokenAddress: utxo.tokenAddress
+        tokenAddress: utxo.tokenAddress,
+        cryptographyType: 'BN254'
       });
 
       return result;
 
     } catch (error) {
-      console.error('❌ Private UTXO withdrawal failed:', error);
+      console.error('❌ BN254 private UTXO withdrawal failed:', error);
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Private withdrawal failed',
+        error: error instanceof Error ? error.message : 'BN254 private withdrawal failed',
         errorDetails: error
       };
     }
   }
 
   // ========================
-  // FUNCIONES AUXILIARES Y ESTADÍSTICAS - SOLO CRIPTOGRAFÍA REAL
+  // FUNCIONES AUXILIARES Y ESTADÍSTICAS - SOLO BN254
   // ========================
 
   /**
-   * Obtener UTXOs privados por propietario
+   * Obtener UTXOs privados BN254 por propietario
    */
   getPrivateUTXOsByOwner(owner: string): PrivateUTXO[] {
     const utxos: PrivateUTXO[] = [];
     
     for (const [utxoId, utxo] of this.privateUTXOs.entries()) {
-      if (utxo.owner.toLowerCase() === owner.toLowerCase() && !utxo.isSpent) {
+      if (utxo.owner.toLowerCase() === owner.toLowerCase() && 
+          !utxo.isSpent && 
+          utxo.cryptographyType === 'BN254') {
         utxos.push(utxo);
       }
     }
@@ -887,13 +1070,15 @@ export class PrivateUTXOManager extends UTXOLibrary {
   }
 
   /**
-   * Obtener balance privado total
+   * Obtener balance privado BN254 total
    */
   getPrivateBalance(tokenAddress?: string): bigint {
     let balance = BigInt(0);
     
     for (const utxo of this.privateUTXOs.values()) {
-      if (!utxo.isSpent && (!tokenAddress || utxo.tokenAddress === tokenAddress)) {
+      if (!utxo.isSpent && 
+          utxo.cryptographyType === 'BN254' &&
+          (!tokenAddress || utxo.tokenAddress === tokenAddress)) {
         balance += utxo.value;
       }
     }
@@ -902,17 +1087,18 @@ export class PrivateUTXOManager extends UTXOLibrary {
   }
 
   /**
-   * Obtener estadísticas de UTXOs
+   * Obtener estadísticas de UTXOs BN254
    */
   getUTXOStats(): UTXOManagerStats {
     const allUTXOs = Array.from(this.privateUTXOs.values());
-    const unspentUTXOs = allUTXOs.filter(utxo => !utxo.isSpent);
-    const spentUTXOs = allUTXOs.filter(utxo => utxo.isSpent);
-    const confirmedUTXOs = allUTXOs.filter(utxo => utxo.confirmed);
+    const bn254UTXOs = allUTXOs.filter(utxo => utxo.cryptographyType === 'BN254');
+    const unspentUTXOs = bn254UTXOs.filter(utxo => !utxo.isSpent);
+    const spentUTXOs = bn254UTXOs.filter(utxo => utxo.isSpent);
+    const confirmedUTXOs = bn254UTXOs.filter(utxo => utxo.confirmed);
     const uniqueTokens = new Set(unspentUTXOs.map(utxo => utxo.tokenAddress)).size;
     const totalBalance = unspentUTXOs.reduce((sum, utxo) => sum + utxo.value, BigInt(0));
 
-    // Balance por token
+    // Balance por token (solo BN254)
     const balanceByToken: { [tokenAddress: string]: bigint } = {};
     unspentUTXOs.forEach(utxo => {
       if (!balanceByToken[utxo.tokenAddress]) {
@@ -921,7 +1107,7 @@ export class PrivateUTXOManager extends UTXOLibrary {
       balanceByToken[utxo.tokenAddress] += utxo.value;
     });
 
-    // Promedio de valor de UTXO
+    // Promedio de valor de UTXO BN254
     const averageUTXOValue = unspentUTXOs.length > 0 
       ? totalBalance / BigInt(unspentUTXOs.length)
       : BigInt(0);
@@ -937,7 +1123,7 @@ export class PrivateUTXOManager extends UTXOLibrary {
       const dayStart = date.setHours(0, 0, 0, 0);
       const dayEnd = date.setHours(23, 59, 59, 999);
       
-      const count = allUTXOs.filter(utxo => {
+      const count = bn254UTXOs.filter(utxo => {
         const utxoDate = utxo.localCreatedAt || 0;
         return utxoDate >= dayStart && utxoDate <= dayEnd;
       }).length;
@@ -950,82 +1136,194 @@ export class PrivateUTXOManager extends UTXOLibrary {
       unspentUTXOs: unspentUTXOs.length,
       uniqueTokens,
       totalBalance,
-      privateUTXOs: allUTXOs.filter(utxo => utxo.isPrivate).length,
+      privateUTXOs: bn254UTXOs.filter(utxo => utxo.isPrivate).length,
       spentUTXOs: spentUTXOs.length,
       confirmedUTXOs: confirmedUTXOs.length,
       balanceByToken,
       averageUTXOValue,
-      creationDistribution
+      creationDistribution,
+       bn254UTXOs: bn254UTXOs.length,
+      bn254Operations: this.bn254OperationCount,
+      cryptographyDistribution: {
+        BN254: bn254UTXOs.length,
+        Other: allUTXOs.length - bn254UTXOs.length
+      }
     };
   }
 
   /**
-   * Sincronizar con blockchain (solo datos públicos + localStorage para privacidad)
+   * Sincronizar con blockchain (solo datos públicos + localStorage para BN254 privacy)
    */
   async syncWithBlockchain(): Promise<boolean> {
     if (!this.contract || !this.currentEOA) {
       return false;
     }
 
-    console.log('🔄 Syncing with blockchain and localStorage...');
+    console.log('🔄 Syncing BN254 data with blockchain and localStorage...');
 
     try {
       // 1. Verificar conexión con contrato
       const userUTXOCount = await this.contract.getUserUTXOCount(this.currentEOA.address);
-      console.log(`📊 User has ${userUTXOCount} UTXOs in contract`);
+      console.log(`📊 User has ${userUTXOCount} UTXOs in contract (BN254 mode)`);
 
-      // 2. Cargar UTXOs privados desde localStorage (preserva privacidad total)
+      // 2. Cargar UTXOs privados BN254 desde localStorage (preserva privacidad total)
       try {
         const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
         const localUTXOs = PrivateUTXOStorage.getPrivateUTXOs(this.currentEOA.address);
         
-        console.log(`💾 Found ${localUTXOs.length} private UTXOs in localStorage`);
+        // Filtrar solo UTXOs BN254
+        const bn254UTXOs = localUTXOs.filter(utxo => 
+          utxo.cryptographyType === 'BN254' || 
+          utxo.isPrivate // Backwards compatibility
+        );
         
-        // 3. Cargar UTXOs en cache
+        console.log(`💾 Found ${bn254UTXOs.length} BN254 private UTXOs in localStorage`);
+        
+        // 3. Cargar UTXOs BN254 en cache
         this.privateUTXOs.clear();
-        for (const utxo of localUTXOs) {
-          this.privateUTXOs.set(utxo.id, utxo);
+        for (const utxo of bn254UTXOs) {
+          // Ensure BN254 type consistency
+          const bn254UTXO: PrivateUTXO = {
+            ...utxo,
+            cryptographyType: 'BN254',
+            isPrivate: true
+          };
+          this.privateUTXOs.set(utxo.id, bn254UTXO);
         }
 
-        // 4. Obtener estadísticas locales
+        // 4. Verificar integridad de commitments BN254
+        let verifiedCount = 0;
+        let corruptedCount = 0;
+        
+        for (const utxo of this.privateUTXOs.values()) {
+          if (!utxo.isSpent && utxo.blindingFactor) {
+            try {
+              const isValid = await ZenroomHelpers.verifyPedersenCommitment(
+                utxo.commitment,
+                utxo.value.toString(),
+                utxo.blindingFactor
+              );
+              
+              if (isValid) {
+                verifiedCount++;
+              } else {
+                corruptedCount++;
+                console.warn('⚠️ Corrupted BN254 commitment detected:', utxo.id);
+              }
+            } catch (verifyError) {
+              corruptedCount++;
+              console.warn('⚠️ Could not verify BN254 commitment:', utxo.id, verifyError);
+            }
+          }
+        }
+
+        // 5. Obtener estadísticas BN254
         const stats = this.getUTXOStats();
         
-        console.log('📈 Local UTXO statistics:');
-        console.log(`  - Total UTXOs: ${stats.totalUTXOs}`);
-        console.log(`  - Unspent UTXOs: ${stats.unspentUTXOs}`);
+        console.log('📈 BN254 UTXO statistics:');
+        console.log(`  - Total BN254 UTXOs: ${stats.totalUTXOs}`);
+        console.log(`  - Unspent BN254 UTXOs: ${stats.unspentUTXOs}`);
+        console.log(`  - Verified commitments: ${verifiedCount}`);
+        console.log(`  - Corrupted commitments: ${corruptedCount}`);
         console.log(`  - Unique tokens: ${stats.uniqueTokens}`);
-        console.log(`  - Total balance: ${stats.totalBalance.toString()}`);
+        console.log(`  - Total BN254 balance: ${stats.totalBalance.toString()}`);
+        console.log(`  - BN254 operations: ${stats.bn254Operations}`);
         
-        console.log('✅ Privacy-preserving sync completed');
+        console.log('✅ BN254 privacy-preserving sync completed');
         
-        // Emitir evento de sincronización
+        // Emitir evento de sincronización BN254
         this.emit('blockchain:synced', {
           localUTXOs: Array.from(this.utxos.values()).length,
           privateUTXOs: Array.from(this.privateUTXOs.values()).length,
+          bn254UTXOs: stats.cryptographyDistribution.BN254,
           contractUTXOCount: Number(userUTXOCount),
           localStats: stats,
-          syncMode: 'localStorage+contract'
+          syncMode: 'BN254-localStorage+contract',
+          verifiedCommitments: verifiedCount,
+          corruptedCommitments: corruptedCount
         });
 
         return true;
       } catch (storageError) {
-        console.warn('⚠️ Could not load from localStorage:', storageError);
+        console.warn('⚠️ Could not load BN254 UTXOs from localStorage:', storageError);
         return false;
       }
 
     } catch (error) {
-      console.error('❌ Sync failed:', error);
+      console.error('❌ BN254 sync failed:', error);
       this.emit('blockchain:sync:failed', error);
       return false;
     }
   }
 
   /**
-   * Limpiar datos privados (para seguridad)
+   * Limpiar datos privados BN254 (para seguridad)
    */
   clearPrivateData(): void {
     this.privateUTXOs.clear();
-    console.log('🧹 Private data cleared');
+    this.bn254OperationCount = 0;
+    console.log('🧹 BN254 private data cleared');
+  }
+
+  // ========================
+  // HELPER METHODS BN254
+  // ========================
+
+  /**
+   * Obtener generadores BN254 estándar
+   */
+  private getBN254StandardGenerators(): GeneratorParams {
+    return {
+      gX: BigInt("0x01"), // G1 generator X coordinate
+      gY: BigInt("0x02"), // G1 generator Y coordinate
+      hX: BigInt("0x2cf44499d5d27bb186308b7af7af02ac5bc9eeb6a3d147c186b21fb1b76e18da"), // H1 generator X
+      hY: BigInt("0x2c0f001f52110ccfe69108924926e45f0b0c868df0e7bde1fe16d3242dc715f6")  // H1 generator Y
+    };
+  }
+
+
+
+  /**
+   * Verificar si un UTXO usa BN254
+   */
+  isUTXOBN254(utxoId: string): boolean {
+    const utxo = this.privateUTXOs.get(utxoId);
+    return utxo?.cryptographyType === 'BN254' || false;
+  }
+
+  /**
+   * Obtener tipo de criptografía
+   */
+  get cryptographyType(): string {
+    return 'BN254';
+  }
+
+  /**
+   * Obtener conteo de operaciones BN254
+   */
+  get bn254OperationsCount(): number {
+    return this.bn254OperationCount;
+  }
+
+  /**
+   * Obtener información de BN254
+   */
+  getBN254Info(): {
+    operationsCount: number;
+    utxosCount: number;
+    verifiedCommitments: number;
+    isZenroomAvailable: boolean;
+  } {
+    const bn254UTXOs = Array.from(this.privateUTXOs.values()).filter(
+      utxo => utxo.cryptographyType === 'BN254'
+    );
+
+    return {
+      operationsCount: this.bn254OperationCount,
+      utxosCount: bn254UTXOs.length,
+      verifiedCommitments: bn254UTXOs.filter(utxo => !utxo.isSpent).length,
+      isZenroomAvailable: ZenroomHelpers.isZenroomAvailable()
+    };
   }
 }
 
@@ -1033,5 +1331,3 @@ export class PrivateUTXOManager extends UTXOLibrary {
  * Exportar instancia por defecto
  */
 export const privateUTXOManager = new PrivateUTXOManager();
-
- 

@@ -82,8 +82,9 @@
     }
   }
 
-  async function handleDeposit() {
+async function handleDeposit() {
     if (!tokenData || !amount || !utxoManager.currentAccount) {
+      console.log('❌ Missing required data:', { tokenData: !!tokenData, amount, account: !!utxoManager.currentAccount });
       return;
     }
 
@@ -91,6 +92,14 @@
     depositError = '';
 
     try {
+      console.log('🚀 Starting deposit process...');
+      console.log('📊 Deposit data:', {
+        amount,
+        tokenAddress,
+        tokenSymbol: tokenData.symbol,
+        accountAddress: utxoManager.currentAccount.address
+      });
+
       // Parse amount with token decimals - safer conversion
       const amountFloat = parseFloat(amount);
       if (isNaN(amountFloat) || amountFloat <= 0) {
@@ -105,6 +114,13 @@
       const fullAmountStr = integerPart + paddedDecimal;
       const amountBigInt = BigInt(fullAmountStr);
 
+      console.log('💰 Amount conversion:', {
+        input: amount,
+        float: amountFloat,
+        decimals: decimalsNum,
+        bigInt: amountBigInt.toString()
+      });
+
       // Prepare deposit parameters
       const depositParams = {
         amount: amountBigInt,
@@ -114,8 +130,11 @@
           customBlindingFactor : undefined
       };
 
+      console.log('🔐 Calling createPrivateUTXO...');
       // Execute deposit - always use createPrivateUTXO (simplified contract only supports private UTXOs)
       const result = await utxoManager.createPrivateUTXO(depositParams);
+
+      console.log('📄 Deposit result:', result);
 
       if (result.success) {
         // Reset form
@@ -123,6 +142,8 @@
         customBlindingFactor = '';
         useCustomBlinding = false;
         depositError = '';
+        
+        console.log('✅ Deposit successful!');
         
         // Notify parent
         dispatch('deposited', {
@@ -132,11 +153,11 @@
           txHash: result.transactionHash
         });
       } else {
-        console.error('Deposit failed:', result.error);
+        console.error('❌ Deposit failed:', result.error);
         depositError = result.error || 'Deposit failed';
       }
     } catch (error) {
-      console.error('Deposit error:', error);
+      console.error('❌ Deposit error:', error);
       
       // Extract user-friendly error messages
       let errorMessage = 'An unexpected error occurred';
@@ -146,6 +167,8 @@
           errorMessage = 'Transaction was rejected. Please try again.';
         } else if (error.message.includes('insufficient funds')) {
           errorMessage = 'Insufficient funds for gas fees.';
+        } else if (error.message.includes('Zenroom') || error.message.includes('nonce')) {
+          errorMessage = 'Cryptographic operation failed. Please refresh the page and try again.';
         } else if (error.message.includes('Failed to approve token')) {
           errorMessage = 'Token approval failed. Please check your wallet and try again.';
         } else if (error.message.includes('execution reverted')) {
@@ -192,6 +215,7 @@
   }
 
   function isValidAmount(): boolean {
+
     if (!amount || !tokenData) {
       return false;
     }
@@ -211,7 +235,8 @@
       const amountBigInt = BigInt(fullAmountStr);
       
       const isValid = amountBigInt > 0n && (!tokenData.balance || amountBigInt <= tokenData.balance);
-      
+      console.log(`isValid`, isValid);
+
       return isValid;
     } catch (error) {
       return false;
@@ -427,7 +452,6 @@
       <!-- Submit Button -->
       <button
         type="submit"
-        disabled={!tokenData || isDepositing || !isValidAmount()}
         class="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white py-4 rounded-lg font-semibold transition-all duration-200 shadow-lg hover:shadow-xl flex items-center justify-center space-x-2"
       >
         {#if isDepositing}

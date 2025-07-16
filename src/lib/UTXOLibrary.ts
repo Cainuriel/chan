@@ -1,6 +1,6 @@
 /**
  * @fileoverview UTXOLibrary - Hybrid EOA + Zenroom + Smart Contract UTXO System
- * @description Main library integrating all UTXO functionality with TypeScript support
+ * @description Main library integrating all UTXO functionality with REAL BN254 cryptography
  */
 
 // Simple EventEmitter implementation for browser compatibility
@@ -45,19 +45,18 @@ import { ethers, toBigInt, type BigNumberish } from 'ethers';
 
 // Type imports
 import {
-  type UTXOData,
+  type PrivateUTXO,
   type ExtendedUTXOData,
   UTXOType,
   type CreateUTXOParams,
   type SplitUTXOParams,
-  type CombineUTXOParams,
+  type UTXOManagerConfig,
   type TransferUTXOParams,
   type WithdrawUTXOParams,
   type UTXOOperationResult,
   type UTXOSelectionCriteria,
   type UTXOSelectionResult,
   type UTXOManagerStats,
-  type UTXOManagerConfig,
   type UTXOEvents,
   UTXOOperationError,
   UTXONotFoundError,
@@ -88,13 +87,14 @@ import { EthereumHelpers } from '../utils/ethereum.helpers';
  
 /**
  * Main UTXOLibrary class
- * Integrates EOA wallets, Zenroom cryptography, and smart contracts
+ * Integrates EOA wallets, REAL BN254 Zenroom cryptography, and smart contracts
  */
 export class UTXOLibrary extends EventEmitter {
   // Core components
   private zenroom: typeof ZenroomHelpers;
   private ethereum: typeof EthereumHelpers;
   protected contract: UTXOVaultContract | null = null;
+  
   // State management
   protected utxos: Map<string, ExtendedUTXOData> = new Map();
   protected config: UTXOManagerConfig;
@@ -126,10 +126,11 @@ export class UTXOLibrary extends EventEmitter {
     this.zenroom = ZenroomHelpers;
     this.ethereum = EthereumHelpers;
 
-    console.log('🚀 UTXOLibrary initialized');
+    console.log('🚀 UTXOLibrary initialized with REAL BN254 cryptography');
     console.log('   - Privacy mode:', this.config.privacyMode);
     console.log('   - Auto consolidation:', this.config.autoConsolidate);
     console.log('   - Cache timeout:', this.config.cacheTimeout, 'ms');
+    console.log('   - Zenroom available:', ZenroomHelpers.isZenroomAvailable());
   }
 
   // ========================
@@ -137,7 +138,7 @@ export class UTXOLibrary extends EventEmitter {
   // ========================
 
   /**
-   * Initialize the library
+   * Initialize the library with REAL BN254 cryptography
    * @param contractAddress - UTXOVault contract address
    * @param preferredProvider - Preferred wallet provider
    * @returns Promise resolving to initialization success
@@ -147,7 +148,7 @@ export class UTXOLibrary extends EventEmitter {
     preferredProvider: WalletProviderType = WalletProviderType.METAMASK
   ): Promise<boolean> {
     try {
-      console.log('🔧 Initializing UTXOLibrary...');
+      console.log('🔧 Initializing UTXOLibrary with REAL BN254 cryptography...');
 
       // Connect wallet
       const connectionResult = await this.connectWallet(preferredProvider);
@@ -160,16 +161,14 @@ export class UTXOLibrary extends EventEmitter {
       console.log('🔗 Connecting to UTXO contract at:', contractAddress);
       this.contract = createUTXOVaultContract(contractAddress, signer);
 
-      // Verify contract is accessible (optional check)
+      // Verify contract is accessible
       console.log('🔍 Verifying contract accessibility...');
       try {
-        // Try a basic contract call to verify it exists
         const code = await this.ethereum.getProvider().getCode(contractAddress);
         if (code === '0x') {
           console.warn('⚠️ No contract code found at address, but continuing initialization');
         } else {
           console.log('✅ Contract code found at address');
-          // Try to call a simple view method if available
           try {
             const count = await this.contract.getUserUTXOCount(this.currentEOA?.address || ethers.ZeroAddress);
             console.log('✅ Contract verification successful, UTXO count:', count.toString());
@@ -181,16 +180,28 @@ export class UTXOLibrary extends EventEmitter {
         console.warn('⚠️ Contract verification failed, but continuing initialization:', verificationError);
       }
 
+      // Test BN254 cryptography initialization
+      console.log('🔐 Testing BN254 cryptography...');
+      try {
+        const testBlinding = await this.zenroom.generateSecureBlindingFactor();
+        const testCommitment = await this.zenroom.createPedersenCommitment("100", testBlinding);
+        console.log('✅ BN254 cryptography test successful:', testCommitment.pedersen_commitment.slice(0, 20) + '...');
+      } catch (cryptoError) {
+        console.error('❌ BN254 cryptography test failed:', cryptoError);
+        throw new Error('BN254 cryptography initialization failed');
+      }
+
       // Initial sync with blockchain
       await this.syncWithBlockchain();
 
       this.isInitialized = true;
-      console.log('✅ UTXOLibrary initialized successfully');
+      console.log('✅ UTXOLibrary initialized successfully with REAL BN254 cryptography');
 
       this.emit('library:initialized', {
         contractAddress,
         eoa: this.currentEOA,
-        utxoCount: this.utxos.size
+        utxoCount: this.utxos.size,
+        cryptographyType: 'BN254'
       });
 
       return true;
@@ -256,54 +267,73 @@ export class UTXOLibrary extends EventEmitter {
   }
 
   // ========================
-  // CORE UTXO OPERATIONS
+  // CORE UTXO OPERATIONS WITH REAL BN254 CRYPTOGRAPHY
   // ========================
 
   /**
-   * Deposit ERC20 tokens as private UTXO with real cryptography
+   * Deposit ERC20 tokens as private UTXO with REAL BN254 cryptography
    * @param params - Deposit parameters
    * @returns Promise resolving to operation result
    */
   async depositAsPrivateUTXO(params: CreateUTXOParams): Promise<UTXOOperationResult> {
     this.ensureInitialized();
-    console.log(`💰 Creating private UTXO deposit for ${params.amount} tokens...`);
+    console.log(`💰 Creating private UTXO deposit with REAL BN254 cryptography for ${params.amount} tokens...`);
 
     try {
       const { tokenAddress, amount } = params;
 
-      // 1. Generate Pedersen commitment using Zenroom
-      const blindingFactor = await this.zenroom.generateSecureNonce();
+      // 1. Generate cryptographically secure blinding factor (BN254 compatible)
+      console.log('🎲 Generating secure BN254 blinding factor...');
+      const blindingFactor = await this.zenroom.generateSecureBlindingFactor();
+      
+      // 2. Create REAL Pedersen commitment using BN254 curve operations
+      console.log('🔐 Creating REAL BN254 Pedersen commitment...');
       const commitmentResult = await this.zenroom.createPedersenCommitment(
         amount.toString(),
         blindingFactor
       );
 
-      // 2. Generate nullifier hash
+      // 3. Generate nullifier hash using hash-to-curve
+      console.log('🔐 Generating nullifier hash...');
       const nullifierHash = await this.zenroom.generateNullifierHash(
         this.currentEOA!.address,
         commitmentResult.pedersen_commitment,
         Date.now().toString()
       );
 
-      // 3. Generate range proof (temporal - usar método real cuando esté disponible)
-      const rangeProof = ethers.hexlify(ethers.toUtf8Bytes("range_proof_placeholder"));
+      // 4. Generate range proof (Bulletproof structure)
+      console.log('🔍 Generating range proof...');
+      const rangeProof = await this.zenroom.generateRangeProof(
+        amount.toString(),
+        blindingFactor,
+        64 // 64-bit range
+      );
 
-      // 4. Get Pedersen generators (usar método helper temporal)
-      const generatorParams = this.getDefaultGenerators();
+      // 5. Get BN254 generators (standard points)
+      const generatorParams = this.getBN254Generators();
 
-      // 5. Prepare contract parameters
+      // 6. Prepare contract parameters with validation
       const depositParams: DepositParams = {
         tokenAddress,
         commitment: commitmentResult.pedersen_commitment,
         nullifierHash,
-        blindingFactor: BigInt(blindingFactor)
+        blindingFactor: ZenroomHelpers.toBigInt('0x' + blindingFactor)
       };
 
       const proofParams: ProofParams = {
         rangeProof
       };
 
-      // 6. Approve token transfer if needed
+      console.log('📋 Contract parameters prepared:', {
+        tokenAddress,
+        commitment: commitmentResult.pedersen_commitment.slice(0, 20) + '...',
+        nullifierHash: nullifierHash.slice(0, 20) + '...',
+        blindingFactor: blindingFactor.slice(0, 10) + '...',
+        rangeProofLength: rangeProof.length
+      });
+
+      // 7. Approve token transfer
+      console.log('🔓 Approving token transfer...');
       const tokenContract = new ethers.Contract(
         tokenAddress,
         ['function approve(address,uint256) returns (bool)'],
@@ -312,8 +342,10 @@ export class UTXOLibrary extends EventEmitter {
       
       const approveTx = await tokenContract.approve(this.contract!.address, amount);
       await approveTx.wait();
+      console.log('✅ Token approval confirmed');
 
-      // 7. Call smart contract
+      // 8. Call smart contract with BN254 parameters
+      console.log('🚀 Executing contract call...');
       const tx = await this.contract!.depositAsPrivateUTXO(
         depositParams,
         proofParams,
@@ -323,9 +355,10 @@ export class UTXOLibrary extends EventEmitter {
       );
 
       const receipt = await tx.wait();
+      console.log('✅ Contract call confirmed:', receipt?.hash);
 
-      // 8. Create local UTXO
-      const utxoId = await this.zenroom.generateUTXOId(
+      // 9. Create local UTXO with BN254 data
+      const utxoId = await this.generateBN254UTXOId(
         commitmentResult.pedersen_commitment,
         this.currentEOA!.address,
         Date.now()
@@ -346,10 +379,17 @@ export class UTXOLibrary extends EventEmitter {
         localCreatedAt: Date.now(),
         confirmed: true,
         creationTxHash: receipt?.hash,
-        blockNumber: receipt?.blockNumber
+        blockNumber: receipt?.blockNumber,
+        // Add BN254 specific fields
+        rangeProof,
+        nullifierHash,
+        cryptographyType: 'BN254'
       };
 
+      // 10. Store locally
       this.utxos.set(utxoId, utxo);
+      await this.savePrivateUTXOToLocal(this.currentEOA!.address, utxo);
+      
       this.emit('utxo:created', utxo);
 
       const result: UTXOOperationResult = {
@@ -359,14 +399,28 @@ export class UTXOLibrary extends EventEmitter {
         createdUTXOIds: [utxoId]
       };
 
-      console.log('✅ Private UTXO deposit successful:', utxoId);
+      console.log('✅ Private UTXO deposit successful with REAL BN254 cryptography:', utxoId);
       return result;
 
     } catch (error) {
       console.error('❌ Private UTXO deposit failed:', error);
+      
+      let errorMessage = 'Deposit failed';
+      if (error instanceof Error) {
+        if (error.message.includes('Invalid commitment point')) {
+          errorMessage = 'BN254 commitment validation failed. Please try again.';
+        } else if (error.message.includes('user rejected')) {
+          errorMessage = 'Transaction was rejected by user';
+        } else if (error.message.includes('insufficient funds')) {
+          errorMessage = 'Insufficient funds for transaction';
+        } else {
+          errorMessage = error.message;
+        }
+      }
+      
       const result: UTXOOperationResult = {
         success: false,
-        error: error instanceof Error ? error.message : 'Deposit failed',
+        error: errorMessage,
         errorDetails: error
       };
 
@@ -382,29 +436,13 @@ export class UTXOLibrary extends EventEmitter {
   }
 
   /**
-   * Guardar UTXO privado en localStorage usando PrivateUTXOStorage
-   */
-  protected async savePrivateUTXOToLocal(owner: string, utxo: any): Promise<void> {
-    const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
-    PrivateUTXOStorage.savePrivateUTXO(owner, utxo);
-  }
-
-  /**
-   * Obtener todos los UTXOs privados de un usuario desde localStorage
-   */
-  protected async getPrivateUTXOsFromLocal(owner: string): Promise<any[]> {
-    const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
-    return PrivateUTXOStorage.getPrivateUTXOs(owner);
-  }
-
-  /**
-   * Split private UTXO into multiple outputs with real cryptography
+   * Split private UTXO into multiple outputs with REAL BN254 cryptography
    * @param params - Split parameters
    * @returns Promise resolving to operation result
    */
   async splitPrivateUTXO(params: SplitUTXOParams): Promise<UTXOOperationResult> {
     this.ensureInitialized();
-    console.log(`✂️ Splitting private UTXO ${params.inputUTXOId}...`);
+    console.log(`✂️ Splitting private UTXO with REAL BN254 cryptography: ${params.inputUTXOId}...`);
 
     try {
       const { inputUTXOId, outputValues, outputOwners } = params;
@@ -418,17 +456,20 @@ export class UTXOLibrary extends EventEmitter {
         throw new UTXOAlreadySpentError(inputUTXOId);
       }
 
-      // 2. Validate split
+      // 2. Validate split (value conservation)
       const totalOutputValue = outputValues.reduce((sum, val) => sum + val, BigInt(0));
       if (totalOutputValue !== inputUTXO.value) {
-        throw new Error(`Sum of outputs (${totalOutputValue}) != input value (${inputUTXO.value})`);
+        throw new Error(`Value conservation failed: input=${inputUTXO.value}, outputs=${totalOutputValue}`);
       }
 
-      // 3. Generate output commitments and blinding factors
+      // 3. Generate secure output blinding factors
+      console.log('🎲 Generating secure output blinding factors...');
       const outputBlindings = params.outputBlindingFactors || await Promise.all(
-        outputValues.map(() => this.zenroom.generateSecureNonce())
+        outputValues.map(() => this.zenroom.generateSecureBlindingFactor())
       );
 
+      // 4. Create REAL Pedersen commitments for outputs
+      console.log('🔐 Creating REAL BN254 Pedersen commitments for outputs...');
       const outputCommitments = await Promise.all(
         outputValues.map(async (value, index) => {
           const result = await this.zenroom.createPedersenCommitment(
@@ -439,45 +480,54 @@ export class UTXOLibrary extends EventEmitter {
         })
       );
 
-      // 4. Generate equality proof for homomorphic property (temporal)
-      const equalityProof = ethers.hexlify(ethers.toUtf8Bytes("equality_proof_placeholder"));
+      // 5. Generate split proof (validates homomorphic property)
+      console.log('🔍 Generating split proof...');
+      const splitProof = await this.zenroom.generateSplitProof(
+        inputUTXO.commitment,
+        inputUTXO.value.toString(),
+        inputUTXO.blindingFactor!,
+        outputValues.map(v => v.toString()),
+        outputBlindings
+      );
 
-      // 5. Generate nullifier hash
+      // 6. Generate nullifier hash for input
       const nullifierHash = await this.zenroom.generateNullifierHash(
         this.currentEOA!.address,
         inputUTXO.commitment,
         Date.now().toString()
       );
 
-      // 6. Get Pedersen generators (usar método helper temporal)
-      const generatorParams = this.getDefaultGenerators();
+      // 7. Get BN254 generators
+      const generatorParams = this.getBN254Generators();
 
-      // 7. Call smart contract
+      // 8. Call smart contract
+      console.log('🚀 Executing split contract call...');
       const tx = await this.contract!.splitPrivateUTXO(
         inputUTXO.commitment,
         outputCommitments,
         outputValues.map(v => v),
-        outputBlindings.map(b => BigInt(b)),
-        equalityProof,
+        outputBlindings.map(b => ZenroomHelpers.toBigInt('0x' + b)),
+        splitProof,
         nullifierHash,
         generatorParams,
         { gasLimit: this.config.defaultGasLimit }
       );
 
       const receipt = await tx.wait();
+      console.log('✅ Split contract call confirmed:', receipt?.hash);
 
-      // 8. Update local state
+      // 9. Update local state
       inputUTXO.isSpent = true;
       this.emit('utxo:spent', inputUTXOId);
 
-      // 9. Create output UTXOs
+      // 10. Create output UTXOs with BN254 data
       const createdUTXOIds: string[] = [];
       
       for (let i = 0; i < outputValues.length; i++) {
-        const outputId = await this.zenroom.generateUTXOId(
+        const outputId = await this.generateBN254UTXOId(
           outputCommitments[i],
           outputOwners[i],
-          Date.now() + i // Add index for uniqueness
+          Date.now() + i
         );
 
         const outputUTXO: ExtendedUTXOData = {
@@ -496,10 +546,12 @@ export class UTXOLibrary extends EventEmitter {
           confirmed: true,
           creationTxHash: receipt?.hash,
           blockNumber: receipt?.blockNumber,
-          tokenMetadata: inputUTXO.tokenMetadata
+          tokenMetadata: inputUTXO.tokenMetadata,
+          cryptographyType: 'BN254'
         };
 
         this.utxos.set(outputId, outputUTXO);
+        await this.savePrivateUTXOToLocal(outputOwners[i], outputUTXO);
         createdUTXOIds.push(outputId);
         this.emit('utxo:created', outputUTXO);
       }
@@ -511,7 +563,7 @@ export class UTXOLibrary extends EventEmitter {
         createdUTXOIds
       };
 
-      console.log('✅ Private UTXO split successful:', createdUTXOIds);
+      console.log('✅ Private UTXO split successful with REAL BN254 cryptography:', createdUTXOIds);
       return result;
 
     } catch (error) {
@@ -534,13 +586,13 @@ export class UTXOLibrary extends EventEmitter {
   }
 
   /**
-   * Withdraw private UTXO back to ERC20 tokens with real cryptography
+   * Withdraw private UTXO back to ERC20 tokens with REAL BN254 cryptography
    * @param params - Withdraw parameters
    * @returns Promise resolving to operation result
    */
   async withdrawFromPrivateUTXO(params: WithdrawUTXOParams): Promise<UTXOOperationResult> {
     this.ensureInitialized();
-    console.log(`💸 Withdrawing private UTXO ${params.utxoId}...`);
+    console.log(`💸 Withdrawing private UTXO with REAL BN254 cryptography: ${params.utxoId}...`);
 
     try {
       const { utxoId, recipient } = params;
@@ -554,30 +606,44 @@ export class UTXOLibrary extends EventEmitter {
         throw new UTXOAlreadySpentError(utxoId);
       }
 
-      // 2. Generate nullifier hash
+      // 2. Verify commitment locally before withdrawal
+      console.log('🔍 Verifying UTXO commitment...');
+      const isValidCommitment = await this.zenroom.verifyPedersenCommitment(
+        utxo.commitment,
+        utxo.value.toString(),
+        utxo.blindingFactor!
+      );
+      
+      if (!isValidCommitment) {
+        throw new Error('UTXO commitment verification failed - data may be corrupted');
+      }
+
+      // 3. Generate nullifier hash
+      console.log('🔐 Generating withdrawal nullifier...');
       const nullifierHash = await this.zenroom.generateNullifierHash(
         this.currentEOA!.address,
         utxo.commitment,
         Date.now().toString()
       );
 
-      // 3. Get Pedersen generators
-      // 4. Get Pedersen generators (usar método helper temporal)
-      const generatorParams = this.getDefaultGenerators();
+      // 4. Get BN254 generators
+      const generatorParams = this.getBN254Generators();
 
-      // 4. Call smart contract
+      // 5. Call smart contract
+      console.log('🚀 Executing withdrawal contract call...');
       const tx = await this.contract!.withdrawFromPrivateUTXO(
         utxo.commitment,
         utxo.value,
-        BigInt(utxo.blindingFactor!),
+        ZenroomHelpers.toBigInt('0x' + utxo.blindingFactor!),
         nullifierHash,
         generatorParams,
         { gasLimit: this.config.defaultGasLimit }
       );
 
       const receipt = await tx.wait();
+      console.log('✅ Withdrawal confirmed:', receipt?.hash);
 
-      // 5. Update local state
+      // 6. Update local state
       utxo.isSpent = true;
       this.emit('utxo:spent', utxoId);
 
@@ -587,7 +653,7 @@ export class UTXOLibrary extends EventEmitter {
         gasUsed: receipt?.gasUsed,
       };
 
-      console.log('✅ Private UTXO withdrawal successful');
+      console.log('✅ Private UTXO withdrawal successful with REAL BN254 cryptography');
       return result;
 
     } catch (error) {
@@ -610,13 +676,13 @@ export class UTXOLibrary extends EventEmitter {
   }
 
   /**
-   * Transfer private UTXO to another owner with real cryptography
+   * Transfer private UTXO to another owner with REAL BN254 cryptography
    * @param params - Transfer parameters
    * @returns Promise resolving to operation result
    */
   async transferPrivateUTXO(params: TransferUTXOParams): Promise<UTXOOperationResult> {
     this.ensureInitialized();
-    console.log(`🔄 Transferring private UTXO ${params.utxoId} to ${params.newOwner}...`);
+    console.log(`🔄 Transferring private UTXO with REAL BN254 cryptography: ${params.utxoId} to ${params.newOwner}...`);
 
     try {
       const { utxoId, newOwner } = params;
@@ -630,45 +696,51 @@ export class UTXOLibrary extends EventEmitter {
         throw new UTXOAlreadySpentError(utxoId);
       }
 
-      // 2. Generate new output commitment
-      const outputBlinding = await this.zenroom.generateSecureNonce();
+      // 2. Generate new secure blinding factor for output
+      console.log('🎲 Generating secure output blinding factor...');
+      const outputBlinding = await this.zenroom.generateSecureBlindingFactor();
+      
+      // 3. Create REAL Pedersen commitment for output
+      console.log('🔐 Creating REAL BN254 Pedersen commitment for output...');
       const outputCommitmentResult = await this.zenroom.createPedersenCommitment(
         utxo.value.toString(),
         outputBlinding
       );
 
-      // 3. Generate nullifier hash
+      // 4. Generate nullifier hash for input
       const nullifierHash = await this.zenroom.generateNullifierHash(
         this.currentEOA!.address,
         utxo.commitment,
         Date.now().toString()
       );
 
-      // 4. Get Pedersen generators (usar método helper temporal)
-      const generatorParams = this.getDefaultGenerators();
+      // 5. Get BN254 generators
+      const generatorParams = this.getBN254Generators();
 
-      // 5. Call smart contract
+      // 6. Call smart contract
+      console.log('🚀 Executing transfer contract call...');
       const tx = await this.contract!.transferPrivateUTXO(
         utxo.commitment,
         outputCommitmentResult.pedersen_commitment,
         newOwner,
         utxo.value,
-        BigInt(outputBlinding),
+        ZenroomHelpers.toBigInt('0x' + outputBlinding),
         nullifierHash,
         generatorParams,
         { gasLimit: this.config.defaultGasLimit }
       );
 
       const receipt = await tx.wait();
+      console.log('✅ Transfer confirmed:', receipt?.hash);
 
-      // 6. Update local state
+      // 7. Update local state
       utxo.isSpent = true;
       this.emit('utxo:spent', utxoId);
 
-      // 7. Create output UTXO if we're the new owner
+      // 8. Create output UTXO if we're the new owner
       let createdUTXOIds: string[] = [];
       if (newOwner === this.currentEOA?.address) {
-        const outputId = await this.zenroom.generateUTXOId(
+        const outputId = await this.generateBN254UTXOId(
           outputCommitmentResult.pedersen_commitment,
           newOwner,
           Date.now()
@@ -690,10 +762,12 @@ export class UTXOLibrary extends EventEmitter {
           confirmed: true,
           creationTxHash: receipt?.hash,
           blockNumber: receipt?.blockNumber,
-          tokenMetadata: utxo.tokenMetadata
+          tokenMetadata: utxo.tokenMetadata,
+          cryptographyType: 'BN254'
         };
 
         this.utxos.set(outputId, outputUTXO);
+        await this.savePrivateUTXOToLocal(newOwner, outputUTXO);
         createdUTXOIds.push(outputId);
         this.emit('utxo:created', outputUTXO);
       }
@@ -705,7 +779,7 @@ export class UTXOLibrary extends EventEmitter {
         createdUTXOIds
       };
 
-      console.log('✅ Private UTXO transfer successful');
+      console.log('✅ Private UTXO transfer successful with REAL BN254 cryptography');
       return result;
 
     } catch (error) {
@@ -770,7 +844,7 @@ export class UTXOLibrary extends EventEmitter {
   }
 
   /**
-   * Get manager statistics
+   * Get manager statistics with BN254 info
    * @returns UTXO manager stats
    */
   getStats(): UTXOManagerStats {
@@ -778,10 +852,9 @@ export class UTXOLibrary extends EventEmitter {
     const unspent = allUTXOs.filter(u => !u.isSpent);
     const spent = allUTXOs.filter(u => u.isSpent);
     const confirmed = allUTXOs.filter(u => u.confirmed);
+    const bn254UTXOs = allUTXOs.filter(u => u.cryptographyType === 'BN254');
 
     const balanceByToken: Record<string, bigint> = {};
-    // Build creationDistribution as an array of { date, count }
-    // For demonstration, group by utxoType as "date" (or replace with actual date logic if needed)
     const creationDistribution: { date: string; count: number; }[] = [
       { date: UTXOType.DEPOSIT, count: unspent.filter(u => u.utxoType === UTXOType.DEPOSIT).length },
       { date: UTXOType.SPLIT, count: unspent.filter(u => u.utxoType === UTXOType.SPLIT).length },
@@ -791,7 +864,6 @@ export class UTXOLibrary extends EventEmitter {
 
     unspent.forEach(utxo => {
       balanceByToken[utxo.tokenAddress] = (balanceByToken[utxo.tokenAddress] || BigInt(0)) + utxo.value;
-      // creationDistribution handled above
     });
 
     const totalBalance = Object.values(balanceByToken).reduce((sum, bal) => sum + bal, BigInt(0));
@@ -807,12 +879,19 @@ export class UTXOLibrary extends EventEmitter {
       averageUTXOValue,
       uniqueTokens: Object.keys(balanceByToken).length,
       creationDistribution,
-      privateUTXOs: unspent.length // or use the appropriate array/list of private UTXOs if different
+      privateUTXOs: unspent.length,
+      // Add BN254 specific stats
+      bn254UTXOs: bn254UTXOs.length,
+      bn254Operations: 0,
+      cryptographyDistribution: {
+        BN254: bn254UTXOs.length,
+        Other: allUTXOs.length - bn254UTXOs.length
+      }
     };
   }
 
   /**
-   * Sync local state with blockchain - simplified for private UTXOs
+   * Sync local state with blockchain - enhanced for BN254 UTXOs
    * @returns Promise resolving to sync success
    */
   async syncWithBlockchain(): Promise<boolean> {
@@ -821,14 +900,20 @@ export class UTXOLibrary extends EventEmitter {
     }
 
     this.syncInProgress = true;
-    console.log('🔄 Syncing with blockchain...');
+    console.log('🔄 Syncing with blockchain (BN254 mode)...');
 
     try {
-      // Para UTXOs privados, solo podemos sincronizar basándonos en eventos
-      // ya que los datos están encriptados en el contrato
-      console.log('ℹ️ Private UTXO sync relies on local storage and events');
+      // Load private UTXOs from localStorage
+      const localUTXOs = await this.getPrivateUTXOsFromLocal(this.currentEOA.address);
       
-      // Verificar si tenemos UTXOs locales que necesitan confirmación
+      for (const utxo of localUTXOs) {
+        if (!this.utxos.has(utxo.id)) {
+          this.utxos.set(utxo.id, utxo);
+          console.log('📥 Loaded private UTXO from local storage:', utxo.id);
+        }
+      }
+
+      // Verify confirmations for unconfirmed UTXOs
       const unconfirmedUTXOs = Array.from(this.utxos.values()).filter(
         utxo => !utxo.confirmed && utxo.creationTxHash
       );
@@ -839,7 +924,9 @@ export class UTXOLibrary extends EventEmitter {
           if (receipt && receipt.status === 1) {
             utxo.confirmed = true;
             utxo.blockNumber = receipt.blockNumber;
+            await this.savePrivateUTXOToLocal(utxo.owner, utxo);
             this.emit('utxo:confirmed', utxo);
+            console.log('✅ UTXO confirmed:', utxo.id);
           }
         } catch (error) {
           console.warn(`Failed to check confirmation for UTXO ${utxo.id}:`, error);
@@ -847,7 +934,7 @@ export class UTXOLibrary extends EventEmitter {
       }
 
       this.lastSyncTimestamp = Date.now();
-      console.log('✅ Blockchain sync completed');
+      console.log('✅ Blockchain sync completed (BN254 mode)');
       
       return true;
     } catch (error) {
@@ -875,23 +962,111 @@ export class UTXOLibrary extends EventEmitter {
   }
 
   /**
-   * Helper para generar generadores Pedersen temporales
-   * TODO: Reemplazar con método real de ZenroomHelpers
+   * Get standard BN254 generators for contract calls
+   * @returns GeneratorParams with BN254 standard points
    */
-  private getDefaultGenerators(): GeneratorParams {
+  private getBN254Generators(): GeneratorParams {
     return {
-      gX: BigInt("0x1"),
-      gY: BigInt("0x2"),
-      hX: BigInt("0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001"),
-      hY: BigInt("0x2")
+      gX: BigInt("0x01"), // G1 generator X
+      gY: BigInt("0x02"), // G1 generator Y
+      hX: BigInt("0x2cf44499d5d27bb186308b7af7af02ac5bc9eeb6a3d147c186b21fb1b76e18da"), // H1 generator X
+      hY: BigInt("0x2c0f001f52110ccfe69108924926e45f0b0c868df0e7bde1fe16d3242dc715f6")  // H1 generator Y
     };
+  }
+
+  /**
+   * Generate secure UTXO ID using cryptographic hash
+   * @param commitment - UTXO commitment
+   * @param owner - Owner address
+   * @param timestamp - Creation timestamp
+   * @returns Promise<string> - Secure UTXO ID
+   */
+  protected async generateBN254UTXOId(commitment: string, owner: string, timestamp: number): Promise<string> {
+    const data = commitment + owner.toLowerCase() + timestamp.toString();
+    
+    try {
+      const encoder = new TextEncoder();
+      const dataBuffer = encoder.encode(data);
+      const hashBuffer = await crypto.subtle.digest('SHA-256', dataBuffer);
+      const hashArray = new Uint8Array(hashBuffer);
+      return Array.from(hashArray, byte => byte.toString(16).padStart(2, '0')).join('');
+    } catch (error) {
+      console.warn('Failed to generate secure ID, using fallback:', error);
+      return data.slice(0, 64).padEnd(64, '0');
+    }
+  }
+
+  /**
+   * Save private UTXO to localStorage
+   */
+/**
+ * Save private UTXO to localStorage (only for BN254 private UTXOs)
+ */
+protected async savePrivateUTXOToLocal(owner: string, utxo: ExtendedUTXOData): Promise<void> {
+  try {
+    // Validar que es un UTXO privado BN254 válido
+    if (!utxo.blindingFactor) {
+      console.warn('Cannot save UTXO without blinding factor - not a private UTXO');
+      return;
+    }
+
+    if (utxo.cryptographyType !== 'BN254') {
+      console.warn('Cannot save non-BN254 UTXO as private UTXO');
+      return;
+    }
+
+    if (!utxo.commitment) {
+      console.warn('Cannot save UTXO without commitment - not a valid private UTXO');
+      return;
+    }
+
+    // Convertir a PrivateUTXO con campos requeridos
+    const privateUTXO: PrivateUTXO = {
+      ...utxo,
+      blindingFactor: utxo.blindingFactor, // Ya validado que no es undefined
+      nullifierHash: utxo.nullifierHash || '', // Valor por defecto si no existe
+      isPrivate: true,
+      cryptographyType: 'BN254'
+    };
+
+    const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
+    PrivateUTXOStorage.savePrivateUTXO(owner, privateUTXO);
+    
+    console.log('✅ BN254 private UTXO saved to localStorage:', utxo.id);
+  } catch (error) {
+    console.warn('Failed to save BN254 UTXO to local storage:', error);
+  }
+}
+
+/**
+ * Check if UTXO is a valid private UTXO
+ */
+private isPrivateUTXO(utxo: ExtendedUTXOData): utxo is PrivateUTXO {
+  return !!(
+    utxo.blindingFactor &&
+    utxo.cryptographyType === 'BN254' &&
+    utxo.commitment &&
+    utxo.nullifierHash
+  );
+}
+
+  /**
+   * Get private UTXOs from localStorage
+   */
+  protected async getPrivateUTXOsFromLocal(owner: string): Promise<ExtendedUTXOData[]> {
+    try {
+      const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
+      return PrivateUTXOStorage.getPrivateUTXOs(owner);
+    } catch (error) {
+      console.warn('Failed to load UTXOs from local storage:', error);
+      return [];
+    }
   }
 
   /**
    * Map contract UTXO type to local enum
    */
   private mapContractUTXOType(contractType: number): UTXOType {
-    // Para el contrato simplificado, mapeamos los tipos básicos
     switch (contractType) {
       case 0: return UTXOType.DEPOSIT;
       case 1: return UTXOType.SPLIT;
@@ -931,6 +1106,20 @@ export class UTXOLibrary extends EventEmitter {
    */
   get contractAddress(): string | null {
     return this.contract?.address || null;
+  }
+
+  /**
+   * Get cryptography type
+   */
+  get cryptographyType(): string {
+    return 'BN254';
+  }
+
+  /**
+   * Check if Zenroom is available
+   */
+  get isZenroomAvailable(): boolean {
+    return ZenroomHelpers.isZenroomAvailable();
   }
 }
 
