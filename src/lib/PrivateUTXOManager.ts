@@ -259,7 +259,20 @@ export class PrivateUTXOManager extends UTXOLibrary {
    * Crear UTXO privado usando REAL BN254 cryptography
    */
   async createPrivateUTXO(params: CreateUTXOParams): Promise<UTXOOperationResult> {
-    this.ensureInitialized();
+    // Verificar inicialización del contrato
+    console.log('🔍 Verificando inicialización del contrato...');
+    try {
+      this.ensureInitialized();
+      console.log('✅ Contrato UTXO inicializado correctamente');
+    } catch (initError) {
+      console.error('❌ Error en la inicialización del contrato:', initError);
+      return {
+        success: false,
+        error: `Error de inicialización: ${initError instanceof Error ? initError.message : 'Error desconocido'}`,
+        errorDetails: initError
+      };
+    }
+    
     console.log('🔐 Creating private UTXO with REAL BN254 cryptography...');
     this.bn254OperationCount++;
 
@@ -314,14 +327,59 @@ export class PrivateUTXOManager extends UTXOLibrary {
       console.log('🔍 Preparing BN254-validated contract parameters...');
       
       // Validar que el commitment es un punto BN254 válido
-      if (!ZenroomHelpers.isValidHex(commitmentResult.pedersen_commitment, 64)) {
-        throw new Error('Invalid BN254 commitment format');
+      // El commitment siempre debe llevar el prefijo 0x, pero validamos sin él
+      if (!commitmentResult.pedersen_commitment.startsWith('0x')) {
+        console.error('Commitment missing 0x prefix:', commitmentResult.pedersen_commitment);
+        throw new Error('Invalid BN254 commitment format: missing 0x prefix');
       }
       
-      // Validar nullifier hash
-      if (!ZenroomHelpers.isValidHex(nullifierHash, 64)) {
-        throw new Error('Invalid BN254 nullifier hash format');
+      const commitmentHex = commitmentResult.pedersen_commitment.substring(2);
+      
+      // Un punto de curva elíptica BN254 tiene coordenadas x,y que ocupan 64 bytes (128 caracteres hex sin prefijo)
+      // Pero aquí estamos comprobando solo la mitad (32 bytes / 64 caracteres) porque es un formato específico 
+      if (!ZenroomHelpers.isValidHex(commitmentHex, 64)) {
+        console.error('Commitment format error:', {
+          original: commitmentResult.pedersen_commitment,
+          cleaned: commitmentHex,
+          length: commitmentHex.length,
+          expectedLength: 128
+        });
+        throw new Error(`Invalid BN254 commitment format: expected 128 hex chars, got ${commitmentHex.length}`);
       }
+      
+      // Log detallado para depuración
+      console.log('✅ Validated commitment format:', {
+        withPrefix: commitmentResult.pedersen_commitment.slice(0, 10) + '...',
+        withoutPrefix: commitmentHex.slice(0, 8) + '...',
+        length: commitmentHex.length
+      });
+      
+      // Validar nullifier hash con manejo estricto de formato
+      // El nullifier SIEMPRE debe incluir el prefijo 0x, pero lo validamos sin él
+      if (!nullifierHash.startsWith('0x')) {
+        console.error('Nullifier missing 0x prefix:', nullifierHash);
+        throw new Error('Invalid BN254 nullifier hash format: missing 0x prefix');
+      }
+      
+      const nullifierHex = nullifierHash.substring(2);
+      
+      // SHA-256 es 32 bytes (64 caracteres hex sin prefijo)
+      if (!ZenroomHelpers.isValidHex(nullifierHex, 32)) { 
+        console.error('Nullifier format error:', {
+          original: nullifierHash,
+          cleaned: nullifierHex,
+          length: nullifierHex.length,
+          expectedLength: 64
+        });
+        throw new Error(`Invalid BN254 nullifier hash format: expected 64 hex chars, got ${nullifierHex.length}`);
+      }
+      
+      // Log detallado para depuración
+      console.log('✅ Validated nullifier hash format:', {
+        withPrefix: nullifierHash.slice(0, 10) + '...',
+        withoutPrefix: nullifierHex.slice(0, 8) + '...',
+        length: nullifierHex.length
+      });
 
       const depositParams: DepositParams = {
         tokenAddress: tokenAddress,

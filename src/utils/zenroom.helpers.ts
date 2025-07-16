@@ -472,19 +472,41 @@ export class ZenroomHelpers {
   
   /**
    * Check if the value is a valid hexadecimal string of specified length
+   * @param value The string to validate
+   * @param byteLength The expected length in bytes (1 byte = 2 hex chars)
+   * @returns boolean indicating if the value is valid hex of correct length
    */
   static isValidHex(value: string, byteLength: number): boolean {
     try {
+      if (!value) {
+        console.warn('isValidHex: Empty value provided');
+        return false;
+      }
+      
       // Remove 0x prefix if present
       const hex = value.startsWith('0x') ? value.substring(2) : value;
       
+      // Log detailed info for debugging
+      console.log(`🔍 Validating hex [${byteLength} bytes]`, {
+        original: value,
+        withoutPrefix: hex,
+        actualLength: hex.length,
+        expectedLength: byteLength * 2
+      });
+      
       // Check if it's a valid hex string
       if (!/^[0-9a-fA-F]+$/.test(hex)) {
+        console.warn('isValidHex: Invalid characters in hex string');
         return false;
       }
       
       // Check length (each byte is 2 hex chars)
-      return hex.length === byteLength * 2;
+      const isValidLength = hex.length === byteLength * 2;
+      if (!isValidLength) {
+        console.warn(`isValidHex: Length mismatch - got ${hex.length}, expected ${byteLength * 2}`);
+      }
+      
+      return isValidLength;
     } catch (error) {
       console.error('Hex validation error:', error);
       return false;
@@ -595,20 +617,44 @@ export class ZenroomHelpers {
   }
 
   /**
-   * Generate nullifier hash using Poseidon-like construction
+   * Generate nullifier hash using cryptographic hash function
+   * @param address Owner address
+   * @param commitment Pedersen commitment
+   * @param nonce Unique nonce (typically timestamp)
+   * @returns Promise<string> Nullifier hash with 0x prefix
    */
   static async generateNullifierHash(address: string, commitment: string, nonce: string): Promise<string> {
     try {
-      // Combinar inputs para el hash
-      const input = address.toLowerCase() + commitment.toLowerCase() + nonce;
+      console.log('🔐 Generating nullifier hash with inputs:', {
+        address: address.slice(0, 10) + '...',
+        commitment: commitment.slice(0, 10) + '...',
+        nonce
+      });
       
-      // Usar SHA-256 como hash function (en producción usar Poseidon)
+      // Normalizar inputs
+      const normalizedAddress = address.toLowerCase().replace(/^0x/, '');
+      const normalizedCommitment = commitment.toLowerCase().replace(/^0x/, '');
+      
+      // Combinar inputs para el hash
+      const input = normalizedAddress + normalizedCommitment + nonce;
+      
+      // Usar SHA-256 como hash function
       const encoder = new TextEncoder();
       const data = encoder.encode(input);
       const hashBuffer = await crypto.subtle.digest('SHA-256', data);
       const hashArray = new Uint8Array(hashBuffer);
       
-      return '0x' + Array.from(hashArray, byte => byte.toString(16).padStart(2, '0')).join('');
+      // Convertir a hex string con prefijo 0x
+      const nullifierHex = '0x' + Array.from(hashArray, byte => byte.toString(16).padStart(2, '0')).join('');
+      
+      console.log('✅ Generated nullifier hash:', nullifierHex.slice(0, 10) + '...');
+      
+      // Validar que el nullifier es un hash correcto y en formato adecuado
+      if (!this.isValidHex(nullifierHex.substring(2), 32)) { // 32 bytes para SHA-256
+        throw new Error('Generated nullifier has invalid format');
+      }
+      
+      return nullifierHex;
     } catch (error) {
       console.error('Failed to generate nullifier hash:', error);
       if (error instanceof Error) {

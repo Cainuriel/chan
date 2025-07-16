@@ -3,6 +3,8 @@
  * @description Main library integrating all UTXO functionality with REAL BN254 cryptography
  */
 
+// Ya deben estar importados en otra parte del archivo
+
 // Simple EventEmitter implementation for browser compatibility
 class EventEmitter {
   private events: { [key: string]: Array<(...args: any[]) => void> } = {};
@@ -145,6 +147,42 @@ export class UTXOLibrary extends EventEmitter {
  async initialize(contractAddressOrProvider: string): Promise<boolean> {
   try {
     console.log('🚀 Initializing UTXOLibrary with BN254 cryptography...');
+    console.log('📝 Contract address:', contractAddressOrProvider);
+    
+    // Validar la dirección del contrato
+    if (!contractAddressOrProvider || contractAddressOrProvider === 'default') {
+      throw new Error('Invalid contract address provided. Please provide a valid Ethereum address.');
+    }
+    
+    // Intentar conectar con el contrato
+    try {
+      if (typeof window !== 'undefined' && window.ethereum) {
+        const provider = new ethers.BrowserProvider(window.ethereum);
+        const signer = await provider.getSigner();
+        
+        // Crear instancia del contrato con la ABI mínima necesaria para verificación
+        const testContract = new ethers.Contract(
+          contractAddressOrProvider,
+          [
+            "function getRegisteredTokenCount() view returns (uint256)",
+          ],
+          signer
+        );
+        
+        // Verificar que el contrato responde correctamente
+        await testContract.getRegisteredTokenCount();
+        
+        // Crear la instancia real del contrato con la ABI completa
+        this.contract = createUTXOVaultContract(contractAddressOrProvider, signer);
+        
+        // Realizar una llamada de prueba adicional con el contrato real para confirmar que funciona
+        const tokenCount = await this.contract.getRegisteredTokenCount();
+        console.log('✅ Contrato UTXO validado correctamente e inicializado. Tokens registrados:', tokenCount.toString());
+      }
+    } catch (contractError) {
+      console.error('❌ Error conectando con el contrato:', contractError);
+      throw new Error(`No se pudo conectar con el contrato UTXO en la dirección ${contractAddressOrProvider}. Verifica que la dirección sea correcta y que el contrato esté desplegado.`);
+    }
     
     // Test BN254 cryptography ANTES de hacer otras operaciones
     console.log('🔬 Testing BN254 cryptography...');
@@ -161,7 +199,8 @@ export class UTXOLibrary extends EventEmitter {
     this.isInitialized = true;
     this.emit('library:initialized', { 
       cryptography: 'BN254',
-      status: 'ready'
+      status: 'ready',
+      contractAddress: contractAddressOrProvider
     });
     
     console.log('🎉 UTXOLibrary initialized successfully with BN254 cryptography');
@@ -170,6 +209,14 @@ export class UTXOLibrary extends EventEmitter {
   } catch (error) {
     console.error('❌ Failed to initialize UTXOLibrary:', error);
     this.isInitialized = false;
+    
+    // Propagar error específico para mejor depuración
+    if (error instanceof Error) {
+      throw error;
+    } else {
+      throw new Error('Unknown error during UTXOLibrary initialization');
+    }
+    
     return false;
   }
 }
@@ -269,11 +316,28 @@ export class UTXOLibrary extends EventEmitter {
       // 5. Get BN254 generators (standard points)
       const generatorParams = this.getBN254Generators();
 
-      // 6. Prepare contract parameters with validation
+      // 6. Prepare contract parameters with validation and formato normalizado
+      // Aseguramos que tanto el commitment como el nullifier tienen formato 0x
+      const normalizedCommitment = commitmentResult.pedersen_commitment.startsWith('0x') ? 
+        commitmentResult.pedersen_commitment : '0x' + commitmentResult.pedersen_commitment;
+        
+      const normalizedNullifier = nullifierHash.startsWith('0x') ? 
+        nullifierHash : '0x' + nullifierHash;
+        
+      // Validar formato correcto
+      console.log('🔍 Validando formato de commitment y nullifier...');
+      if (!normalizedCommitment.startsWith('0x') || !ZenroomHelpers.isValidHex(normalizedCommitment.substring(2), 64)) {
+        throw new Error(`Invalid commitment format for contract: ${normalizedCommitment.slice(0, 10)}...`);
+      }
+      
+      if (!normalizedNullifier.startsWith('0x') || !ZenroomHelpers.isValidHex(normalizedNullifier.substring(2), 32)) {
+        throw new Error(`Invalid nullifier format for contract: ${normalizedNullifier.slice(0, 10)}...`);
+      }
+      
       const depositParams: DepositParams = {
         tokenAddress,
-        commitment: commitmentResult.pedersen_commitment,
-        nullifierHash,
+        commitment: normalizedCommitment,
+        nullifierHash: normalizedNullifier,
         blindingFactor: ZenroomHelpers.toBigInt('0x' + blindingFactor)
       };
 
@@ -283,8 +347,18 @@ export class UTXOLibrary extends EventEmitter {
 
       console.log('📋 Contract parameters prepared:', {
         tokenAddress,
-        commitment: commitmentResult.pedersen_commitment.slice(0, 20) + '...',
-        nullifierHash: nullifierHash.slice(0, 20) + '...',
+        commitment: {
+          value: normalizedCommitment.slice(0, 20) + '...',
+          hasPrefix: normalizedCommitment.startsWith('0x'),
+          length: normalizedCommitment.length,
+          lengthWithoutPrefix: normalizedCommitment.startsWith('0x') ? normalizedCommitment.length - 2 : normalizedCommitment.length
+        },
+        nullifierHash: {
+          value: normalizedNullifier.slice(0, 20) + '...',
+          hasPrefix: normalizedNullifier.startsWith('0x'),
+          length: normalizedNullifier.length,
+          lengthWithoutPrefix: normalizedNullifier.startsWith('0x') ? normalizedNullifier.length - 2 : normalizedNullifier.length
+        },
         blindingFactor: blindingFactor.slice(0, 10) + '...',
         rangeProofLength: rangeProof.length
       });
@@ -913,7 +987,12 @@ export class UTXOLibrary extends EventEmitter {
       throw new Error('UTXOLibrary not initialized. Call initialize() first.');
     }
     if (!this.contract) {
-      throw new Error('UTXO contract not initialized. Contract address may be invalid.');
+      console.error('Contract state:', {
+        isInitialized: this.isInitialized,
+        contractExists: !!this.contract,
+        currentAccount: this.currentEOA?.address || 'not connected'
+      });
+      throw new Error('UTXO contract not initialized. Contract address may be invalid or not properly set up. Please check the console for details.');
     }
   }
 

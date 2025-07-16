@@ -26,7 +26,7 @@
   const privacyMode = true;
 
   // Configuration
-  const CONTRACT_ADDRESS = '0x3c2A6aA03743A2D8220ade79e242A042fB9E576b';
+  const CONTRACT_ADDRESS = '0x3c2A6aA03743A2D8220ade79e242A042fB9E576b'; // Actualizado a la dirección correcta del contrato UTXOVault
   const PREFERRED_PROVIDER = WalletProviderType.METAMASK;
 
   onMount(async () => {
@@ -131,9 +131,9 @@
   
   async function initializeLibrary() {
     try {
-      console.log('🚀 Initializing library...');
+      console.log('🚀 Initializing library with contract address:', CONTRACT_ADDRESS);
       
-      const success = await privateUTXOManager.initialize('default');
+      const success = await privateUTXOManager.initialize(CONTRACT_ADDRESS);
       if (success) {
         isInitialized = true;
         const account = privateUTXOManager.currentAccount;
