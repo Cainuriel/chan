@@ -224,24 +224,17 @@ export interface UTXOSelectionResult {
  * UTXO manager statistics
  */
 export interface UTXOManagerStats {
-  /** Total number of UTXOs */
   totalUTXOs: number;
-  /** Number of unspent UTXOs */
   unspentUTXOs: number;
-  /** Number of spent UTXOs */
-  spentUTXOs: number;
-  /** Number of confirmed UTXOs */
-  confirmedUTXOs: number;
-  /** Total balance across all UTXOs */
-  totalBalance: bigint;
-  /** Balance by token address */
-  balanceByToken: Record<string, bigint>;
-  /** Average UTXO value */
-  averageUTXOValue: bigint;
-  /** Number of unique tokens */
   uniqueTokens: number;
-  /** Creation distribution by type */
-  creationDistribution: Record<UTXOType, number>;
+  totalBalance: bigint;
+  privateUTXOs: number;
+  // Añadir las propiedades faltantes
+  spentUTXOs: number;
+  confirmedUTXOs: number;
+  balanceByToken: { [tokenAddress: string]: bigint };
+  averageUTXOValue: bigint;
+  creationDistribution: Array<{ date: string; count: number }>;
 }
 
 /**

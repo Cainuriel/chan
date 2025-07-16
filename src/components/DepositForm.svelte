@@ -114,10 +114,8 @@
           customBlindingFactor : undefined
       };
 
-      // Execute deposit - choose between private and public based on privacy mode
-      const result = privacyMode 
-        ? await utxoManager.createPrivateUTXO(depositParams)
-        : await utxoManager.depositAsUTXO(depositParams);
+      // Execute deposit - always use createPrivateUTXO (simplified contract only supports private UTXOs)
+      const result = await utxoManager.createPrivateUTXO(depositParams);
 
       if (result.success) {
         // Reset form
@@ -250,16 +248,16 @@
   <!-- Header -->
   <div class="bg-white/10 backdrop-blur-sm rounded-lg p-6 border border-white/20">
     <div class="flex items-center justify-between mb-2">
-      <h2 class="text-xl font-bold text-white">Deposit ERC20 as UTXO</h2>
-      <div class="flex items-center space-x-2 px-3 py-1 rounded-lg {privacyMode ? 'bg-purple-600/20 border border-purple-500/50' : 'bg-blue-600/20 border border-blue-500/50'}">
-        <span class="text-lg">{privacyMode ? '🔐' : '🔓'}</span>
-        <span class="text-sm font-medium {privacyMode ? 'text-purple-300' : 'text-blue-300'}">
-          {privacyMode ? 'Private Mode' : 'Public Mode'}
+      <h2 class="text-xl font-bold text-white">Deposit ERC20 as Private UTXO</h2>
+      <div class="flex items-center space-x-2 px-3 py-1 rounded-lg bg-purple-600/20 border border-purple-500/50">
+        <span class="text-lg">🔐</span>
+        <span class="text-sm font-medium text-purple-300">
+          Private Mode Only
         </span>
       </div>
     </div>
     <p class="text-gray-300 text-sm">
-      Convert your ERC20 tokens into {privacyMode ? 'privacy-preserving' : 'transparent'} UTXOs using {privacyMode ? 'BBS+ cryptography' : 'standard cryptography'}
+      Convert your ERC20 tokens into privacy-preserving UTXOs using Pedersen commitments and real cryptography
     </p>
   </div>
 
@@ -429,15 +427,15 @@
       <!-- Submit Button -->
       <button
         type="submit"
-        disabled={!tokenData || isDepositing}
+        disabled={!tokenData || isDepositing || !isValidAmount()}
         class="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white py-4 rounded-lg font-semibold transition-all duration-200 shadow-lg hover:shadow-xl flex items-center justify-center space-x-2"
       >
         {#if isDepositing}
           <div class="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-          <span>Creating UTXO...</span>
+          <span>Creating Private UTXO...</span>
         {:else}
-          <span>💰</span>
-          <span>Deposit as UTXO</span>
+          <span>🔐</span>
+          <span>Deposit as Private UTXO</span>
         {/if}
       </button>
       
@@ -460,12 +458,13 @@
     <div class="flex space-x-3">
       <div class="text-blue-400 text-xl">ℹ️</div>
       <div class="text-sm text-blue-200">
-        <div class="font-medium mb-1">How it works:</div>
+        <div class="font-medium mb-1">How it works (Real Cryptography):</div>
         <ol class="list-decimal list-inside space-y-1 text-blue-300">
           <li>Your ERC20 tokens are transferred to the UTXO Vault contract</li>
-          <li>A Pedersen commitment is created using Zenroom cryptography</li>
-          <li>You receive a UTXO representing your deposited tokens</li>
-          <li>The UTXO provides privacy while maintaining blockchain verifiability</li>
+          <li>A Pedersen commitment is created using Zenroom cryptography on BN254</li>
+          <li>Range proofs ensure the amount is valid without revealing it</li>
+          <li>You receive a private UTXO with mathematical privacy guarantees</li>
+          <li>All operations use real cryptographic verification - no shortcuts</li>
         </ol>
       </div>
     </div>

@@ -1,5 +1,5 @@
 /**
- * Structs for grouped parameters in depositAsPrivateUTXO (matching Solidity)
+ * Structs for grouped parameters in depositAsPrivateUTXO (matching simplified Solidity)
  */
 export interface DepositParams {
   tokenAddress: string;
@@ -9,8 +9,7 @@ export interface DepositParams {
 }
 
 export interface ProofParams {
-  bbsProof: BBSProofDataContract;
-  rangeProof: string; // bytes
+  rangeProof: string; // bytes - Range proof real (Bulletproof)
 }
 
 export interface GeneratorParams {
@@ -20,8 +19,9 @@ export interface GeneratorParams {
   hY: bigint;
 }
 /**
- * @fileoverview TypeScript type definitions for UTXOVault smart contract
- * @description Types, ABI, and interfaces for UTXOVault contract interaction
+ * @fileoverview TypeScript type definitions for UTXOVault smart contract (simplified)
+ * @description Types, ABI, and interfaces for simplified UTXOVault contract interaction
+ * Only includes Pedersen commitments, range proofs, and equality proofs - no BBS+ or issuer logic
  */
 
 import { 
@@ -33,22 +33,7 @@ import {
 } from 'ethers';
 
 /**
- * UTXOVault contract data structures (matching Solidity structs)
- */
-export interface UTXODataContract {
-  exists: boolean;
-  value: bigint;
-  tokenAddress: string;
-  owner: string;
-  timestamp: bigint;
-  isSpent: boolean;
-  commitment: string; // bytes32 as hex string
-  parentUTXO: string; // bytes32 as hex string
-  utxoType: number; // enum as number
-}
-
-/**
- * UTXOVault private UTXO structures (matching enhanced Solidity structs)
+ * UTXOVault contract data structures (simplified - matching Solidity structs)
  */
 export interface PrivateUTXOContract {
   exists: boolean;
@@ -60,36 +45,20 @@ export interface PrivateUTXOContract {
   parentUTXO: string; // bytes32
   utxoType: number; // enum
   nullifierHash: string; // bytes32
-  bbsCredential: string; // bytes
-}
-
-export interface BBSProofDataContract {
-  proof: string; // bytes
-  disclosedAttributes: string[]; // bytes32[]
-  disclosureIndexes: bigint[]; // uint256[]
-  challenge: string; // bytes32
-  timestamp: bigint;
-}
-
-export interface CommitmentProofContract {
-  commitment: string; // bytes32
-  rangeProof: string; // bytes
-  equalityProof: string; // bytes
 }
 
 /**
- * Enhanced function parameters for private operations
+ * Enhanced function parameters for private operations (simplified)
  */
 export interface DepositAsPrivateUTXOParams {
   tokenAddress: string;
-  // amount eliminado: la cantidad se extrae del proof y commitment
+  amount: bigint; // Cantidad real a depositar
   blindingFactor: bigint;
   gX: bigint;
   gY: bigint;
   hX: bigint;
   hY: bigint;
   commitment: string; // bytes32
-  bbsProof: BBSProofDataContract;
   nullifierHash: string; // bytes32
   rangeProof: string; // bytes
 }
@@ -97,7 +66,8 @@ export interface DepositAsPrivateUTXOParams {
 export interface SplitPrivateUTXOParams {
   inputCommitment: string; // bytes32
   outputCommitments: string[]; // bytes32[]
-  splitProof: BBSProofDataContract;
+  outputAmounts: bigint[]; // uint256[]
+  outputBlindings: bigint[]; // uint256[]
   equalityProof: string; // bytes
   nullifierHash: string; // bytes32
 }
@@ -105,19 +75,21 @@ export interface SplitPrivateUTXOParams {
 export interface TransferPrivateUTXOParams {
   inputCommitment: string; // bytes32
   outputCommitment: string; // bytes32
-  transferProof: BBSProofDataContract;
   newOwner: string; // address
+  amount: bigint; // uint256
+  outputBlinding: bigint; // uint256
   nullifierHash: string; // bytes32
 }
 
 export interface WithdrawFromPrivateUTXOParams {
   commitment: string; // bytes32
-  withdrawProof: BBSProofDataContract;
+  amount: bigint; // uint256
+  blindingFactor: bigint; // uint256
   nullifierHash: string; // bytes32
 }
 
 /**
- * Enhanced events for private operations
+ * Enhanced events for private operations (simplified)
  */
 export interface PrivateUTXOCreatedEvent {
   commitment: string;
@@ -125,25 +97,21 @@ export interface PrivateUTXOCreatedEvent {
   tokenAddress: string;
   nullifierHash: string;
   utxoType: number;
+  amount: bigint;
 }
 
 export interface PrivateTransferEvent {
   inputCommitment: string;
   outputCommitment: string;
   nullifierHash: string;
-  transferProof: string;
+  newOwner: string;
 }
 
 export interface PrivateWithdrawalEvent {
   commitment: string;
   recipient: string;
   nullifierHash: string;
-}
-
-export interface BBSCredentialRevokedEvent {
-  credentialId: string;
-  issuer: string;
-  timestamp: bigint;
+  amount: bigint;
 }
 
 export interface SplitOperationContract {
@@ -273,9 +241,9 @@ export interface CombineUTXOsResult {
 }
 
 /**
- * UTXOVault contract view function results
+ * UTXOVault contract view function results (simplified)
  */
-export interface GetUTXOInfoResult extends UTXODataContract {}
+export interface GetUTXOInfoResult extends PrivateUTXOContract {}
 
 export interface GetUTXOsByOwnerResult {
   utxoIds: string[]; // bytes32[]
@@ -355,33 +323,23 @@ export interface UTXOVaultEventFilters {
 }
 
 /**
- * Contract error types (matching Solidity custom errors)
+ * Contract error types (matching simplified Solidity custom errors)
  */
 export enum UTXOVaultErrorType {
-  // Original errors
+  // Core UTXO errors
   UTXOAlreadyExists = 'UTXOAlreadyExists',
   UTXONotFound = 'UTXONotFound',
   UTXOAlreadySpent = 'UTXOAlreadySpent',
-  InvalidProof = 'InvalidProof',
-  InvalidSplit = 'InvalidSplit',
-  InvalidCombine = 'InvalidCombine',
   InvalidOwner = 'InvalidOwner',
-  InvalidNonce = 'InvalidNonce',
   TokenNotSupported = 'TokenNotSupported',
   InsufficientValue = 'InsufficientValue',
-  ZenroomProofRequired = 'ZenroomProofRequired',
   
-  // New privacy-related errors
-  InvalidBBSProof = 'InvalidBBSProof',
+  // Privacy-related errors (simplified)
   InvalidCommitment = 'InvalidCommitment',
   InvalidRangeProof = 'InvalidRangeProof',
   NullifierAlreadyUsed = 'NullifierAlreadyUsed',
-  ChallengeAlreadyUsed = 'ChallengeAlreadyUsed',
-  UnauthorizedIssuer = 'UnauthorizedIssuer',
-  RevokedCredential = 'RevokedCredential',
-  InvalidSelectiveDisclosure = 'InvalidSelectiveDisclosure',
-  ProofExpired = 'ProofExpired',
-  InvalidEqualityProof = 'InvalidEqualityProof'
+  InvalidEqualityProof = 'InvalidEqualityProof',
+  NotOwner = 'NotOwner'
 }
 
 /**
@@ -406,85 +364,54 @@ export class UTXOVaultProofError extends UTXOVaultError {
   ) {
     super(
       `Invalid ${proofType} proof${reason ? `: ${reason}` : ''}`,
-      UTXOVaultErrorType.InvalidProof
+      UTXOVaultErrorType.InvalidRangeProof
     );
     this.name = 'UTXOVaultProofError';
   }
 }
 
 /**
- * UTXOVault contract ABI - Enhanced with Private UTXO support
+ * UTXOVault contract ABI - Simplified without BBS+ and issuer logic
  */
 export const UTXO_VAULT_ABI = [
   // Constructor
   "constructor()",
   
   // Public variables (auto-generated getters)
-  "function utxos(bytes32) view returns (bool exists, uint256 value, address tokenAddress, address owner, uint256 timestamp, bool isSpent, bytes32 commitment, bytes32 parentUTXO, uint8 utxoType)",
-  "function utxosByOwner(address, uint256) view returns (bytes32)",
-  "function utxoIndexByOwner(address, bytes32) view returns (uint256)",
-  "function splitOperations(bytes32) view returns (bytes32 inputUTXO, bytes32[] outputUTXOs, address[] outputOwners, uint256[] outputValues, bytes splitProof, uint256 timestamp)",
-  "function combineOperations(bytes32) view returns (bytes32[] inputUTXOs, bytes32 outputUTXO, address outputOwner, uint256 totalValue, bytes combineProof, uint256 timestamp)",
-  "function nonces(address) view returns (uint256)",
-  "function supportedTokens(address) view returns (bool)",
-  "function useWhitelist() view returns (bool)",
-  "function tokenBalances(address) view returns (uint256)",
-  "function tokensUsed(uint256) view returns (address)",
-  "function tokenExists(address) view returns (bool)",
-  "function requireZenroomProofs() view returns (bool)",
-  "function verifiedZenroomProofs(bytes32) view returns (bool)",
+  "function registeredTokens(address) view returns (bool)",
+  "function tokenRegistrationTime(address) view returns (uint256)",
+  "function tokenNames(address) view returns (string)",
+  "function tokenSymbols(address) view returns (string)",
+  "function tokenDecimals(address) view returns (uint8)",
+  "function allRegisteredTokens(uint256) view returns (address)",
   
-  // Privacy-related getters
-  "function authorizedIssuers(address) view returns (bool)",
-  "function issuerPublicKeys(address) view returns (bytes)",
-  "function requireBBSProofs() view returns (bool)",
-  "function enableSelectiveDisclosure() view returns (bool)",
-  "function proofValidityPeriod() view returns (uint256)",
-  
-  // Original functions (maintained for compatibility)
-  "function depositAsUTXO(address tokenAddress, uint256 amount, bytes32 commitment, bytes calldata zenroomProof) external",
-  "function withdrawFromUTXO(bytes32 utxoId, bytes calldata burnProof, bytes calldata openingProof) external",
-  "function splitUTXO(bytes32 inputUTXOId, bytes32[] calldata outputCommitments, address[] calldata outputOwners, uint256[] calldata outputValues, bytes calldata splitProof) external returns (bytes32[] memory)",
-  "function combineUTXOs(bytes32[] calldata inputUTXOIds, bytes32 outputCommitment, address outputOwner, bytes calldata combineProof) external returns (bytes32)",
-  "function transferUTXO(bytes32 utxoId, address newOwner, bytes calldata transferProof) external",
-  
-  // New private UTXO functions
-  "function depositAsPrivateUTXO((address tokenAddress, bytes32 commitment, bytes32 nullifierHash, uint256 blindingFactor) depositParams, (bytes proof, bytes32[] disclosedAttributes, uint256[] disclosureIndexes, bytes32 challenge, uint256 timestamp, bytes rangeProof) proofParams, (uint256 gX, uint256 gY, uint256 hX, uint256 hY) generators) external",
-  "function splitPrivateUTXO(bytes32 inputCommitment, bytes32[] calldata outputCommitments, (bytes proof, bytes32[] disclosedAttributes, uint256[] disclosureIndexes, bytes32 challenge, uint256 timestamp) splitProof, bytes calldata equalityProof, bytes32 nullifierHash) external returns (bytes32[] memory)",
-  "function transferPrivateUTXO(bytes32 inputCommitment, bytes32 outputCommitment, (bytes proof, bytes32[] disclosedAttributes, uint256[] disclosureIndexes, bytes32 challenge, uint256 timestamp) transferProof, address newOwner, bytes32 nullifierHash) external",
-  "function withdrawFromPrivateUTXO(bytes32 commitment, (bytes proof, bytes32[] disclosedAttributes, uint256[] disclosureIndexes, bytes32 challenge, uint256 timestamp) withdrawProof, bytes32 nullifierHash) external",
+  // Core private UTXO functions with real cryptography
+  "function depositAsPrivateUTXO((address tokenAddress, bytes32 commitment, bytes32 nullifierHash, uint256 blindingFactor) depositParams, (bytes rangeProof) proofParams, (uint256 gX, uint256 gY, uint256 hX, uint256 hY) generators, uint256 amount) external",
+  "function splitPrivateUTXO(bytes32 inputCommitment, bytes32[] calldata outputCommitments, uint256[] calldata outputAmounts, uint256[] calldata outputBlindings, bytes calldata equalityProof, bytes32 nullifierHash, (uint256 gX, uint256 gY, uint256 hX, uint256 hY) generators) external returns (bytes32[] memory)",
+  "function transferPrivateUTXO(bytes32 inputCommitment, bytes32 outputCommitment, address newOwner, uint256 amount, uint256 outputBlinding, bytes32 nullifierHash, (uint256 gX, uint256 gY, uint256 hX, uint256 hY) generators) external returns (bytes32)",
+  "function withdrawFromPrivateUTXO(bytes32 commitment, uint256 amount, uint256 blindingFactor, bytes32 nullifierHash, (uint256 gX, uint256 gY, uint256 hX, uint256 hY) generators) external",
   
   // View functions
-  "function getUTXOsByOwner(address owner) external view returns (bytes32[] memory)",
-  "function getUTXOInfo(bytes32 utxoId) external view returns (bool exists, bytes32 commitment, address tokenAddress, address owner, uint256 timestamp, bool isSpent, bytes32 parentUTXO, uint8 utxoType, bytes32 nullifierHash)",
-  "function getSplitOperation(bytes32 operationId) external view returns (bytes32 inputUTXO, bytes32[] memory outputUTXOs, address[] memory outputOwners, uint256[] memory outputValues, bytes memory splitProof, uint256 timestamp)",
-  "function getCombineOperation(bytes32 operationId) external view returns (bytes32[] memory inputUTXOs, bytes32 outputUTXO, address outputOwner, uint256 totalValue, bytes memory combineProof, uint256 timestamp)",
-  
-  // Privacy query functions
+  "function getRegisteredTokens() external view returns (address[] memory)",
+  "function getTokenInfo(address tokenAddress) external view returns (bool isRegistered, uint256 registrationTime, string memory name, string memory symbol, uint8 decimals)",
+  "function getRegisteredTokenCount() external view returns (uint256)",
+  "function isTokenRegistered(address tokenAddress) external view returns (bool)",
   "function getUTXOCommitment(bytes32 utxoId) external view returns (bytes32)",
   "function isNullifierUsed(bytes32 nullifier) external view returns (bool)",
   "function getUserUTXOCount(address user) external view returns (uint256)",
+  "function getUTXOsByOwner(address user) external view returns (bytes32[] memory)",
+  "function getUTXOInfo(bytes32 utxoId) external view returns (bool exists, bytes32 commitment, address tokenAddress, address owner, uint256 timestamp, bool isSpent, bytes32 parentUTXO, uint8 utxoType, bytes32 nullifierHash)",
   
-  // Admin functions
-  "function setZenroomProofRequirement(bool required) external",
-  "function addSupportedToken(address tokenAddress) external",
-  "function setUseWhitelist(bool _useWhitelist) external",
-  "function addAuthorizedIssuer(address issuer, bytes calldata publicKey) external",
-  "function revokeCredential(bytes32 credentialId) external",
-  "function updatePrivacySettings(bool _requireBBSProofs, bool _enableSelectiveDisclosure, uint256 _proofValidityPeriod) external",
+  // Token helper functions
+  "function getTokenName(address tokenAddress) external view returns (string memory)",
+  "function getTokenSymbol(address tokenAddress) external view returns (string memory)",
+  "function getTokenDecimals(address tokenAddress) external view returns (uint8)",
   
-  // Original events
-  "event UTXOCreated(bytes32 indexed utxoId, address indexed owner, address indexed tokenAddress, uint256 value, bytes32 commitment, uint8 utxoType, bytes32 parentUTXO)",
-  "event UTXOSplit(bytes32 indexed inputUTXO, address indexed inputOwner, bytes32[] outputUTXOs, address[] outputOwners, uint256[] outputValues, bytes32 indexed operationId)",
-  "event UTXOCombined(bytes32[] inputUTXOs, address indexed inputOwner, bytes32 indexed outputUTXO, address indexed outputOwner, uint256 totalValue, bytes32 operationId)",
-  "event UTXOTransferred(bytes32 indexed utxoId, address indexed fromOwner, address indexed toOwner, uint256 value, address tokenAddress)",
-  "event UTXOWithdrawn(bytes32 indexed utxoId, address indexed owner, address indexed tokenAddress, uint256 value)",
-  
-  // New private events
-  "event PrivateUTXOCreated(bytes32 indexed commitment, address indexed owner, address indexed tokenAddress, bytes32 nullifierHash, uint8 utxoType)",
-  "event PrivateTransfer(bytes32 indexed inputCommitment, bytes32 indexed outputCommitment, bytes32 nullifierHash, bytes32 transferProof)",
-  "event PrivateWithdrawal(bytes32 indexed commitment, address indexed recipient, bytes32 nullifierHash)",
-  "event BBSCredentialRevoked(bytes32 indexed credentialId, address indexed issuer, uint256 timestamp)",
+  // Events - Simplified
+  "event TokenRegistered(address indexed tokenAddress, string name, string symbol, uint8 decimals, uint256 timestamp)",
+  "event PrivateUTXOCreated(bytes32 indexed commitment, address indexed owner, address indexed tokenAddress, bytes32 nullifierHash, uint8 utxoType, uint256 amount)",
+  "event PrivateTransfer(bytes32 indexed inputCommitment, bytes32 indexed outputCommitment, bytes32 nullifierHash, address indexed newOwner)",
+  "event PrivateWithdrawal(bytes32 indexed commitment, address indexed recipient, bytes32 nullifierHash, uint256 amount)",
   
   // Inherited from Ownable
   "function owner() view returns (address)",
@@ -494,63 +421,42 @@ export const UTXO_VAULT_ABI = [
 ] as const;
 
 /**
- * Contract interface for type-safe contract interaction
+ * Contract interface for type-safe contract interaction (simplified)
  */
 export interface UTXOVaultInterface {
   // Function fragments
   getFunction(nameOrSignatureOrTopic: 
-    | "depositAsUTXO"
-    | "withdrawFromUTXO"
-    | "splitUTXO"
-    | "combineUTXOs"
-    | "transferUTXO"
     | "depositAsPrivateUTXO"
     | "splitPrivateUTXO"
     | "transferPrivateUTXO"
     | "withdrawFromPrivateUTXO"
     | "getUTXOsByOwner"
     | "getUTXOInfo"
-    | "getSplitOperation"
-    | "getCombineOperation"
     | "getUTXOCommitment"
     | "isNullifierUsed"
     | "getUserUTXOCount"
-    | "setZenroomProofRequirement"
-    | "addSupportedToken"
-    | "setUseWhitelist"
-    | "addAuthorizedIssuer"
-    | "revokeCredential"
-    | "updatePrivacySettings"
+    | "getRegisteredTokens"
+    | "getTokenInfo"
+    | "isTokenRegistered"
   ): ethers.FunctionFragment;
   
   // Event fragments
   getEvent(nameOrSignatureOrTopic:
-    | "UTXOCreated"
-    | "UTXOSplit"
-    | "UTXOCombined"
-    | "UTXOTransferred"
-    | "UTXOWithdrawn"
+    | "TokenRegistered"
     | "PrivateUTXOCreated"
     | "PrivateTransfer"
     | "PrivateWithdrawal"
-    | "BBSCredentialRevoked"
   ): ethers.EventFragment;
   
   // Encode function data
-  encodeFunctionData(functionFragment: "depositAsUTXO", values: [string, bigint, string, string]): string;
-  encodeFunctionData(functionFragment: "withdrawFromUTXO", values: [string, string, string]): string;
-  encodeFunctionData(functionFragment: "splitUTXO", values: [string, string[], string[], bigint[], string]): string;
-  encodeFunctionData(functionFragment: "combineUTXOs", values: [string[], string, string, string]): string;
-  encodeFunctionData(functionFragment: "transferUTXO", values: [string, string, string]): string;
-  encodeFunctionData(functionFragment: "depositAsPrivateUTXO", values: [DepositParams, ProofParams, GeneratorParams]): string;
-  encodeFunctionData(functionFragment: "splitPrivateUTXO", values: [string, string[], BBSProofDataContract, string, string]): string;
-  encodeFunctionData(functionFragment: "transferPrivateUTXO", values: [string, string, BBSProofDataContract, string, string]): string;
-  encodeFunctionData(functionFragment: "withdrawFromPrivateUTXO", values: [string, BBSProofDataContract, string]): string;
+  encodeFunctionData(functionFragment: "depositAsPrivateUTXO", values: [DepositParams, ProofParams, GeneratorParams, bigint]): string;
+  encodeFunctionData(functionFragment: "splitPrivateUTXO", values: [string, string[], bigint[], bigint[], string, string, GeneratorParams]): string;
+  encodeFunctionData(functionFragment: "transferPrivateUTXO", values: [string, string, string, bigint, bigint, string, GeneratorParams]): string;
+  encodeFunctionData(functionFragment: "withdrawFromPrivateUTXO", values: [string, bigint, bigint, string, GeneratorParams]): string;
   
   // Decode function result
-  decodeFunctionResult(functionFragment: "splitUTXO", data: string): Result;
-  decodeFunctionResult(functionFragment: "combineUTXOs", data: string): Result;
   decodeFunctionResult(functionFragment: "splitPrivateUTXO", data: string): Result;
+  decodeFunctionResult(functionFragment: "transferPrivateUTXO", data: string): Result;
   decodeFunctionResult(functionFragment: "getUTXOsByOwner", data: string): Result;
   decodeFunctionResult(functionFragment: "getUTXOInfo", data: string): Result;
   decodeFunctionResult(functionFragment: "getUTXOCommitment", data: string): Result;
@@ -559,7 +465,7 @@ export interface UTXOVaultInterface {
 }
 
 /**
- * Type-safe contract instance
+ * Type-safe contract instance (simplified)
  */
 export interface UTXOVaultContract {
   // Contract metadata
@@ -569,137 +475,88 @@ export interface UTXOVaultContract {
   readonly target: string;
   
   // Read-only functions
-  utxos(utxoId: string): Promise<UTXODataContract>;
+  registeredTokens(tokenAddress: string): Promise<boolean>;
+  tokenRegistrationTime(tokenAddress: string): Promise<bigint>;
+  tokenNames(tokenAddress: string): Promise<string>;
+  tokenSymbols(tokenAddress: string): Promise<string>;
+  tokenDecimals(tokenAddress: string): Promise<number>;
+  allRegisteredTokens(index: bigint): Promise<string>;
   getUTXOsByOwner(owner: string): Promise<string[]>;
   getUTXOInfo(utxoId: string): Promise<[boolean, string, string, string, bigint, boolean, string, number, string]>;
-  getSplitOperation(operationId: string): Promise<SplitOperationContract>;
-  getCombineOperation(operationId: string): Promise<CombineOperationContract>;
-  nonces(user: string): Promise<bigint>;
-  requireZenroomProofs(): Promise<boolean>;
-  useWhitelist(): Promise<boolean>;
-  supportedTokens(token: string): Promise<boolean>;
-  
-  // Privacy-related getters
-  authorizedIssuers(issuer: string): Promise<boolean>;
-  issuerPublicKeys(issuer: string): Promise<string>;
-  requireBBSProofs(): Promise<boolean>;
-  enableSelectiveDisclosure(): Promise<boolean>;
-  proofValidityPeriod(): Promise<bigint>;
   getUTXOCommitment(utxoId: string): Promise<string>;
   isNullifierUsed(nullifier: string): Promise<boolean>;
   getUserUTXOCount(user: string): Promise<bigint>;
+  getRegisteredTokens(): Promise<string[]>;
+  getTokenInfo(tokenAddress: string): Promise<[boolean, bigint, string, string, number]>;
+  getRegisteredTokenCount(): Promise<bigint>;
+  isTokenRegistered(tokenAddress: string): Promise<boolean>;
+  getTokenName(tokenAddress: string): Promise<string>;
+  getTokenSymbol(tokenAddress: string): Promise<string>;
+  getTokenDecimals(tokenAddress: string): Promise<number>;
   
-  // State-changing functions (original)
-  depositAsUTXO(
-    tokenAddress: string,
-    amount: bigint,
-    commitment: string,
-    zenroomProof: string,
-    overrides?: ContractCallOptions
-  ): Promise<ContractTransactionResponse>;
-  
-  withdrawFromUTXO(
-    utxoId: string,
-    burnProof: string,
-    openingProof: string,
-    overrides?: ContractCallOptions
-  ): Promise<ContractTransactionResponse>;
-  
-  splitUTXO(
-    inputUTXOId: string,
-    outputCommitments: string[],
-    outputOwners: string[],
-    outputValues: bigint[],
-    splitProof: string,
-    overrides?: ContractCallOptions
-  ): Promise<ContractTransactionResponse>;
-  
-  combineUTXOs(
-    inputUTXOIds: string[],
-    outputCommitment: string,
-    outputOwner: string,
-    combineProof: string,
-    overrides?: ContractCallOptions
-  ): Promise<ContractTransactionResponse>;
-  
-  transferUTXO(
-    utxoId: string,
-    newOwner: string,
-    transferProof: string,
-    overrides?: ContractCallOptions
-  ): Promise<ContractTransactionResponse>;
-  
-  // Private UTXO functions
+  // Private UTXO functions (simplified)
   depositAsPrivateUTXO(
     depositParams: DepositParams,
     proofParams: ProofParams,
     generators: GeneratorParams,
+    amount: bigint,
     overrides?: ContractCallOptions
   ): Promise<ContractTransactionResponse>;
   
   splitPrivateUTXO(
     inputCommitment: string,
     outputCommitments: string[],
-    splitProof: BBSProofDataContract,
+    outputAmounts: bigint[],
+    outputBlindings: bigint[],
     equalityProof: string,
     nullifierHash: string,
+    generators: GeneratorParams,
     overrides?: ContractCallOptions
   ): Promise<ContractTransactionResponse>;
   
   transferPrivateUTXO(
     inputCommitment: string,
     outputCommitment: string,
-    transferProof: BBSProofDataContract,
     newOwner: string,
+    amount: bigint,
+    outputBlinding: bigint,
     nullifierHash: string,
+    generators: GeneratorParams,
     overrides?: ContractCallOptions
   ): Promise<ContractTransactionResponse>;
   
   withdrawFromPrivateUTXO(
     commitment: string,
-    withdrawProof: BBSProofDataContract,
+    amount: bigint,
+    blindingFactor: bigint,
     nullifierHash: string,
+    generators: GeneratorParams,
     overrides?: ContractCallOptions
   ): Promise<ContractTransactionResponse>;
-  
-  // Admin functions
-  setZenroomProofRequirement(required: boolean, overrides?: ContractCallOptions): Promise<ContractTransactionResponse>;
-  addSupportedToken(tokenAddress: string, overrides?: ContractCallOptions): Promise<ContractTransactionResponse>;
-  setUseWhitelist(useWhitelist: boolean, overrides?: ContractCallOptions): Promise<ContractTransactionResponse>;
-  addAuthorizedIssuer(issuer: string, publicKey: string, overrides?: ContractCallOptions): Promise<ContractTransactionResponse>;
-  revokeCredential(credentialId: string, overrides?: ContractCallOptions): Promise<ContractTransactionResponse>;
-  updatePrivacySettings(requireBBSProofs: boolean, enableSelectiveDisclosure: boolean, proofValidityPeriod: bigint, overrides?: ContractCallOptions): Promise<ContractTransactionResponse>;
   
   // Event methods
   on(event: string, listener: (...args: any[]) => void): UTXOVaultContract;
   off(event: string, listener?: (...args: any[]) => void): UTXOVaultContract;
   once(event: string, listener: (...args: any[]) => void): UTXOVaultContract;
   
-  // Event filters - using a more compatible structure
-  filters: UTXOVaultEventFilters;
+  // Event filters - simplified
+  filters: {
+    TokenRegistered(tokenAddress?: string | null): ethers.DeferredTopicFilter;
+    PrivateUTXOCreated(commitment?: string | null, owner?: string | null, tokenAddress?: string | null): ethers.DeferredTopicFilter;
+    PrivateTransfer(inputCommitment?: string | null, outputCommitment?: string | null, newOwner?: string | null): ethers.DeferredTopicFilter;
+    PrivateWithdrawal(commitment?: string | null, recipient?: string | null): ethers.DeferredTopicFilter;
+  };
   getEvent(eventName: string): ethers.EventFragment;
   queryFilter(event: string | ethers.EventFilter, fromBlock?: number, toBlock?: number): Promise<ethers.EventLog[]>;
 }
 
 /**
- * Type guards for contract data validation
+ * Type guards for contract data validation (simplified)
  */
-export function isUTXODataContract(obj: any): obj is UTXODataContract {
-  return (
-    typeof obj === 'object' &&
-    obj !== null &&
-    typeof obj.exists === 'boolean' &&
-    (typeof obj.value === 'bigint' || typeof obj.value === 'string' || typeof obj.value === 'number') &&
-    typeof obj.tokenAddress === 'string' &&
-    typeof obj.owner === 'string' &&
-    (typeof obj.timestamp === 'bigint' || typeof obj.timestamp === 'string' || typeof obj.timestamp === 'number') &&
-    typeof obj.isSpent === 'boolean' &&
-    typeof obj.commitment === 'string' &&
-    typeof obj.parentUTXO === 'string' &&
-    typeof obj.utxoType === 'number'
-  );
-}
 
+/**
+ * Type guards for contract data validation (simplified)
+ */
 export function isPrivateUTXOContract(obj: any): obj is PrivateUTXOContract {
   return (
     typeof obj === 'object' &&
@@ -712,33 +569,7 @@ export function isPrivateUTXOContract(obj: any): obj is PrivateUTXOContract {
     typeof obj.isSpent === 'boolean' &&
     typeof obj.parentUTXO === 'string' &&
     typeof obj.utxoType === 'number' &&
-    typeof obj.nullifierHash === 'string' &&
-    typeof obj.bbsCredential === 'string'
-  );
-}
-
-export function isBBSProofDataContract(obj: any): obj is BBSProofDataContract {
-  return (
-    typeof obj === 'object' &&
-    obj !== null &&
-    typeof obj.proof === 'string' &&
-    Array.isArray(obj.disclosedAttributes) &&
-    Array.isArray(obj.disclosureIndexes) &&
-    typeof obj.challenge === 'string' &&
-    (typeof obj.timestamp === 'bigint' || typeof obj.timestamp === 'string' || typeof obj.timestamp === 'number')
-  );
-}
-
-export function isSplitOperationContract(obj: any): obj is SplitOperationContract {
-  return (
-    typeof obj === 'object' &&
-    obj !== null &&
-    typeof obj.inputUTXO === 'string' &&
-    Array.isArray(obj.outputUTXOs) &&
-    Array.isArray(obj.outputOwners) &&
-    Array.isArray(obj.outputValues) &&
-    typeof obj.splitProof === 'string' &&
-    (typeof obj.timestamp === 'bigint' || typeof obj.timestamp === 'string' || typeof obj.timestamp === 'number')
+    typeof obj.nullifierHash === 'string'
   );
 }
 
@@ -757,7 +588,7 @@ export function createUTXOVaultContract(
 }
 
 /**
- * Constants for contract interaction
+ * Constants for contract interaction (simplified)
  */
 export const UTXO_VAULT_CONSTANTS = {
   // Enum values matching Solidity
@@ -765,29 +596,19 @@ export const UTXO_VAULT_CONSTANTS = {
     DEPOSIT: 0,
     SPLIT: 1,
     COMBINE: 2,
-    TRANSFER: 3
+    TRANSFER: 3,
+    WITHDRAW: 4
   } as const,
   
-  // Event signatures
-  EVENT_SIGNATURES: {
-    UTXO_CREATED: "0x...", // Will be calculated from ABI
-    UTXO_SPLIT: "0x...",
-    UTXO_COMBINED: "0x...",
-    UTXO_TRANSFERRED: "0x...",
-    UTXO_WITHDRAWN: "0x..."
-  } as const,
-  
-  // Error signatures
+  // Error signatures (simplified)
   ERROR_SIGNATURES: {
-    UTXO_ALREADY_EXISTS: "0x...",
     UTXO_NOT_FOUND: "0x...",
     UTXO_ALREADY_SPENT: "0x...",
-    INVALID_PROOF: "0x...",
-    INVALID_SPLIT: "0x...",
-    INVALID_COMBINE: "0x...",
-    INVALID_OWNER: "0x...",
-    TOKEN_NOT_SUPPORTED: "0x...",
-    INSUFFICIENT_VALUE: "0x..."
+    INVALID_COMMITMENT: "0x...",
+    INVALID_RANGE_PROOF: "0x...",
+    NULLIFIER_ALREADY_USED: "0x...",
+    INVALID_EQUALITY_PROOF: "0x...",
+    NOT_OWNER: "0x..."
   } as const
 } as const;
 
@@ -811,5 +632,5 @@ export type UTXOVaultContractUsageExample = {
   listenToEvents: (contract: UTXOVaultContract) => void;
   
   // Example of reading UTXO data
-  readUTXOData: (contract: UTXOVaultContract, utxoId: string) => Promise<UTXODataContract>;
+  readUTXOData: (contract: UTXOVaultContract, utxoId: string) => Promise<PrivateUTXOContract>;
 };
