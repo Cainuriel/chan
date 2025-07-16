@@ -267,128 +267,28 @@ export class UTXOLibrary extends EventEmitter {
    * @param params - Deposit parameters
    * @returns Promise resolving to operation result
    */
+  /**
+   * DEPRECATED: Usar PrivateUTXOManager para depósitos privados con structs y almacenamiento local
+   * Este método solo sirve para depósitos públicos simples (sin privacidad)
+   */
   async depositAsUTXO(params: CreateUTXOParams): Promise<UTXOOperationResult> {
-    this.ensureInitialized();
-    console.log(`💰 Depositing ${params.amount} tokens as UTXO...`);
+    throw new Error('depositAsUTXO está deshabilitado. Usa PrivateUTXOManager.createPrivateUTXO para depósitos privados.');
+  }
 
-    try {
-      const { amount, tokenAddress, owner } = params;
+  /**
+   * Guardar UTXO privado en localStorage usando PrivateUTXOStorage
+   */
+  protected async savePrivateUTXOToLocal(owner: string, utxo: any): Promise<void> {
+    const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
+    PrivateUTXOStorage.savePrivateUTXO(owner, utxo);
+  }
 
-      // 1. Get token info and check balance
-      const tokenInfo = await this.ethereum.getERC20TokenInfo(tokenAddress, owner);
-      if (!tokenInfo.balance || tokenInfo.balance < amount) {
-        throw new InsufficientFundsError(amount, tokenInfo.balance || BigInt(0), tokenAddress);
-      }
-
-      // 2. Check allowance and approve if needed
-      console.log('🔍 Contract status:', {
-        contractExists: !!this.contract,
-        contractAddress: this.contract?.target
-      });
-      
-      const spenderAddress = this.contract!.target as string;
-      
-      if (!spenderAddress) {
-        throw new Error('Contract address is not available. Contract may not be properly initialized.');
-      }
-      
-      console.log('📋 Using spender address:', spenderAddress);
-      const currentAllowance = tokenInfo.allowance || BigInt(0);
-      
-      if (currentAllowance < amount) {
-        console.log('📝 Approving token spending...');
-        await this.ethereum.approveERC20(tokenAddress, spenderAddress, amount);
-      }
-
-      // 3. Generate Zenroom commitment
-      const blindingFactor = params.blindingFactor || await this.zenroom.generateSecureNonce();
-      const commitmentResult = await this.zenroom.createPedersenCommitment(
-        amount.toString(),
-        blindingFactor
-      );
-
-      // 4. Generate Zenroom proof for deposit
-      const zenroomProof = await this.generateDepositProof(amount, commitmentResult.pedersen_commitment, owner);
-
-      // 5. Call smart contract
-      const contractParams: DepositAsUTXOParams = {
-        tokenAddress,
-        amount: amount,
-        commitment: commitmentResult.pedersen_commitment,
-        zenroomProof
-      };
-
-      const tx = await this.contract!.depositAsUTXO(
-        contractParams.tokenAddress,
-        contractParams.amount,
-        contractParams.commitment,
-        contractParams.zenroomProof,
-        { gasLimit: this.config.defaultGasLimit }
-      );
-
-      const receipt = await tx.wait();
-
-      // 6. Create local UTXO
-      const utxoId = await this.zenroom.generateUTXOId(
-        commitmentResult.pedersen_commitment,
-        owner,
-        Date.now()
-      );
-
-    const utxo: ExtendedUTXOData = {
-      id: utxoId,
-      exists: true,
-      value: BigInt(amount),
-      tokenAddress,
-      owner,
-      timestamp: toBigInt(Date.now()),
-      isSpent: false,
-      commitment: commitmentResult.pedersen_commitment,
-      parentUTXO: '',
-      utxoType: UTXOType.DEPOSIT,
-      blindingFactor: blindingFactor,
-      localCreatedAt: Date.now(),
-      confirmed: true,
-      creationTxHash: receipt?.hash,
-      blockNumber: receipt?.blockNumber,
-      tokenMetadata: {
-        symbol: tokenInfo.symbol,
-        name: tokenInfo.name,
-        decimals: tokenInfo.decimals
-      }
-    };
-
-      this.utxos.set(utxoId, utxo);
-
-      const result: UTXOOperationResult = {
-        success: true,
-        transactionHash: receipt?.hash,
-        gasUsed: receipt?.gasUsed,
-        createdUTXOIds: [utxoId]
-      };
-
-      console.log('✅ UTXO deposit successful:', utxoId);
-      this.emit('utxo:created', utxo);
-
-      return result;
-
-    } catch (error) {
-      console.error('❌ UTXO deposit failed:', error);
-      const result: UTXOOperationResult = {
-        success: false,
-        error: error instanceof Error ? error.message : 'Deposit failed',
-        errorDetails: error
-      };
-
-      this.emit('operation:failed', new UTXOOperationError(
-        'Deposit failed',
-        'deposit',
-        undefined,
-        error
-      ));
-
-      return result;
-    }
+  /**
+   * Obtener todos los UTXOs privados de un usuario desde localStorage
+   */
+  protected async getPrivateUTXOsFromLocal(owner: string): Promise<any[]> {
+    const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
+    return PrivateUTXOStorage.getPrivateUTXOs(owner);
   }
 
   /**
@@ -712,31 +612,27 @@ export class UTXOLibrary extends EventEmitter {
       
       for (const utxoId of contractUTXOIds) {
         const contractUTXO = await this.contract.getUTXOInfo(utxoId);
-        
-        // Update or create local UTXO
+        // contractUTXO: [exists, commitment, tokenAddress, owner, value, isSpent, parentUTXO, utxoType, timestamp, nullifierHash]
         if (!this.utxos.has(utxoId)) {
-          // Create missing UTXO
           const utxo: ExtendedUTXOData = {
             id: utxoId,
-            exists: contractUTXO.exists,
-            value: BigInt(contractUTXO.value.toString()),
-            tokenAddress: contractUTXO.tokenAddress,
-            owner: contractUTXO.owner,
-            timestamp: contractUTXO.timestamp,
-            isSpent: contractUTXO.isSpent,
-            commitment: contractUTXO.commitment,
-            parentUTXO: contractUTXO.parentUTXO,
-            utxoType: this.mapContractUTXOType(contractUTXO.utxoType),
+            exists: contractUTXO[0],
+            commitment: contractUTXO[1],
+            tokenAddress: contractUTXO[2],
+            owner: contractUTXO[3],
+            value: BigInt(contractUTXO[4].toString()),
+            isSpent: contractUTXO[5],
+            parentUTXO: contractUTXO[6],
+            utxoType: this.mapContractUTXOType(contractUTXO[7]),
+            timestamp: toBigInt(contractUTXO[8]),
             localCreatedAt: Date.now(),
             confirmed: true
           };
-          
           this.utxos.set(utxoId, utxo);
           this.emit('utxo:synced', utxo);
         } else {
-          // Update existing UTXO
           const localUTXO = this.utxos.get(utxoId)!;
-          localUTXO.isSpent = contractUTXO.isSpent;
+          localUTXO.isSpent = contractUTXO[5];
           localUTXO.confirmed = true;
         }
       }

@@ -7,6 +7,7 @@
 import { ethers, toBigInt, type BigNumberish } from 'ethers';
 import { UTXOLibrary } from './UTXOLibrary';
 import { ZenroomHelpers } from './../utils/zenroom.helpers';
+import { getBN254Generators } from '../utils/bn254.generators';
 import { EthereumHelpers } from './../utils/ethereum.helpers';
 import {
   type UTXOOperationResult,
@@ -414,10 +415,11 @@ export class PrivateUTXOManager extends UTXOLibrary {
       });
 
       // 5. Crear range proof para probar que el valor es válido
+      const blindingFactorBigInt = BigInt(blindingFactor);
       const rangeProof = await ZenroomHelpers.createRangeProof(
         commitment.pedersen_commitment,
         amount.toString(),
-        blindingFactor,
+        blindingFactorBigInt.toString(),
         '0'
       );
 
@@ -497,24 +499,7 @@ export class PrivateUTXOManager extends UTXOLibrary {
       
       console.log('✅ All parameters validated');
 
-      // 7.5. Test function encoding before contract call
-      try {
-        console.log('🧪 Testing function encoding...');
-        const contractInterface = this.contract!.interface;
-        const encodedData = contractInterface.encodeFunctionData('depositAsPrivateUTXO', [
-          tokenAddress,
-          commitment.pedersen_commitment,
-          bbsProofData,
-          nullifierHash,
-          rangeProof,
-          blindingFactor
-        ]);
-        console.log('✅ Function encoding successful, data length:', encodedData.length);
-        console.log('🔍 Encoded data preview:', encodedData.substring(0, 100) + '...');
-      } catch (encodingError) {
-        console.error('❌ Function encoding failed:', encodingError);
-        throw new Error(`Function encoding failed: ${encodingError}`);
-      }
+      // ...existing code...
 
       // 8. Preparar transacción con gas estimation manual (como en approve)
       const signer = EthereumHelpers.getSigner();
@@ -640,13 +625,46 @@ export class PrivateUTXOManager extends UTXOLibrary {
       console.log('   Gas price:', ethers.formatUnits(gasPrice, 'gwei'), 'gwei');
       console.log('   Estimated cost:', ethers.formatEther(gasLimit * gasPrice), 'ETH');
       
-      const tx = await this.contract!.depositAsPrivateUTXO(
+
+
+      // Get BN254 generator coordinates
+      const { gX, gY, hX, hY } = getBN254Generators();
+
+      // Adaptar a structs para la nueva firma del contrato
+      const depositParams = {
         tokenAddress,
-        commitment.pedersen_commitment,
-        bbsProofData,
+        commitment: commitment.pedersen_commitment,
         nullifierHash,
-        rangeProof,
-        blindingFactor,
+        blindingFactor: blindingFactorBigInt
+      };
+
+      const proofParams = {
+        bbsProof: bbsProofData,
+        rangeProof
+      };
+
+      const generators = { gX, gY, hX, hY };
+
+      // 7.5. Test function encoding before contract call (usando structs)
+      try {
+        console.log('🧪 Testing function encoding...');
+        const contractInterface = this.contract!.interface;
+        const encodedData = contractInterface.encodeFunctionData('depositAsPrivateUTXO', [
+          depositParams,
+          proofParams,
+          generators
+        ]);
+        console.log('✅ Function encoding successful, data length:', encodedData.length);
+        console.log('🔍 Encoded data preview:', encodedData.substring(0, 100) + '...');
+      } catch (encodingError) {
+        console.error('❌ Function encoding failed:', encodingError);
+        throw new Error(`Function encoding failed: ${encodingError}`);
+      }
+
+      const tx = await this.contract!.depositAsPrivateUTXO(
+        depositParams,
+        proofParams,
+        generators,
         {
           gasLimit: gasLimit,
           gasPrice: gasPrice

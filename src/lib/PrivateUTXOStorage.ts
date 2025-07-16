@@ -21,22 +21,24 @@ export class PrivateUTXOStorage {
    */
   static savePrivateUTXO(userAddress: string, utxo: PrivateUTXO): void {
     try {
+      // Validar estructura mínima
+      if (!utxo.id || !utxo.tokenAddress || !utxo.owner || typeof utxo.value === 'undefined') {
+        throw new Error('UTXO missing required fields');
+      }
       const userKey = this.getUserKey(userAddress);
       console.log(`💾 Saving UTXO for user: ${userAddress}`);
       console.log(`💾 Using key: ${userKey}`);
       console.log(`💾 UTXO data:`, {
         id: utxo.id,
-        value: utxo.value.toString(),
+        value: utxo.value?.toString(),
         tokenAddress: utxo.tokenAddress,
         owner: utxo.owner,
         isSpent: utxo.isSpent
       });
-      
       const existingUTXOs = this.getPrivateUTXOs(userAddress);
       console.log(`💾 Existing UTXOs count: ${existingUTXOs.length}`);
-      
-      // Actualizar o añadir UTXO
-      const utxoIndex = existingUTXOs.findIndex(u => u.id === utxo.id);
+      // Actualizar o añadir UTXO (por id y owner)
+      const utxoIndex = existingUTXOs.findIndex(u => u.id === utxo.id && u.owner.toLowerCase() === utxo.owner.toLowerCase());
       if (utxoIndex >= 0) {
         existingUTXOs[utxoIndex] = utxo;
         console.log(`💾 Updated existing UTXO at index ${utxoIndex}`);
@@ -44,21 +46,16 @@ export class PrivateUTXOStorage {
         existingUTXOs.push(utxo);
         console.log(`💾 Added new UTXO, total count: ${existingUTXOs.length}`);
       }
-
+      // Serializar todos los campos bigint relevantes
       const serializedData = JSON.stringify(existingUTXOs, (key, value) => {
-        // Convert BigInt to string for serialization
-        if (typeof value === 'bigint') {
-          return value.toString();
-        }
+        if (typeof value === 'bigint') return value.toString();
         return value;
       });
       localStorage.setItem(userKey, serializedData);
       console.log(`💾 Saved to localStorage. Data length: ${serializedData.length}`);
-      
       // Verificar que se guardó correctamente
       const verification = localStorage.getItem(userKey);
       console.log(`💾 Verification - data exists: ${verification !== null}`);
-      
       console.log(`💾 Private UTXO saved locally for user ${userAddress.substring(0, 8)}...`);
     } catch (error) {
       console.error('❌ Failed to save private UTXO:', error);
@@ -78,13 +75,20 @@ export class PrivateUTXOStorage {
       }
 
       const utxos = JSON.parse(storedData) as PrivateUTXO[];
-      
-      // Convertir bigint strings de vuelta a bigint
-      return utxos.map(utxo => ({
-        ...utxo,
-        value: typeof utxo.value === 'string' ? BigInt(utxo.value) : utxo.value,
-        timestamp: typeof utxo.timestamp === 'string' ? BigInt(utxo.timestamp) : utxo.timestamp
-      }));
+      // Convertir todos los campos bigint relevantes de vuelta a bigint
+      return utxos.map(utxo => {
+        const restored: any = {
+          ...utxo,
+          value: typeof utxo.value === 'string' ? BigInt(utxo.value) : utxo.value,
+          timestamp: typeof utxo.timestamp === 'string' ? BigInt(utxo.timestamp) : utxo.timestamp
+        };
+        if (typeof utxo.blockNumber === 'string') {
+          // blockNumber puede ser number o string, restaurar a number si es posible
+          const n = Number(utxo.blockNumber);
+          restored.blockNumber = isNaN(n) ? undefined : n;
+        }
+        return restored;
+      });
     } catch (error) {
       console.error('❌ Failed to load private UTXOs:', error);
       return [];

@@ -1,3 +1,5 @@
+
+
 /**
  * @fileoverview Zenroom helper functions for UTXO operations
  * @description Utility functions for Zenroom cryptographic operations
@@ -23,6 +25,70 @@ import { zencode_exec, zenroom_exec, introspect, isZenroomAvailable } from './ze
  * Zenroom helper class for UTXO cryptographic operations
  */
 export class ZenroomHelpers {
+
+  /**
+   * Generate a split proof for UTXO splitting using Zenroom only
+   * @param inputCommitment - Commitment of the input UTXO
+   * @param inputValue - Value of the input UTXO (string)
+   * @param inputBlinding - Blinding factor of the input UTXO
+   * @param outputValues - Array of output values (as strings)
+   * @param outputBlindings - Array of output blinding factors (as strings)
+   * @returns Promise resolving to { split_proof: string }
+   */
+  static async generateSplitProof(
+    inputCommitment: string,
+    inputValue: string,
+    inputBlinding: string,
+    outputValues: string[],
+    outputBlindings: string[]
+  ): Promise<{ split_proof: string }> {
+    const zenroomAvailable = await isZenroomAvailable();
+    if (!zenroomAvailable) {
+      throw new ZenroomExecutionError('Zenroom is not available in this environment', '', 'generateSplitProof');
+    }
+    if (
+      outputValues.length !== outputBlindings.length ||
+      outputValues.length === 0
+    ) {
+      throw new Error('Output values and blindings must be non-empty and of equal length');
+    }
+    const totalOutput = outputValues.reduce((sum, v) => sum + parseInt(v), 0);
+    if (parseInt(inputValue) !== totalOutput) {
+      throw new Error('Sum of output values must equal input value');
+    }
+    const zencode = `
+Scenario 'ethereum': Generate split proof
+Given I have a 'hex' named 'input_commitment'
+Given I have a 'integer' named 'input_value'
+Given I have a 'hex' named 'input_blinding'
+Given I have a 'integer array' named 'output_values'
+Given I have a 'hex array' named 'output_blindings'
+When I verify the input commitment opens to input_value with input_blinding
+And I create the output commitments of 'output_values' with 'output_blindings'
+And I create the split proof
+Then print the 'split proof' as 'hex'
+`;
+    const data = JSON.stringify({
+      input_commitment: inputCommitment,
+      input_value: parseInt(inputValue),
+      input_blinding: inputBlinding,
+      output_values: outputValues.map(v => parseInt(v)),
+      output_blindings: outputBlindings
+    });
+    try {
+      const result = await zencode_exec(zencode, { data });
+      if (!result.result) {
+        throw new Error('Empty result from Zenroom');
+      }
+      const output = JSON.parse(result.result);
+      if (!output['split proof'] && !output.split_proof) {
+        throw new Error('No split proof in Zenroom result');
+      }
+      return { split_proof: output['split proof'] || output.split_proof };
+    } catch (error) {
+      throw new ZenroomExecutionError('Failed to generate split proof', error instanceof Error ? error.message : 'Unknown error', 'generateSplitProof');
+    }
+  }
   
   /**
    * Generate a secure random nonce for cryptographic operations
@@ -31,50 +97,28 @@ export class ZenroomHelpers {
    */
   static async generateSecureNonce(bits: number = 256): Promise<string> {
     const zenroomAvailable = await isZenroomAvailable();
-    
     if (!zenroomAvailable) {
-      // Fallback to browser crypto API if zenroom is not available
-      const array = new Uint8Array(bits / 8);
-      crypto.getRandomValues(array);
-      const hexString = Array.from(array, byte => byte.toString(16).padStart(2, '0')).join('');
-      const prefixedHex = hexString.startsWith('0x') ? hexString : `0x${hexString}`;
-      console.log('🎲 Generated fallback nonce:', prefixedHex);
-      return prefixedHex;
+      throw new ZenroomExecutionError('Zenroom is not available in this environment', '', 'generateSecureNonce');
     }
-    
     // Simple Zenroom script to generate random bytes
-    const zencode = `Given nothing
-When I create the random object of '${bits / 8}' bytes  
-Then print 'random object' as 'hex'`;
-
+    const zencode = `Given nothing\nWhen I create the random object of '${bits / 8}' bytes  \nThen print 'random object' as 'hex'`;
     try {
       console.log('🔧 Generating nonce with Zenroom...');
       const result = await zencode_exec(zencode);
-      
       if (!result.result) {
         throw new Error('Empty result from Zenroom');
       }
-      
       const output = JSON.parse(result.result);
       const hexString = output['random object'] || output.random_bytes;
-      
       if (!hexString || typeof hexString !== 'string') {
         throw new Error('Invalid random bytes from Zenroom');
       }
-      
       // Ensure the nonce has 0x prefix for ethers.js compatibility
       const prefixedHex = hexString.startsWith('0x') ? hexString : `0x${hexString}`;
       console.log('✅ Generated Zenroom nonce:', prefixedHex);
       return prefixedHex;
     } catch (error) {
-      console.warn('❌ Zenroom nonce generation failed, falling back to crypto API:', error);
-      // Fallback to crypto API if Zenroom fails
-      const array = new Uint8Array(bits / 8);
-      crypto.getRandomValues(array);
-      const hexString = Array.from(array, byte => byte.toString(16).padStart(2, '0')).join('');
-      const prefixedHex = hexString.startsWith('0x') ? hexString : `0x${hexString}`;
-      console.log('🎲 Generated fallback nonce after error:', prefixedHex);
-      return prefixedHex;
+      throw new ZenroomExecutionError('Zenroom nonce generation failed', error instanceof Error ? error.message : 'Unknown error', 'generateSecureNonce');
     }
   }
 
@@ -93,254 +137,46 @@ Then print 'random object' as 'hex'`;
     try {
       // Generate blinding factor if not provided
       const blinding = blindingFactor || await this.generateSecureNonce();
-      
       console.log('🔒 Using blinding factor:', blinding, 'type:', typeof blinding);
-      
-      // Validate inputs
       if (typeof value !== 'string' || typeof blinding !== 'string') {
         throw new Error(`Invalid input types: value=${typeof value}, blinding=${typeof blinding}`);
       }
-
-      // Try to use Zenroom for proper Pedersen commitment if available
       const zenroomAvailable = await isZenroomAvailable();
-      if (zenroomAvailable) {
-        console.log('🔒 Using Zenroom for Pedersen commitment');
-        
-        const zencode = `
-Scenario 'commitment': Create a Pedersen commitment
-Given I have an 'integer' named 'value'
-and I have a 'hex' named 'blinding'
-When I create the pedersen commitment from 'value' with blinding 'blinding' on curve 'secp256k1'
+      if (!zenroomAvailable) {
+        throw new ZenroomExecutionError('Zenroom is not available in this environment', '', 'createPedersenCommitment');
+      }
+      // Provide the actual Zencode for Pedersen commitment
+      const zencode = `
+Scenario 'ethereum': Create Pedersen commitment
+Given I have a 'integer' named 'value'
+Given I have a 'hex' named 'blinding'
+When I create the Pedersen commitment of 'value' with 'blinding'
 Then print the 'commitment' as 'hex'
-        `;
-
-        const data = JSON.stringify({
-          value: parseInt(value),
-          blinding: blinding
-        });
-
-        try {
-          console.log('🔧 Executing Zenroom commitment script...');
-          const result = await zencode_exec(zencode, { data });
-          
-          if (!result.result) {
-            throw new Error('Empty result from Zenroom');
-          }
-          
-          const output = JSON.parse(result.result);
-                console.log('✅ Zenroom commitment created successfully:', output);
-      
-      // Ensure the hash has 0x prefix for ethers.js compatibility
+`;
+      const data = JSON.stringify({
+        value: parseInt(value),
+        blinding: blinding
+      });
+      console.log('🔧 Executing Zenroom commitment script...');
+      const result = await zencode_exec(zencode, { data });
+      if (!result.result) {
+        throw new Error('Empty result from Zenroom');
+      }
+      const output = JSON.parse(result.result);
+      console.log('✅ Zenroom commitment created successfully:', output);
       const prefixedHash = output.commitment.startsWith('0x') ? output.commitment : `0x${output.commitment}`;
-      // Ensure blinding factor also has 0x prefix
       const prefixedBlinding = blinding.startsWith('0x') ? blinding : `0x${blinding}`;
-      
       return {
         pedersen_commitment: prefixedHash,
         blinding_factor: prefixedBlinding,
-        commitment_proof: prefixedHash // For now, use same as commitment
+        commitment_proof: prefixedHash
       };
-        } catch (zenroomError) {
-          console.warn('⚠️ Zenroom commitment failed, falling back to hash-based commitment:', zenroomError);
-          // Fall through to hash-based commitment
-        }
-      }
-
-      // Fallback: create a simple hash-based commitment
-      console.log('🔒 Using hash-based commitment fallback');
-      const commitmentData = ethers.solidityPackedKeccak256(
-        ['string', 'string'],
-        [value, blinding]
-      );
-      
-      console.log('✅ Hash-based commitment created successfully:', commitmentData);
-      
-      // Ensure blinding factor has 0x prefix
-      const prefixedBlinding = blinding.startsWith('0x') ? blinding : `0x${blinding}`;
-      
-      return {
-        pedersen_commitment: commitmentData,
-        blinding_factor: prefixedBlinding,
-        commitment_proof: commitmentData // For now, use same as commitment
-      };
-      
     } catch (error) {
       console.error('❌ Failed to create commitment:', error);
       throw new ZenroomExecutionError(
         'Failed to create Pedersen commitment',
-        error instanceof Error ? error.message : 'Unknown error',
-        'commitment creation'
-      );
-    }
-  }
-
-  /**
-   * Verify a Pedersen commitment opening
-   * @param commitment - The commitment to verify
-   * @param value - The claimed value
-   * @param blindingFactor - The blinding factor
-   * @returns Promise resolving to verification result
-   */
-  static async verifyCommitmentOpening(
-    commitment: string,
-    value: string,
-    blindingFactor: string
-  ): Promise<boolean> {
-    // Simplified verification using hash comparison
-    const zencode = `
-Given I have a 'string' named 'input_data'
-When I create the hash of 'input_data'
-Then print 'hash' as 'hex'
-    `;
-
-    // Concatenate value and blinding factor for hashing
-    const inputData = `${value}:${blindingFactor}`;
-    const data = JSON.stringify({
-      input_data: inputData
-    });
-
-    try {
-      const result = await zencode_exec(zencode, { data });
-      const output = JSON.parse(result.result);
-      
-      // Compare the computed hash with the commitment
-      return output.hash === commitment;
-    } catch (error) {
-      // If verification fails, use fallback comparison
-      const expectedCommitment = ethers.solidityPackedKeccak256(
-        ['string', 'string'],
-        [value, blindingFactor]
-      );
-      return expectedCommitment === commitment;
-    }
-  }
-
-  /**
-   * Generate a split proof for UTXO division
-   * @param inputCommitment - Input UTXO commitment
-   * @param inputValue - Input UTXO value
-   * @param inputBlinding - Input UTXO blinding factor
-   * @param outputValues - Array of output values
-   * @param outputBlindings - Array of output blinding factors
-   * @returns Promise resolving to split proof
-   */
-  static async generateSplitProof(
-    inputCommitment: string,
-    inputValue: string,
-    inputBlinding: string,
-    outputValues: string[],
-    outputBlindings: string[]
-  ): Promise<ZenroomSplitProofResult> {
-    if (outputValues.length !== outputBlindings.length) {
-      throw new Error('Output values and blinding factors arrays must have same length');
-    }
-
-    // Verify sum of outputs equals input
-    const totalOutput = outputValues.reduce((sum, val) => sum + parseInt(val), 0);
-    if (totalOutput !== parseInt(inputValue)) {
-      throw new Error(`Sum of outputs (${totalOutput}) does not equal input (${inputValue})`);
-    }
-
-    const zencode = `
-    Scenario 'ethereum': Generate split proof
-    Given I have a 'hex' named 'input_commitment'
-    Given I have a 'integer' named 'input_value'
-    Given I have a 'integer' named 'input_blinding'
-    Given I have a 'integer array' named 'output_values'
-    Given I have a 'integer array' named 'output_blindings'
-    
-    When I verify the commitment 'input_commitment' opens to 'input_value' with 'input_blinding'
-    And I verify that sum of 'output_values' equals 'input_value'
-    And I create the split proof for outputs
-    And I create the output commitments from 'output_values' and 'output_blindings'
-    And I create the split signature
-    
-    Then print the 'split proof' as 'hex'
-    And print the 'output commitments' as 'hex'
-    And print the 'split signature' as 'hex'
-    `;
-
-    const data = JSON.stringify({
-      input_commitment: inputCommitment,
-      input_value: inputValue,
-      input_blinding: inputBlinding,
-      output_values: outputValues,
-      output_blindings: outputBlindings
-    });
-
-    try {
-      const result = await zencode_exec(zencode, { data });
-      const output = JSON.parse(result.result);
-      
-      return {
-        split_proof: output.split_proof,
-        output_commitments: output.output_commitments,
-        signatures: [output.split_signature]
-      };
-    } catch (error) {
-      throw new ZenroomExecutionError(
-        'Failed to generate split proof',
-        error instanceof Error ? error.message : 'Unknown error',
-        zencode
-      );
-    }
-  }
-
-  /**
-   * Generate a combine proof for UTXO combination
-   * @param inputCommitments - Array of input commitments
-   * @param inputValues - Array of input values
-   * @param inputBlindings - Array of input blinding factors
-   * @param outputBlinding - Output blinding factor
-   * @returns Promise resolving to combine proof
-   */
-  static async generateCombineProof(
-    inputCommitments: string[],
-    inputValues: string[],
-    inputBlindings: string[],
-    outputBlinding: string
-  ): Promise<string> {
-    if (inputCommitments.length !== inputValues.length || 
-        inputValues.length !== inputBlindings.length) {
-      throw new Error('Input arrays must have same length');
-    }
-
-    const totalValue = inputValues.reduce((sum, val) => sum + parseInt(val), 0).toString();
-
-    const zencode = `
-    Scenario 'ethereum': Generate combine proof
-    Given I have a 'hex array' named 'input_commitments'
-    Given I have a 'integer array' named 'input_values'
-    Given I have a 'integer array' named 'input_blindings'
-    Given I have a 'integer' named 'total_value'
-    Given I have a 'integer' named 'output_blinding'
-    
-    When I verify all input commitments open correctly
-    And I verify that sum of 'input_values' equals 'total_value'
-    And I create the combine proof for inputs
-    And I create the output commitment of 'total_value' with 'output_blinding'
-    And I create the combine signature
-    
-    Then print the 'combine proof' as 'hex'
-    `;
-
-    const data = JSON.stringify({
-      input_commitments: inputCommitments,
-      input_values: inputValues,
-      input_blindings: inputBlindings,
-      total_value: totalValue,
-      output_blinding: outputBlinding
-    });
-
-    try {
-      const result = await zencode_exec(zencode, { data });
-      const output = JSON.parse(result.result);
-      return output.combine_proof;
-    } catch (error) {
-      throw new ZenroomExecutionError(
-        'Failed to generate combine proof',
-        error instanceof Error ? error.message : 'Unknown error',
-        zencode
+        error instanceof Error ? (error.message ?? String(error)) : 'Unknown error',
+        'createPedersenCommitment'
       );
     }
   }
@@ -652,56 +488,29 @@ Then print 'hash' as 'hex'
    * @param privateKey - Optional private key, generates new if not provided
    * @returns Promise resolving to BBS+ key pair
    */
-  static async generateBBSKeyPair(privateKey?: string): Promise<{
-    privateKey: string;
-    publicKey: string;
-  }> {
-    console.log('🔑 Generating BBS+ key pair...');
-    
+  static async generateBBSKeyPair(privateKey?: string): Promise<{ privateKey: string; publicKey: string }> {
+    const zenroomAvailable = await isZenroomAvailable();
+    if (!zenroomAvailable) {
+      throw new ZenroomExecutionError('Zenroom is not available in this environment', '', 'generateBBSKeyPair');
+    }
+    const zencode = `
+Scenario 'bbs-plus': Generate BBS+ key pair
+When I create the bbs+ keypair
+Then print the 'bbs private key' as 'hex'
+And print the 'bbs public key' as 'hex'
+`;
+    const data = privateKey ? JSON.stringify({ private_key: privateKey }) : undefined;
     try {
-      const zenroomAvailable = await isZenroomAvailable();
-      if (!zenroomAvailable) {
-        // Fallback: generate using ethers wallet
-        const wallet = privateKey ? new ethers.Wallet(privateKey) : ethers.Wallet.createRandom();
-        console.log('🔑 Generated BBS+ keys using ethers fallback');
-        return {
-          privateKey: wallet.privateKey,
-          publicKey: wallet.address // Use address as public key identifier
-        };
-      }
-
-      const zencode = `
-      Scenario 'bbs': Generate BBS+ keypair
-      ${privateKey ? `Given I have a 'hex' named 'private_key'` : 'Given nothing'}
-      When I create the BBS+ key pair${privateKey ? ' from \'private_key\'' : ''}
-      And I create the BBS+ public key
-      Then print the 'bbs private key' as 'hex'
-      And print the 'bbs public key' as 'hex'
-      `;
-
-      const data = privateKey ? JSON.stringify({ private_key: privateKey }) : undefined;
-
       const result = await zencode_exec(zencode, data ? { data } : undefined);
       const output = JSON.parse(result.result);
-      
-      console.log('✅ BBS+ keys generated successfully');
-      
       return {
         privateKey: output.bbs_private_key || output['bbs private key'],
         publicKey: output.bbs_public_key || output['bbs public key']
       };
     } catch (error) {
-      console.error('❌ Failed to generate BBS+ keys:', error);
-      // Fallback to ethers
-      const wallet = privateKey ? new ethers.Wallet(privateKey) : ethers.Wallet.createRandom();
-      console.log('🔑 Generated BBS+ keys using ethers fallback after error');
-      return {
-        privateKey: wallet.privateKey,
-        publicKey: wallet.address // Use address as public key identifier
-      };
+      throw new ZenroomExecutionError('Failed to generate BBS+ keys', error instanceof Error ? error.message : 'Unknown error', 'generateBBSKeyPair');
     }
   }
-
   /**
    * Generate Coconut threshold setup for distributed credential issuance
    * @param authorities - Array of authority addresses
@@ -724,47 +533,24 @@ Then print 'hash' as 'hex'
     try {
       const zenroomAvailable = await isZenroomAvailable();
       if (!zenroomAvailable) {
-        // Fallback: generate individual keys
-        const publicKeys = [];
-        for (let i = 0; i < authorities.length; i++) {
-          if (authorityKeys && authorityKeys[i]) {
-            const wallet = new ethers.Wallet(authorityKeys[i]);
-            publicKeys.push(wallet.address);
-          } else {
-            const wallet = ethers.Wallet.createRandom();
-            publicKeys.push(wallet.address);
-          }
-        }
-        
-        const aggregatedPubKey = ethers.Wallet.createRandom().address;
-        console.log('🥥 Generated Coconut setup using ethers fallback');
-        
-        return {
-          authorities,
-          threshold,
-          publicKeys,
-          aggregatedPubKey
-        };
+        throw new ZenroomExecutionError('Zenroom is not available in this environment', '', 'generateCoconutThresholdKeys');
       }
-
       const zencode = `
-      Scenario 'coconut': Generate threshold setup
-      Given I have a 'string array' named 'authorities'
-      Given I have a 'integer' named 'threshold'
-      ${authorityKeys ? `Given I have a 'string array' named 'authority_keys'` : ''}
-      When I create the coconut threshold setup with 'threshold' of 'authorities'
-      And I create the coconut aggregation key
-      Then print the 'threshold setup'
-      And print the 'authority keys'
-      And print the 'aggregation key' as 'hex'
-      `;
-
+Scenario 'coconut': Generate threshold setup
+Given I have a 'string array' named 'authorities'
+Given I have a 'integer' named 'threshold'
+${authorityKeys ? `Given I have a 'string array' named 'authority_keys'` : ''}
+When I create the coconut threshold setup with 'threshold' of 'authorities'
+And I create the coconut aggregation key
+Then print the 'threshold setup'
+And print the 'authority keys'
+And print the 'aggregation key' as 'hex'
+`;
       const data = JSON.stringify({
         authorities,
         threshold,
         ...(authorityKeys && { authority_keys: authorityKeys })
       });
-
       const result = await zencode_exec(zencode, { data });
       const output = JSON.parse(result.result);
       
