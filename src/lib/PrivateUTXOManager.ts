@@ -730,6 +730,118 @@ export class PrivateUTXOManager extends UTXOLibrary {
         throw new Error(`ABI encoding error: ${abiError.reason || abiError.message}`);
       }
 
+      // 🔍 VALIDACIÓN ADICIONAL: Verificar que el blinding factor modificado es correcto
+      console.log('🔍 VALIDACIÓN FINAL DE PARÁMETROS:');
+      
+      // Verificar que el commitment se puede reconstruir correctamente
+      try {
+        const testCommitment = await ZenroomHelpers.createPedersenCommitment(
+          amount.toString(),
+          blindingFactor // usar el original, no el modificado
+        );
+        
+        console.log('✅ Test commitment creation successful:', {
+          original: commitmentResult.pedersen_commitment.slice(0, 20) + '...',
+          test: testCommitment.pedersen_commitment.slice(0, 20) + '...',
+          match: commitmentResult.pedersen_commitment === testCommitment.pedersen_commitment
+        });
+        
+        if (commitmentResult.pedersen_commitment !== testCommitment.pedersen_commitment) {
+          console.warn('⚠️ Commitment mismatch detected, but proceeding with original');
+        }
+      } catch (commitmentTestError) {
+        console.error('❌ Failed to recreate commitment:', commitmentTestError);
+        throw new Error('Commitment recreation failed during validation');
+      }
+
+      // Verificar que todos los parámetros tienen el formato correcto
+      const paramValidation = {
+        tokenAddress: {
+          value: depositParams.tokenAddress,
+          isValid: /^0x[0-9a-fA-F]{40}$/i.test(depositParams.tokenAddress),
+          type: typeof depositParams.tokenAddress
+        },
+        commitment: {
+          value: depositParams.commitment,
+          isValid: /^0x[0-9a-fA-F]{64}$/i.test(depositParams.commitment),
+          type: typeof depositParams.commitment,
+          length: depositParams.commitment.length
+        },
+        nullifierHash: {
+          value: depositParams.nullifierHash,
+          isValid: /^0x[0-9a-fA-F]{64}$/i.test(depositParams.nullifierHash),
+          type: typeof depositParams.nullifierHash,
+          length: depositParams.nullifierHash.length
+        },
+        blindingFactor: {
+          value: depositParams.blindingFactor.toString(),
+          type: typeof depositParams.blindingFactor,
+          isBigInt: typeof depositParams.blindingFactor === 'bigint'
+        },
+        amount: {
+          value: amount.toString(),
+          type: typeof amount,
+          isBigInt: typeof amount === 'bigint',
+          isPositive: amount > 0n
+        }
+      };
+      
+      console.log('📋 Parameter validation results:', paramValidation);
+      
+      // Verificar que no hay problemas obvios
+      const validationErrors = [];
+      if (!paramValidation.tokenAddress.isValid) validationErrors.push('Invalid token address format');
+      if (!paramValidation.commitment.isValid) validationErrors.push('Invalid commitment format');
+      if (!paramValidation.nullifierHash.isValid) validationErrors.push('Invalid nullifier hash format');
+      if (!paramValidation.blindingFactor.isBigInt) validationErrors.push('Blinding factor must be BigInt');
+      if (!paramValidation.amount.isBigInt) validationErrors.push('Amount must be BigInt');
+      if (!paramValidation.amount.isPositive) validationErrors.push('Amount must be positive');
+      
+      if (validationErrors.length > 0) {
+        console.error('❌ Parameter validation failed:', validationErrors);
+        throw new Error(`Parameter validation failed: ${validationErrors.join(', ')}`);
+      }
+      
+      console.log('✅ All parameters validated successfully');
+
+      // 🔍 DEBUG: Test contract interaction before actual transaction
+      console.log('🔍 Testing contract interaction before deposit...');
+      await this.debugContractInteraction(params);
+      
+      // 🔍 DEBUG: Verificar allowance del token
+      console.log('🔍 Checking token allowance...');
+      try {
+        const tokenContract = new ethers.Contract(
+          tokenAddress,
+          ['function allowance(address owner, address spender) view returns (uint256)'],
+          EthereumHelpers.getSigner()
+        );
+        
+        const contractAddress = this.contract?.target;
+        if (!contractAddress) {
+          throw new Error('Contract address not available');
+        }
+        
+        const allowance = await tokenContract.allowance(owner, contractAddress);
+        console.log('💰 Token allowance check:', {
+          owner,
+          spender: contractAddress,
+          allowance: allowance.toString(),
+          required: amount.toString(),
+          sufficient: allowance >= amount
+        });
+        
+        if (allowance < amount) {
+          throw new Error(`Insufficient token allowance: has ${allowance.toString()}, needs ${amount.toString()}`);
+        }
+        
+        console.log('✅ Token allowance is sufficient');
+        
+      } catch (allowanceError) {
+        console.error('❌ Token allowance check failed:', allowanceError);
+        throw new Error(`Token allowance verification failed: ${allowanceError instanceof Error ? allowanceError.message : allowanceError}`);
+      }
+
       // 10. Ejecutar transacción BN254
       console.log('🚀 Executing BN254 depositAsPrivateUTXO transaction...');
       
@@ -825,6 +937,91 @@ export class PrivateUTXOManager extends UTXOLibrary {
         error: errorMessage,
         errorDetails: error
       };
+    }
+  }
+
+  /**
+   * Debug function to test contract interaction before actual deposit
+   */
+  async debugContractInteraction(params: CreateUTXOParams): Promise<void> {
+    console.log('🔍 === DEBUG CONTRACT INTERACTION ===');
+    
+    if (!this.contract) {
+      throw new Error('Contract not initialized');
+    }
+
+    try {
+      // 1. Test network connectivity first
+      console.log('🌐 Testing network connectivity...');
+      try {
+        const provider = EthereumHelpers.getProvider();
+        const blockNumber = await provider.getBlockNumber();
+        const network = await provider.getNetwork();
+        console.log('✅ Network info:', {
+          chainId: network.chainId.toString(),
+          blockNumber: blockNumber.toString(),
+          name: network.name
+        });
+      } catch (networkError) {
+        console.error('❌ Network connectivity issue:', networkError);
+        throw new Error(`Network connectivity failed: ${networkError instanceof Error ? networkError.message : networkError}`);
+      }
+
+      // 2. Test basic contract calls with retry logic
+      console.log('📞 Testing basic contract calls with retry logic...');
+      let retryCount = 0;
+      const maxRetries = 3;
+      
+      while (retryCount < maxRetries) {
+        try {
+          // Test if contract is accessible
+          const registeredTokensCount = await this.contract.getRegisteredTokenCount();
+          console.log('✅ Contract accessible, registered tokens:', registeredTokensCount.toString());
+          
+          // Test token registration check
+          const isTokenRegistered = await this.contract.isTokenRegistered(params.tokenAddress);
+          console.log('🔍 Token registration status:', isTokenRegistered);
+          
+          // Test nullifier check (should be false for new nullifier)
+          const nullifierHash = await ZenroomHelpers.generateNullifierHash(
+            'test_commitment',
+            params.owner,
+            Date.now().toString()
+          );
+          
+          const isNullifierUsed = await this.contract.isNullifierUsed(nullifierHash);
+          console.log('🔍 Nullifier status (should be false):', isNullifierUsed);
+          
+          break; // Success, exit retry loop
+          
+        } catch (contractError: any) {
+          retryCount++;
+          console.warn(`⚠️ Contract call attempt ${retryCount}/${maxRetries} failed:`, contractError?.message || contractError);
+          
+          if (retryCount >= maxRetries) {
+            // If it's a JSON-RPC error, provide specific guidance
+            if (contractError?.message?.includes('missing trie node') || contractError?.code === -32603) {
+              throw new Error(`Network node synchronization issue. Please try again in a few moments or switch to a different RPC endpoint. Error: ${contractError.message}`);
+            }
+            
+            // If it's a call exception without revert data, the contract might not be deployed correctly
+            if (contractError?.code === 'CALL_EXCEPTION' && contractError?.message?.includes('missing revert data')) {
+              throw new Error(`Contract call failed - contract may not be properly deployed at ${this.contract?.target}. Error: ${contractError.message}`);
+            }
+            
+            throw new Error(`Contract interaction failed after ${maxRetries} attempts: ${contractError?.message || contractError}`);
+          }
+          
+          // Wait before retry (exponential backoff)
+          await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
+        }
+      }
+      
+      console.log('✅ Basic contract interaction tests passed');
+      
+    } catch (error) {
+      console.error('❌ Contract interaction test failed:', error);
+      throw new Error(`Contract interaction test failed: ${error instanceof Error ? error.message : error}`);
     }
   }
 

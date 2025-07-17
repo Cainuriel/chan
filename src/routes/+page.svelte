@@ -1,11 +1,24 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { ethers } from 'ethers';
   import { privateUTXOManager } from '$lib/PrivateUTXOManager';
   import type { PrivateUTXO } from '$lib/PrivateUTXOManager'; 
   import { PrivateUTXOStorage } from '$lib/PrivateUTXOStorage';
   import { WalletProviderType } from '../types/ethereum.types';
   import type { UTXOManagerStats, UTXOManagerConfig } from '../types/utxo.types';
   import type { EOAData } from '../types/ethereum.types';
+  
+  // Types for networks
+  type NetworkConfig = {
+    name: string;
+    chainId: number;
+    rpcUrl: string;
+    blockExplorer: string;
+    nativeCurrency: { name: string; symbol: string; decimals: number };
+    contractAddress: string;
+  };
+  
+  type NetworkKey = 'amoy' | 'alastria';
   
   // Components
   import WalletConnection from '../components/WalletConnection.svelte';
@@ -21,12 +34,39 @@
   let stats: UTXOManagerStats | null = null;
   let activeTab = 'balance';
   let notifications: Array<{id: string, type: string, message: string}> = [];
+  let selectedNetwork: NetworkKey = 'amoy'; // Default network
+  
+  // Controlled Flow State
+  let isWalletConnected = false;
+  let isNetworkSelected = false;
+  let isLibraryInitialized = false;
+  let currentStep = 1; // 1: Connect Wallet, 2: Select Network, 3: Initialize Library
   
   // Privacy mode - always true since we only support private UTXOs
   const privacyMode = true;
 
-  // Configuration
-  const CONTRACT_ADDRESS = '0xE4e35290Dda72e6fA426E23e8E805219246f415e'; // Amoy
+  // Network configurations
+  const NETWORKS: Record<NetworkKey, NetworkConfig> = {
+    amoy: {
+      name: 'Polygon Amoy',
+      chainId: 80002,
+      rpcUrl: 'https://rpc-amoy.polygon.technology/',
+      blockExplorer: 'https://amoy.polygonscan.com',
+      nativeCurrency: { name: 'MATIC', symbol: 'MATIC', decimals: 18 },
+      contractAddress: import.meta.env.VITE_ADDRESS_CONTRACT_AMOY || ''
+    },
+    alastria: {
+      name: 'Alastria',
+      chainId: 2020,
+      rpcUrl: 'http://108.142.237.13:8545',
+      blockExplorer: 'http://108.142.237.13', // Placeholder, adjust as needed
+      nativeCurrency: { name: 'ALA', symbol: 'ALA', decimals: 18 },
+      contractAddress: import.meta.env.VITE_ADDRESS_CONTRACT_ALASTRIA || ''
+    }
+  };
+
+  // Configuration - will be updated based on selected network
+  let CONTRACT_ADDRESS = NETWORKS[selectedNetwork].contractAddress;
   const PREFERRED_PROVIDER = WalletProviderType.METAMASK;
 
   onMount(async () => {
@@ -51,10 +91,8 @@
       // Setup event listeners
       setupEventListeners();
 
-      console.log('🔐 Private UTXO Manager initialized with REAL cryptography only');
-      
-      // Auto-initialize library and reconnect if possible
-      await initializeLibrary();
+      console.log('🔐 Private UTXO Manager ready - waiting for user interaction');
+      addNotification('info', '🚀 Ready! Please follow the steps to get started');
       
     } catch (error) {
       console.error('❌ Failed to initialize Private UTXO Manager:', error);
@@ -126,12 +164,190 @@
   }
 
   // ========================
+  // NETWORK SWITCHING
+  // ========================
+
+  async function switchNetwork(networkKey: NetworkKey) {
+    if (!NETWORKS[networkKey]) {
+      addNotification('error', 'Unknown network');
+      return;
+    }
+
+    try {
+      const network = NETWORKS[networkKey];
+      console.log(`🌐 Switching to ${network.name}...`);
+      addNotification('info', `Switching to ${network.name}...`);
+
+      // Check if contract is deployed on this network
+      if (!network.contractAddress) {
+        addNotification('warning', `⚠️ No contract deployed on ${network.name} yet. Deploy contract first.`);
+        selectedNetwork = networkKey;
+        CONTRACT_ADDRESS = '';
+        return;
+      }
+
+      // Request network switch in MetaMask
+      if (typeof window !== 'undefined' && window.ethereum) {
+        try {
+          // Try to switch to the network
+          await window.ethereum.request({
+            method: 'wallet_switchEthereumChain',
+            params: [{ chainId: `0x${network.chainId.toString(16)}` }],
+          });
+        } catch (switchError: any) {
+          // If the network is not added to MetaMask, add it
+          if (switchError.code === 4902) {
+            console.log(`Adding ${network.name} to MetaMask...`);
+            await window.ethereum.request({
+              method: 'wallet_addEthereumChain',
+              params: [{
+                chainId: `0x${network.chainId.toString(16)}`,
+                chainName: network.name,
+                rpcUrls: [network.rpcUrl],
+                blockExplorerUrls: [network.blockExplorer],
+                nativeCurrency: network.nativeCurrency
+              }],
+            });
+          } else {
+            throw switchError;
+          }
+        }
+      }
+
+      // Update local state
+      selectedNetwork = networkKey;
+      CONTRACT_ADDRESS = network.contractAddress;
+
+      // Reinitialize with new network
+      if (isInitialized) {
+        console.log('🔄 Reinitializing with new network...');
+        isInitialized = false;
+        await initializeLibrary();
+      }
+
+      addNotification('success', `✅ Switched to ${network.name}`);
+
+    } catch (error: any) {
+      console.error('❌ Failed to switch network:', error);
+      addNotification('error', `Failed to switch to ${NETWORKS[networkKey].name}: ${error.message || error}`);
+    }
+  }
+
+  // Function to update contract address for current network
+  function updateContractAddress(address: string) {
+    if (!selectedNetwork || !NETWORKS[selectedNetwork]) {
+      addNotification('error', 'No network selected');
+      return;
+    }
+
+    NETWORKS[selectedNetwork].contractAddress = address;
+    CONTRACT_ADDRESS = address;
+    addNotification('success', `Contract address updated for ${NETWORKS[selectedNetwork].name}: ${address}`);
+  }
+
+  // ========================
+  // CONTROLLED FLOW FUNCTIONS
+  // ========================
+  
+  async function step1_connectWallet() {
+    try {
+      console.log('🔌 Step 1: Connecting wallet...');
+      addNotification('info', 'Connecting wallet...');
+      
+      const success = await privateUTXOManager.connectWallet(PREFERRED_PROVIDER);
+      if (success) {
+        isWalletConnected = true;
+        currentStep = 2;
+        const account = privateUTXOManager.currentAccount;
+        if (account) {
+          currentAccount = account;
+        }
+        addNotification('success', '✅ Step 1 complete: Wallet connected!');
+        console.log('✅ Step 1 complete: Wallet connected');
+      } else {
+        addNotification('error', 'Failed to connect wallet');
+      }
+    } catch (error: any) {
+      console.error('❌ Failed to connect wallet:', error);
+      addNotification('error', `Failed to connect wallet: ${error.message || error}`);
+    }
+  }
+
+  async function step2_selectNetwork() {
+    try {
+      console.log('🌐 Step 2: Confirming network selection...');
+      addNotification('info', `Confirming network: ${NETWORKS[selectedNetwork].name}...`);
+      
+      // Validate that we have a contract address for this network
+      if (!NETWORKS[selectedNetwork].contractAddress) {
+        addNotification('error', `No contract deployed on ${NETWORKS[selectedNetwork].name}. Please deploy contract first.`);
+        return;
+      }
+      
+      // Switch to the selected network
+      await switchNetwork(selectedNetwork);
+      
+      isNetworkSelected = true;
+      currentStep = 3;
+      CONTRACT_ADDRESS = NETWORKS[selectedNetwork].contractAddress;
+      
+      addNotification('success', `✅ Step 2 complete: Network ${NETWORKS[selectedNetwork].name} selected!`);
+      console.log('✅ Step 2 complete: Network selected');
+      
+    } catch (error: any) {
+      console.error('❌ Failed to select network:', error);
+      addNotification('error', `Failed to select network: ${error.message || error}`);
+    }
+  }
+
+  async function step3_initializeLibrary() {
+    try {
+      console.log('🚀 Step 3: Initializing UTXO Library...');
+      addNotification('info', 'Initializing UTXO Library...');
+      
+      const success = await initializeLibrary();
+      if (success !== false) {
+        isLibraryInitialized = true;
+        currentStep = 4; // All steps complete
+        addNotification('success', '✅ Step 3 complete: UTXO Library initialized!');
+        addNotification('success', '🎉 All steps complete! You can now use the UTXO system.');
+        console.log('✅ All steps complete! UTXO system ready');
+      } else {
+        addNotification('error', 'Failed to initialize UTXO Library');
+      }
+    } catch (error: any) {
+      console.error('❌ Failed to initialize library:', error);
+      addNotification('error', `Failed to initialize library: ${error.message || error}`);
+    }
+  }
+
+  // Reset flow (for testing or if user wants to start over)
+  function resetFlow() {
+    isWalletConnected = false;
+    isNetworkSelected = false;
+    isLibraryInitialized = false;
+    currentStep = 1;
+    isInitialized = false;
+    currentAccount = null;
+    privateUTXOs = [];
+    stats = null;
+    addNotification('info', 'Flow reset. Please start from Step 1.');
+    console.log('🔄 Flow reset');
+  }
+
+  // ========================
   // LIBRARY INITIALIZATION
   // ========================
   
   async function initializeLibrary() {
     try {
       console.log('🚀 Initializing library with contract address:', CONTRACT_ADDRESS);
+      console.log('🌐 Selected network:', NETWORKS[selectedNetwork].name);
+
+      if (!CONTRACT_ADDRESS) {
+        addNotification('warning', `⚠️ No contract deployed on ${NETWORKS[selectedNetwork].name}. Deploy contract first.`);
+        return false;
+      }
       
       const success = await privateUTXOManager.initialize(CONTRACT_ADDRESS);
       if (success) {
@@ -141,26 +357,15 @@
           currentAccount = account;
           await refreshData();
         }
-        addNotification('success', 'Library initialized successfully');
-        
-        // Try to auto-reconnect if MetaMask is already connected
-        if (typeof window !== 'undefined' && window.ethereum) {
-          try {
-            const accounts = await window.ethereum.request({ method: 'eth_accounts' });
-            if (accounts && accounts.length > 0) {
-              console.log('🔄 Auto-reconnecting to existing wallet session...');
-              await privateUTXOManager.connectWallet(PREFERRED_PROVIDER);
-            }
-          } catch (autoConnectError: any) {
-            console.log('ℹ️ Auto-reconnect not available:', autoConnectError.message || autoConnectError);
-          }
-        }
+        addNotification('success', `Library initialized successfully on ${NETWORKS[selectedNetwork].name}`);
+        return true;
       } else {
         throw new Error('Library initialization failed');
       }
     } catch (error) {
       console.error('❌ Library initialization failed:', error);
       addNotification('error', 'Failed to initialize library');
+      return false;
     }
   }
 
@@ -383,6 +588,123 @@
     }
   }
 
+  // Test contract debug function
+  async function testContractDebug() {
+    if (!currentAccount?.address || !isInitialized || !privateUTXOManager) {
+      addNotification('error', 'Please connect wallet and initialize first');
+      return;
+    }
+
+    try {
+      console.log('🔍 === TESTING CONTRACT DEBUG ===');
+      addNotification('info', 'Testing contract interaction...');
+      
+      // Create test parameters
+      const testParams = {
+        amount: 1000000000000000000n, // 1 token (18 decimals)
+        tokenAddress: '0xCA4d19D712944874f8dd1472C6de5Dd8e5C9E5e2', // Test token with correct checksum
+        owner: currentAccount.address
+      };
+      
+      // Call debug function
+      await privateUTXOManager.debugContractInteraction(testParams);
+      
+      addNotification('success', 'Contract debug test completed! Check console for details.');
+      
+    } catch (error: any) {
+      console.error('❌ Contract debug test failed:', error);
+      
+      // Check if it's a network/RPC issue
+      if (error.message?.includes('missing trie node') || error.message?.includes('JSON-RPC error') || error.message?.includes('Network node synchronization')) {
+        addNotification('error', `Network/RPC issue detected. ${error.message}. Try the RPC Test button below.`);
+      } else {
+        addNotification('error', `Contract debug failed: ${error.message || error}`);
+      }
+    }
+  }
+
+  // Test different RPC endpoints
+  async function testRPCEndpoints() {
+    if (!currentAccount?.address) {
+      addNotification('error', 'Please connect wallet first');
+      return;
+    }
+
+    try {
+      console.log('🔍 === TESTING RPC ENDPOINTS ===');
+      addNotification('info', 'Testing RPC endpoints...');
+      
+      // Get RPC endpoints based on selected network
+      let rpcEndpoints: string[] = [];
+      
+      if (selectedNetwork === 'amoy') {
+        rpcEndpoints = [
+          'https://rpc-amoy.polygon.technology/',
+          'https://polygon-amoy.blockpi.network/v1/rpc/public',
+          'https://polygon-amoy-bor-rpc.publicnode.com',
+          'https://rpc.ankr.com/polygon_amoy'
+        ];
+      } else if (selectedNetwork === 'alastria') {
+        rpcEndpoints = [
+          'http://108.142.237.13:8545'
+        ];
+      }
+      
+      for (const rpc of rpcEndpoints) {
+        try {
+          console.log(`🌐 Testing RPC: ${rpc}`);
+          
+          // Create a temporary provider for testing
+          const testProvider = new ethers.JsonRpcProvider(rpc);
+          const blockNumber = await testProvider.getBlockNumber();
+          const network = await testProvider.getNetwork();
+          
+          console.log(`✅ RPC ${rpc} - Block: ${blockNumber}, ChainID: ${network.chainId}`);
+          
+          // If we get here, this RPC is working
+          addNotification('success', `✅ Working RPC found: ${rpc} (Block: ${blockNumber})`);
+          
+        } catch (rpcError: any) {
+          console.warn(`❌ RPC ${rpc} failed:`, rpcError.message);
+        }
+      }
+      
+      console.log('🔍 RPC endpoint testing completed');
+      addNotification('info', 'RPC testing completed. Check console for details.');
+      
+    } catch (error: any) {
+      console.error('❌ RPC testing failed:', error);
+      addNotification('error', `RPC testing failed: ${error.message || error}`);
+    }
+  }
+
+  // Show network and contract information
+  function showNetworkInfo() {
+    try {
+      console.log('🔍 === NETWORK INFORMATION ===');
+      
+      const network = NETWORKS[selectedNetwork];
+      console.log(`\n🌐 Current Network: ${network.name}`);
+      console.log(`- Chain ID: ${network.chainId}`);
+      console.log(`- RPC URL: ${network.rpcUrl}`);
+      console.log(`- Block Explorer: ${network.blockExplorer}`);
+      console.log(`- Native Currency: ${network.nativeCurrency.symbol}`);
+      console.log(`- Contract Address: ${network.contractAddress || 'NOT DEPLOYED'}`);
+      
+      console.log(`\n📋 All Networks:`);
+      Object.entries(NETWORKS).forEach(([key, net]) => {
+        console.log(`${key}: ${net.name} (ChainID: ${net.chainId}) - Contract: ${net.contractAddress || 'NOT DEPLOYED'}`);
+      });
+      
+      const contractStatus = CONTRACT_ADDRESS ? 'deployed' : 'not deployed';
+      addNotification('info', `${network.name} (ChainID: ${network.chainId}) - Contract: ${contractStatus}. Check console for details.`);
+      
+    } catch (error: any) {
+      console.error('❌ Failed to show network info:', error);
+      addNotification('error', `Failed to show network info: ${error.message || error}`);
+    }
+  }
+
   // Variable para generar IDs únicos
   let notificationCounter = 0;
 
@@ -481,12 +803,37 @@
         </div>
         
         <div class="flex items-center space-x-4">
-          {#if isInitialized}
+          {#if currentStep === 4 && isInitialized}
             <div class="flex items-center space-x-4">
               <!-- Private Mode Indicator (Always On) -->
               <div class="flex items-center space-x-2 px-3 py-2 rounded-lg bg-purple-600 text-white">
                 <span>🔐</span>
                 <span class="text-sm">Private Mode</span>
+              </div>
+              
+              <!-- Network Selector -->
+              <div class="relative">
+                <select 
+                  bind:value={selectedNetwork}
+                  on:change={(e) => switchNetwork((e.target as HTMLSelectElement).value as NetworkKey)}
+                  class="appearance-none bg-gray-800/50 text-white border border-gray-600 rounded-lg px-4 py-2 pr-8 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  <option value="amoy">🔵 Polygon Amoy</option>
+                  <option value="alastria">⚡ Alastria</option>
+                </select>
+                <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-300">
+                  <svg class="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">
+                    <path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/>
+                  </svg>
+                </div>
+              </div>
+              
+              <!-- Network Status Indicator -->
+              <div class="flex items-center space-x-2 px-3 py-2 rounded-lg bg-gray-800/30 text-gray-300">
+                <div class="w-2 h-2 rounded-full {CONTRACT_ADDRESS ? 'bg-green-400' : 'bg-yellow-400'}"></div>
+                <span class="text-sm">
+                  {CONTRACT_ADDRESS ? NETWORKS[selectedNetwork].name : `${NETWORKS[selectedNetwork].name} (No Contract)`}
+                </span>
               </div>
               
               <!-- Debug Tools -->
@@ -526,6 +873,33 @@
                   <span>🐛</span>
                   <span class="text-sm">Debug Storage</span>
                 </button>
+                
+                <button
+                  on:click={testContractDebug}
+                  class="flex items-center space-x-2 px-3 py-2 rounded-lg bg-yellow-600/20 text-yellow-300 hover:bg-yellow-600/30 transition-all duration-200"
+                  title="Test contract interaction"
+                >
+                  <span>⚗️</span>
+                  <span class="text-sm">Test Contract</span>
+                </button>
+                
+                <button
+                  on:click={testRPCEndpoints}
+                  class="flex items-center space-x-2 px-3 py-2 rounded-lg bg-indigo-600/20 text-indigo-300 hover:bg-indigo-600/30 transition-all duration-200"
+                  title="Test RPC endpoints for network issues"
+                >
+                  <span>🌐</span>
+                  <span class="text-sm">RPC Test</span>
+                </button>
+                
+                <button
+                  on:click={showNetworkInfo}
+                  class="flex items-center space-x-2 px-3 py-2 rounded-lg bg-teal-600/20 text-teal-300 hover:bg-teal-600/30 transition-all duration-200"
+                  title="Show network and contract information"
+                >
+                  <span>ℹ️</span>
+                  <span class="text-sm">Network Info</span>
+                </button>
               {/if}
               
               <!-- Connection Status -->
@@ -549,7 +923,190 @@
 
   <!-- Main Content -->
   <main class="container mx-auto px-4 py-8">
-    {#if !isInitialized}
+    {#if currentStep < 4}
+      <!-- Controlled Flow Panel -->
+      <div class="text-center py-12">
+        <div class="max-w-4xl mx-auto">
+          <h2 class="text-4xl font-bold text-white mb-6">
+            Setup Your UTXO Wallet
+          </h2>
+          <p class="text-xl text-gray-300 mb-12">
+            Follow these 3 simple steps to start using privacy-preserving UTXOs
+          </p>
+          
+          <!-- Progress Steps -->
+          <div class="flex justify-center items-center mb-12 space-x-4">
+            <!-- Step 1: Connect Wallet -->
+            <div class="flex flex-col items-center space-y-2">
+              <div class="w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-lg
+                {currentStep >= 1 ? (isWalletConnected ? 'bg-green-500' : 'bg-blue-500') : 'bg-gray-600'}">
+                {isWalletConnected ? '✅' : '1'}
+              </div>
+              <span class="text-sm {currentStep >= 1 ? 'text-white' : 'text-gray-400'}">Connect Wallet</span>
+            </div>
+            
+            <!-- Arrow -->
+            <div class="w-8 h-0.5 {currentStep >= 2 ? 'bg-blue-400' : 'bg-gray-600'}"></div>
+            
+            <!-- Step 2: Select Network -->
+            <div class="flex flex-col items-center space-y-2">
+              <div class="w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-lg
+                {currentStep >= 2 ? (isNetworkSelected ? 'bg-green-500' : 'bg-blue-500') : 'bg-gray-600'}">
+                {isNetworkSelected ? '✅' : '2'}
+              </div>
+              <span class="text-sm {currentStep >= 2 ? 'text-white' : 'text-gray-400'}">Select Network</span>
+            </div>
+            
+            <!-- Arrow -->
+            <div class="w-8 h-0.5 {currentStep >= 3 ? 'bg-blue-400' : 'bg-gray-600'}"></div>
+            
+            <!-- Step 3: Initialize Library -->
+            <div class="flex flex-col items-center space-y-2">
+              <div class="w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-lg
+                {currentStep >= 3 ? (isLibraryInitialized ? 'bg-green-500' : 'bg-blue-500') : 'bg-gray-600'}">
+                {isLibraryInitialized ? '✅' : '3'}
+              </div>
+              <span class="text-sm {currentStep >= 3 ? 'text-white' : 'text-gray-400'}">Initialize Library</span>
+            </div>
+          </div>
+          
+          <!-- Step Content -->
+          <div class="bg-white/10 backdrop-blur-sm rounded-xl p-8 border border-white/20 max-w-2xl mx-auto">
+            {#if currentStep === 1}
+              <!-- Step 1: Connect Wallet -->
+              <div class="text-center">
+                <div class="text-6xl mb-6">🔌</div>
+                <h3 class="text-2xl font-bold text-white mb-4">Step 1: Connect Your Wallet</h3>
+                <p class="text-gray-300 mb-8">Connect MetaMask or another compatible wallet to get started</p>
+                
+                <button
+                  on:click={step1_connectWallet}
+                  class="bg-gradient-to-r from-purple-600 to-blue-600 text-white px-8 py-4 rounded-lg font-semibold text-lg hover:from-purple-700 hover:to-blue-700 transition-all duration-200 shadow-lg hover:shadow-xl"
+                  disabled={isWalletConnected}
+                >
+                  {isWalletConnected ? '✅ Wallet Connected' : '🔌 Connect Wallet'}
+                </button>
+                
+                {#if currentAccount}
+                  <div class="mt-6 p-4 bg-green-600/20 rounded-lg border border-green-500/30">
+                    <p class="text-green-300 text-sm">
+                      <span class="font-semibold">Connected:</span> {currentAccount.address.slice(0, 6)}...{currentAccount.address.slice(-4)}
+                    </p>
+                  </div>
+                {/if}
+              </div>
+              
+            {:else if currentStep === 2}
+              <!-- Step 2: Select Network -->
+              <div class="text-center">
+                <div class="text-6xl mb-6">🌐</div>
+                <h3 class="text-2xl font-bold text-white mb-4">Step 2: Select Network</h3>
+                <p class="text-gray-300 mb-8">Choose the blockchain network you want to use</p>
+                
+                <!-- Network Selection -->
+                <div class="space-y-4 mb-8">
+                  <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <button
+                      on:click={() => selectedNetwork = 'amoy'}
+                      class="p-6 rounded-lg border-2 transition-all duration-200 {selectedNetwork === 'amoy' ? 'border-blue-500 bg-blue-500/20' : 'border-gray-600 bg-gray-800/30 hover:border-gray-500'}"
+                    >
+                      <div class="text-3xl mb-3">🔵</div>
+                      <h4 class="text-white font-semibold">Polygon Amoy</h4>
+                      <p class="text-gray-400 text-sm mt-2">Testnet • ChainID: 80002</p>
+                      <div class="mt-3 flex items-center justify-center space-x-2">
+                        <div class="w-2 h-2 rounded-full {NETWORKS.amoy.contractAddress ? 'bg-green-400' : 'bg-yellow-400'}"></div>
+                        <span class="text-xs {NETWORKS.amoy.contractAddress ? 'text-green-400' : 'text-yellow-400'}">
+                          {NETWORKS.amoy.contractAddress ? 'Contract Available' : 'No Contract'}
+                        </span>
+                      </div>
+                    </button>
+                    
+                    <button
+                      on:click={() => selectedNetwork = 'alastria'}
+                      class="p-6 rounded-lg border-2 transition-all duration-200 {selectedNetwork === 'alastria' ? 'border-purple-500 bg-purple-500/20' : 'border-gray-600 bg-gray-800/30 hover:border-gray-500'}"
+                    >
+                      <div class="text-3xl mb-3">⚡</div>
+                      <h4 class="text-white font-semibold">Alastria</h4>
+                      <p class="text-gray-400 text-sm mt-2">Private • ChainID: 2020</p>
+                      <div class="mt-3 flex items-center justify-center space-x-2">
+                        <div class="w-2 h-2 rounded-full {NETWORKS.alastria.contractAddress ? 'bg-green-400' : 'bg-yellow-400'}"></div>
+                        <span class="text-xs {NETWORKS.alastria.contractAddress ? 'text-green-400' : 'text-yellow-400'}">
+                          {NETWORKS.alastria.contractAddress ? 'Contract Available' : 'No Contract'}
+                        </span>
+                      </div>
+                    </button>
+                  </div>
+                </div>
+                
+                <button
+                  on:click={step2_selectNetwork}
+                  class="bg-gradient-to-r from-purple-600 to-blue-600 text-white px-8 py-4 rounded-lg font-semibold text-lg hover:from-purple-700 hover:to-blue-700 transition-all duration-200 shadow-lg hover:shadow-xl"
+                  disabled={isNetworkSelected || !NETWORKS[selectedNetwork].contractAddress}
+                >
+                  {isNetworkSelected ? '✅ Network Selected' : `🌐 Use ${NETWORKS[selectedNetwork].name}`}
+                </button>
+                
+                {#if !NETWORKS[selectedNetwork].contractAddress}
+                  <div class="mt-6 p-4 bg-yellow-600/20 rounded-lg border border-yellow-500/30">
+                    <p class="text-yellow-300 text-sm">
+                      ⚠️ No contract deployed on {NETWORKS[selectedNetwork].name}. Please deploy a contract first.
+                    </p>
+                  </div>
+                {/if}
+              </div>
+              
+            {:else if currentStep === 3}
+              <!-- Step 3: Initialize Library -->
+              <div class="text-center">
+                <div class="text-6xl mb-6">🚀</div>
+                <h3 class="text-2xl font-bold text-white mb-4">Step 3: Initialize UTXO Library</h3>
+                <p class="text-gray-300 mb-8">Initialize the cryptographic library with your selected network</p>
+                
+                <div class="bg-gray-800/50 rounded-lg p-6 mb-8">
+                  <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-left">
+                    <div>
+                      <span class="text-gray-400 text-sm">Network:</span>
+                      <p class="text-white font-semibold">{NETWORKS[selectedNetwork].name}</p>
+                    </div>
+                    <div>
+                      <span class="text-gray-400 text-sm">Contract:</span>
+                      <p class="text-white font-mono text-sm">{CONTRACT_ADDRESS.slice(0, 10)}...{CONTRACT_ADDRESS.slice(-8)}</p>
+                    </div>
+                    <div>
+                      <span class="text-gray-400 text-sm">Wallet:</span>
+                      <p class="text-white font-mono text-sm">{currentAccount?.address.slice(0, 10)}...{currentAccount?.address.slice(-8)}</p>
+                    </div>
+                    <div>
+                      <span class="text-gray-400 text-sm">Privacy Mode:</span>
+                      <p class="text-green-400 font-semibold">🔐 Enabled</p>
+                    </div>
+                  </div>
+                </div>
+                
+                <button
+                  on:click={step3_initializeLibrary}
+                  class="bg-gradient-to-r from-purple-600 to-blue-600 text-white px-8 py-4 rounded-lg font-semibold text-lg hover:from-purple-700 hover:to-blue-700 transition-all duration-200 shadow-lg hover:shadow-xl"
+                  disabled={isLibraryInitialized}
+                >
+                  {isLibraryInitialized ? '✅ Library Initialized' : '🚀 Initialize Library'}
+                </button>
+              </div>
+            {/if}
+            
+            <!-- Reset Flow Button -->
+            <div class="mt-8 pt-6 border-t border-white/10">
+              <button
+                on:click={resetFlow}
+                class="text-gray-400 hover:text-white text-sm transition-colors duration-200"
+              >
+                🔄 Reset Flow
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+    {:else if !isInitialized}
       <!-- Welcome Screen -->
       <div class="text-center py-20">
         <div class="max-w-2xl mx-auto">
@@ -588,7 +1145,7 @@
           </button>
         </div>
       </div>
-    {:else}
+    {:else if currentStep === 4 && isInitialized}
       <!-- Dashboard -->
       <div class="space-y-8">
         <!-- Stats Overview -->

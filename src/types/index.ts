@@ -12,41 +12,24 @@ export * from './zenroom.d';
 
 // UTXOVault contract types - export selectively to avoid conflicts
 export type {
-  UTXODataContract,
+  PrivateUTXOContract,
   UTXOVaultContract,
-  UTXOVaultConfig,
-  ContractCallOptions,
-  UTXOVaultInterface,
-  UTXOVaultEventFilters,
-  UTXOVaultError,
-  UTXOVaultProofError,
-  UTXOVaultErrorType,
+  SplitOperationContract,
+  CombineOperationContract,
+  DepositParams,
+  ProofParams,
+  GeneratorParams,
+  DepositAsPrivateUTXOParams,
+  SplitPrivateUTXOParams,
+  TransferPrivateUTXOParams,
+  WithdrawFromPrivateUTXOParams,
+  PrivateUTXOCreatedEvent,
+  PrivateTransferEvent,
+  PrivateWithdrawalEvent,
   UTXO_VAULT_ABI,
-  UTXO_VAULT_CONSTANTS,
-  // Contract-specific parameter types
-  DepositAsUTXOParams as ContractDepositAsUTXOParams,
-  WithdrawFromUTXOParams as ContractWithdrawFromUTXOParams,
-  SplitUTXOParams as ContractSplitUTXOParams,
-  CombineUTXOsParams as ContractCombineUTXOsParams,
-  TransferUTXOParams as ContractTransferUTXOParams,
-  // Contract events
-  UTXOCreatedEvent,
-  UTXOSplitEvent,
-  UTXOCombinedEvent,
-  UTXOTransferredEvent,
-  UTXOWithdrawnEvent,
-  // Contract results
-  SplitUTXOResult,
-  CombineUTXOsResult,
-  GetUTXOInfoResult,
-  GetUTXOsByOwnerResult,
-  GetSplitOperationResult,
-  GetCombineOperationResult,
   // Utility functions
   createUTXOVaultContract,
-  createUTXOVaultInterface,
-  isUTXODataContract,
-  isSplitOperationContract
+  isPrivateUTXOContract
 } from '../contracts/UTXOVault.types';
 
 // Re-export commonly used types for convenience

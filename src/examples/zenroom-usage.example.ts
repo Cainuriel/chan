@@ -21,9 +21,8 @@ import {
 
 // ✅ CORRECT: Import from the centralized index
 import type {
-  UTXODataContract,
-  UTXOVaultContract,
-  ContractCallOptions
+  PrivateUTXOContract,
+  UTXOVaultContract
 } from '../types/index';
 
 // ✅ CORRECT: Import the actual Zenroom functions from the client wrapper
