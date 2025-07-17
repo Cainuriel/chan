@@ -1,3 +1,5 @@
+#  CHAN
+
 # 🔐 UTXO Manager - Real Cryptographic Privacy System
 
 [![Svelte](https://img.shields.io/badge/Svelte-FF3E00?style=flat&logo=svelte&logoColor=white)](https://svelte.dev/)
@@ -28,7 +30,7 @@ Un sistema avanzado de gestión de tokens ERC20 con **privacidad criptográfica 
 - **Nullifier uniqueness** prevents double-spending
 - **On-chain verification** de todas las pruebas criptográficas
 
-## 🔬 How it Works (Real Cryptography)
+## 🔬 How it Works 
 
 ### **Depósito Privado**
 1. **ERC20 Transfer**: Los tokens se transfieren al contrato UTXOVault
@@ -114,12 +116,12 @@ npm run dev
 - [x] **BN254 Point Handling** - Manejo nativo de coordenadas
 - [x] **Proof Generation UI** - Interfaz para operaciones criptográficas
 - [x] **Network Detection** - Auto-configuración según blockchain
-- [x] **Real Cryptography Mode** - Solo operaciones matemáticamente válidas
 
-### 🏗️ **Almacenamiento de Datos - Seguridad Criptográfica**
+
+###  **Almacenamiento de Datos**
 
 #### 📋 **Desarrollo Actual (localStorage)**
-Para este desarrollo, los datos privados se almacenan localmente:
+Para este desarrollo, los datos privados se almacenan localmente en el navegador:
 - ✅ **Commitments BN254**: Puntos de curva verificables matemáticamente
 - ✅ **Blinding Factors**: Valores secretos para reconstituir commitments
 - ✅ **Range Proofs**: Pruebas criptográficas completas
@@ -134,14 +136,6 @@ En producción se implementará:
 
 > **Nota Criptográfica**: El contrato UTXOVault mantiene **perfect privacy** - solo almacena commitments Pedersen que son computacionalmente indistinguibles de valores aleatorios sin los blinding factors.
 
-### **🎯 Uso de Criptografía Real**
-1. `npm run dev` → Servidor con motor criptográfico Zenroom
-2. Abrir `http://localhost:5173`
-3. **"Get Started"** → Inicialización de generadores BN254
-4. **Conectar MetaMask** → Detección automática de red
-5. **Deposit** → Creación de Pedersen commitment real
-6. **Verify** → Validación matemática en blockchain
-
 ---
 
-✅ **Sistema criptográfico completo** con implementación real de Pedersen Commitments en BN254, Zenroom para operaciones verificables, y validación matemática on-chain. **Zero shortcuts, only real cryptography.**
+✅ **En desarrollo** todavía en pruebas con Pedersen Commitments en BN254, Zenroom para operaciones verificables, y validación matemática on-chain. 

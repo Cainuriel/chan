@@ -282,7 +282,7 @@ async function handleDeposit() {
       </div>
     </div>
     <p class="text-gray-300 text-sm">
-      Convert your ERC20 tokens into privacy-preserving UTXOs using Pedersen commitments and real cryptography
+      Convert your ERC20 tokens into privacy-preserving UTXOs using Pedersen commitments
     </p>
   </div>
 
@@ -482,7 +482,7 @@ async function handleDeposit() {
     <div class="flex space-x-3">
       <div class="text-blue-400 text-xl">ℹ️</div>
       <div class="text-sm text-blue-200">
-        <div class="font-medium mb-1">How it works (Real Cryptography):</div>
+        <div class="font-medium mb-1">How it works:</div>
         <ol class="list-decimal list-inside space-y-1 text-blue-300">
           <li>Your ERC20 tokens are transferred to the UTXO Vault contract</li>
           <li>A Pedersen commitment is created using Zenroom cryptography on BN254</li>

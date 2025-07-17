@@ -7,7 +7,7 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "./verifiers/RealPedersenVerifier.sol";
 
 /**
- * @title UTXOVault - Private UTXO System with Real Cryptography
+ * @title UTXOVault - Private UTXO System
  * @notice Sistema UTXO privado usando SOLO criptografía real: Pedersen commitments, Range proofs y Equality proofs sobre la curva BN254.
  * @dev Vault UTXO privado con privacidad real: verificación matemática de pruebas, sin shortcuts ni emulación. 
  * Todas las verificaciones usan la librería RealPedersenVerifier que implementa operaciones de curva elíptica reales.
