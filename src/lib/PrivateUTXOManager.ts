@@ -23,19 +23,18 @@ import {
   UTXOAlreadySpentError,       
   UTXOType
 } from '../types/utxo.types';
+import {
+  type DepositParams,
+  type ProofParams,
+  type GeneratorParams,
+  type CommitmentPoint
+} from '../contracts/UTXOVault.types';
 
 // ========================
 // INTERFACES FALTANTES
 // ========================
 
 // ✅ AÑADIR ESTAS INTERFACES:
-
-interface GeneratorParams {
-  gX: bigint;
-  gY: bigint;
-  hX: bigint;
-  hY: bigint;
-}
 
 interface PedersenCommitmentResult {
   pedersen_commitment: string;
@@ -51,17 +50,6 @@ interface EqualityProofResult {
   equality_proof: string;
   commitment_a: string;
   commitment_b: string;
-}
-
-interface DepositParams {
-  tokenAddress: string;
-  commitment: string;
-  nullifierHash: string;
-  blindingFactor: bigint;
-}
-
-interface ProofParams {
-  rangeProof: string;
 }
 
 // ========================
@@ -625,18 +613,22 @@ export class PrivateUTXOManager extends UTXOLibrary {
         parityBit: useAlternativeY ? 1 : 0
       });
       
-      // Extraer solo la coordenada X para el commitment del contrato (bytes32)
-      const contractCommitment = '0x' + contractCommitmentFull;
+      // Extraer coordenadas para el CommitmentPoint del contrato
+      const commitmentPoint: CommitmentPoint = {
+        x: fullCommitmentX,
+        y: fullCommitmentY
+      };
       
       console.log('📊 Preparing contract parameters:', {
         fullCommitment: commitmentResult.pedersen_commitment.slice(0, 15) + '...',
-        contractCommitment: contractCommitment.slice(0, 15) + '...',
+        commitmentPointX: commitmentPoint.x.toString(16).slice(0, 15) + '...',
+        commitmentPointY: commitmentPoint.y.toString(16).slice(0, 15) + '...',
         blindingFactorWithParity: modifiedBlindingFactor.toString(16).slice(0, 10) + '...'
       });
       
       const depositParams: DepositParams = {
         tokenAddress: tokenAddress,
-        commitment: contractCommitment, // Usamos solo la coordenada X como bytes32
+        commitment: commitmentPoint, // Ahora usando CommitmentPoint con coordenadas X,Y
         nullifierHash: nullifierHash,
         blindingFactor: modifiedBlindingFactor // Blinding factor con información de paridad Y
       };
@@ -660,7 +652,8 @@ export class PrivateUTXOManager extends UTXOLibrary {
 
       console.log('📋 Final BN254 contract parameters:', {
         tokenAddress: depositParams.tokenAddress,
-        commitment: depositParams.commitment.slice(0, 20) + '...',
+        commitmentX: depositParams.commitment.x.toString(16).slice(0, 20) + '...',
+        commitmentY: depositParams.commitment.y.toString(16).slice(0, 20) + '...',
         nullifierHash: depositParams.nullifierHash.slice(0, 20) + '...',
         blindingFactor: depositParams.blindingFactor.toString().slice(0, 10) + '...',
         amount: amount.toString(),
@@ -728,9 +721,10 @@ export class PrivateUTXOManager extends UTXOLibrary {
       console.log('🔍 VERIFICACIÓN DETALLADA DE PARÁMETROS ANTES DEL ENVÍO:');
       console.log('📊 depositParams:', {
         tokenAddress: depositParams.tokenAddress,
-        commitment: depositParams.commitment,
-        commitmentLength: depositParams.commitment.length,
-        commitmentIsHex: /^0x[0-9a-fA-F]+$/.test(depositParams.commitment),
+        commitmentX: depositParams.commitment.x.toString(16),
+        commitmentY: depositParams.commitment.y.toString(16),
+        commitmentType: typeof depositParams.commitment,
+        hasValidCoordinates: typeof depositParams.commitment.x === 'bigint' && typeof depositParams.commitment.y === 'bigint',
         nullifierHash: depositParams.nullifierHash,
         nullifierLength: depositParams.nullifierHash.length,
         nullifierIsHex: /^0x[0-9a-fA-F]+$/.test(depositParams.nullifierHash),
@@ -780,7 +774,9 @@ export class PrivateUTXOManager extends UTXOLibrary {
         nullifierHash: typeof depositParams.nullifierHash,
         blindingFactor: typeof depositParams.blindingFactor,
         isValidAddress: /^0x[0-9a-fA-F]{40}$/i.test(depositParams.tokenAddress),
-        isValidCommitment: /^0x[0-9a-fA-F]{64}$/i.test(depositParams.commitment),
+        isValidCommitment: typeof depositParams.commitment === 'object' && 
+                          typeof depositParams.commitment.x === 'bigint' && 
+                          typeof depositParams.commitment.y === 'bigint',
         isValidNullifier: /^0x[0-9a-fA-F]{64}$/i.test(depositParams.nullifierHash)
       });
       
@@ -865,10 +861,11 @@ export class PrivateUTXOManager extends UTXOLibrary {
           type: typeof depositParams.tokenAddress
         },
         commitment: {
-          value: depositParams.commitment,
-          isValid: /^0x[0-9a-fA-F]{64}$/i.test(depositParams.commitment),
+          x: depositParams.commitment.x.toString(16),
+          y: depositParams.commitment.y.toString(16),
+          isValid: typeof depositParams.commitment.x === 'bigint' && typeof depositParams.commitment.y === 'bigint',
           type: typeof depositParams.commitment,
-          length: depositParams.commitment.length
+          hasValidStructure: !!depositParams.commitment.x && !!depositParams.commitment.y
         },
         nullifierHash: {
           value: depositParams.nullifierHash,
@@ -894,7 +891,7 @@ export class PrivateUTXOManager extends UTXOLibrary {
       // Verificar que no hay problemas obvios
       const validationErrors = [];
       if (!paramValidation.tokenAddress.isValid) validationErrors.push('Invalid token address format');
-      if (!paramValidation.commitment.isValid) validationErrors.push('Invalid commitment format');
+      if (!paramValidation.commitment.isValid) validationErrors.push('Invalid commitment coordinates - must be valid BigInt values');
       if (!paramValidation.nullifierHash.isValid) validationErrors.push('Invalid nullifier hash format');
       if (!paramValidation.blindingFactor.isBigInt) validationErrors.push('Blinding factor must be BigInt');
       if (!paramValidation.amount.isBigInt) validationErrors.push('Amount must be BigInt');

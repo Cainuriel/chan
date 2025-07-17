@@ -3,9 +3,14 @@
  */
 export interface DepositParams {
   tokenAddress: string;
-  commitment: string; // bytes32
+  commitment: CommitmentPoint; // Updated to use CommitmentPoint structure
   nullifierHash: string; // bytes32
   blindingFactor: bigint;
+}
+
+export interface CommitmentPoint {
+  x: bigint;
+  y: bigint;
 }
 
 export interface ProofParams {
@@ -37,7 +42,7 @@ import {
  */
 export interface PrivateUTXOContract {
   exists: boolean;
-  commitment: string; // bytes32 - Pedersen commitment
+  commitment: CommitmentPoint; // Updated to use CommitmentPoint structure
   tokenAddress: string;
   owner: string;
   timestamp: bigint;
@@ -115,8 +120,8 @@ export interface PrivateWithdrawalEvent {
 }
 
 export interface SplitOperationContract {
-  inputUTXO: string; // bytes32
-  outputUTXOs: string[]; // bytes32[]
+  inputUTXO: CommitmentPoint; 
+  outputUTXOs: CommitmentPoint[];
   outputOwners: string[]; // address[]
   outputValues: bigint[]; // uint256[]
   splitProof: string; // bytes as hex string
@@ -124,8 +129,8 @@ export interface SplitOperationContract {
 }
 
 export interface CombineOperationContract {
-  inputUTXOs: string[]; // bytes32[]
-  outputUTXO: string; // bytes32
+  inputUTXOs: CommitmentPoint[];
+  outputUTXO: CommitmentPoint;
   outputOwner: string; // address
   totalValue: bigint;
   combineProof: string; // bytes as hex string
@@ -137,7 +142,7 @@ export interface CreateUTXOParamsContract {
   value: bigint;
   tokenAddress: string;
   owner: string;
-  commitment: string; // bytes32
+  commitment: CommitmentPoint;
   utxoType: number; // enum
   parentUTXO: string; // bytes32
 }
@@ -187,24 +192,24 @@ export interface UTXOCreatedEvent {
   owner: string;
   tokenAddress: string;
   value: bigint;
-  commitment: string;
+  commitment: CommitmentPoint;
   utxoType: number;
   parentUTXO: string;
 }
 
 export interface UTXOSplitEvent {
-  inputUTXO: string;
+  inputUTXO: CommitmentPoint;
   inputOwner: string;
-  outputUTXOs: string[];
+  outputUTXOs: CommitmentPoint[];
   outputOwners: string[];
   outputValues: bigint[];
   operationId: string;
 }
 
 export interface UTXOCombinedEvent {
-  inputUTXOs: string[];
+  inputUTXOs: CommitmentPoint[];
   inputOwner: string;
-  outputUTXO: string;
+  outputUTXO: CommitmentPoint;
   outputOwner: string;
   totalValue: bigint;
   operationId: string;
@@ -371,53 +376,1062 @@ export class UTXOVaultProofError extends UTXOVaultError {
 }
 
 /**
- * UTXOVault contract ABI - Simplified without BBS+ and issuer logic
+ * UTXOVault contract ABI - Updated to match deployed contract with CommitmentPoint structures
  */
 export const UTXO_VAULT_ABI = [
   // Constructor
-  "constructor()",
+  {
+    "inputs": [],
+    "stateMutability": "nonpayable",
+    "type": "constructor"
+  },
   
-  // Public variables (auto-generated getters)
-  "function registeredTokens(address) view returns (bool)",
-  "function tokenRegistrationTime(address) view returns (uint256)",
-  "function tokenNames(address) view returns (string)",
-  "function tokenSymbols(address) view returns (string)",
-  "function tokenDecimals(address) view returns (uint8)",
-  "function allRegisteredTokens(uint256) view returns (address)",
+  // Errors
+  {
+    "inputs": [],
+    "name": "InvalidCommitment",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InvalidEqualityProof",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InvalidRangeProof",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "NotOwner",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "NullifierAlreadyUsed",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "owner",
+        "type": "address"
+      }
+    ],
+    "name": "OwnableInvalidOwner",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "account",
+        "type": "address"
+      }
+    ],
+    "name": "OwnableUnauthorizedAccount",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "ReentrancyGuardReentrantCall",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "UTXOAlreadySpent",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "UTXONotFound",
+    "type": "error"
+  },
   
-  // Core private UTXO functions with real cryptography
-  "function depositAsPrivateUTXO((address tokenAddress, bytes32 commitment, bytes32 nullifierHash, uint256 blindingFactor) depositParams, (bytes rangeProof) proofParams, (uint256 gX, uint256 gY, uint256 hX, uint256 hY) generators, uint256 amount) external",
-  "function splitPrivateUTXO(bytes32 inputCommitment, bytes32[] calldata outputCommitments, uint256[] calldata outputAmounts, uint256[] calldata outputBlindings, bytes calldata equalityProof, bytes32 nullifierHash, (uint256 gX, uint256 gY, uint256 hX, uint256 hY) generators) external returns (bytes32[] memory)",
-  "function transferPrivateUTXO(bytes32 inputCommitment, bytes32 outputCommitment, address newOwner, uint256 amount, uint256 outputBlinding, bytes32 nullifierHash, (uint256 gX, uint256 gY, uint256 hX, uint256 hY) generators) external returns (bytes32)",
-  "function withdrawFromPrivateUTXO(bytes32 commitment, uint256 amount, uint256 blindingFactor, bytes32 nullifierHash, (uint256 gX, uint256 gY, uint256 hX, uint256 hY) generators) external",
+  // Main functions
+  {
+    "inputs": [
+      {
+        "components": [
+          {
+            "internalType": "address",
+            "name": "tokenAddress",
+            "type": "address"
+          },
+          {
+            "components": [
+              {
+                "internalType": "uint256",
+                "name": "x",
+                "type": "uint256"
+              },
+              {
+                "internalType": "uint256",
+                "name": "y",
+                "type": "uint256"
+              }
+            ],
+            "internalType": "struct UTXOVault.CommitmentPoint",
+            "name": "commitment",
+            "type": "tuple"
+          },
+          {
+            "internalType": "bytes32",
+            "name": "nullifierHash",
+            "type": "bytes32"
+          },
+          {
+            "internalType": "uint256",
+            "name": "blindingFactor",
+            "type": "uint256"
+          }
+        ],
+        "internalType": "struct UTXOVault.DepositParams",
+        "name": "depositParams",
+        "type": "tuple"
+      },
+      {
+        "components": [
+          {
+            "internalType": "bytes",
+            "name": "rangeProof",
+            "type": "bytes"
+          }
+        ],
+        "internalType": "struct UTXOVault.ProofParams",
+        "name": "proofParams",
+        "type": "tuple"
+      },
+      {
+        "components": [
+          {
+            "internalType": "uint256",
+            "name": "gX",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "gY",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "hX",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "hY",
+            "type": "uint256"
+          }
+        ],
+        "internalType": "struct UTXOVault.GeneratorParams",
+        "name": "generators",
+        "type": "tuple"
+      },
+      {
+        "internalType": "uint256",
+        "name": "amount",
+        "type": "uint256"
+      }
+    ],
+    "name": "depositAsPrivateUTXO",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "components": [
+          {
+            "internalType": "uint256",
+            "name": "x",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "y",
+            "type": "uint256"
+          }
+        ],
+        "internalType": "struct UTXOVault.CommitmentPoint",
+        "name": "inputCommitment",
+        "type": "tuple"
+      },
+      {
+        "components": [
+          {
+            "internalType": "uint256",
+            "name": "x",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "y",
+            "type": "uint256"
+          }
+        ],
+        "internalType": "struct UTXOVault.CommitmentPoint[]",
+        "name": "outputCommitments",
+        "type": "tuple[]"
+      },
+      {
+        "internalType": "uint256[]",
+        "name": "outputAmounts",
+        "type": "uint256[]"
+      },
+      {
+        "internalType": "uint256[]",
+        "name": "outputBlindings",
+        "type": "uint256[]"
+      },
+      {
+        "internalType": "bytes",
+        "name": "equalityProof",
+        "type": "bytes"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "nullifierHash",
+        "type": "bytes32"
+      },
+      {
+        "components": [
+          {
+            "internalType": "uint256",
+            "name": "gX",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "gY",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "hX",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "hY",
+            "type": "uint256"
+          }
+        ],
+        "internalType": "struct UTXOVault.GeneratorParams",
+        "name": "generators",
+        "type": "tuple"
+      }
+    ],
+    "name": "splitPrivateUTXO",
+    "outputs": [
+      {
+        "internalType": "bytes32[]",
+        "name": "",
+        "type": "bytes32[]"
+      }
+    ],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "components": [
+          {
+            "internalType": "uint256",
+            "name": "x",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "y",
+            "type": "uint256"
+          }
+        ],
+        "internalType": "struct UTXOVault.CommitmentPoint",
+        "name": "inputCommitment",
+        "type": "tuple"
+      },
+      {
+        "components": [
+          {
+            "internalType": "uint256",
+            "name": "x",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "y",
+            "type": "uint256"
+          }
+        ],
+        "internalType": "struct UTXOVault.CommitmentPoint",
+        "name": "outputCommitment",
+        "type": "tuple"
+      },
+      {
+        "internalType": "address",
+        "name": "newOwner",
+        "type": "address"
+      },
+      {
+        "internalType": "uint256",
+        "name": "amount",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "outputBlinding",
+        "type": "uint256"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "nullifierHash",
+        "type": "bytes32"
+      },
+      {
+        "components": [
+          {
+            "internalType": "uint256",
+            "name": "gX",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "gY",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "hX",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "hY",
+            "type": "uint256"
+          }
+        ],
+        "internalType": "struct UTXOVault.GeneratorParams",
+        "name": "generators",
+        "type": "tuple"
+      }
+    ],
+    "name": "transferPrivateUTXO",
+    "outputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      }
+    ],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "components": [
+          {
+            "internalType": "uint256",
+            "name": "x",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "y",
+            "type": "uint256"
+          }
+        ],
+        "internalType": "struct UTXOVault.CommitmentPoint",
+        "name": "commitment",
+        "type": "tuple"
+      },
+      {
+        "internalType": "uint256",
+        "name": "amount",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "blindingFactor",
+        "type": "uint256"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "nullifierHash",
+        "type": "bytes32"
+      },
+      {
+        "components": [
+          {
+            "internalType": "uint256",
+            "name": "gX",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "gY",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "hX",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "hY",
+            "type": "uint256"
+          }
+        ],
+        "internalType": "struct UTXOVault.GeneratorParams",
+        "name": "generators",
+        "type": "tuple"
+      }
+    ],
+    "name": "withdrawFromPrivateUTXO",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  
+  // Ownership functions
+  {
+    "inputs": [],
+    "name": "renounceOwnership",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "newOwner",
+        "type": "address"
+      }
+    ],
+    "name": "transferOwnership",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
   
   // View functions
-  "function getRegisteredTokens() external view returns (address[] memory)",
-  "function getTokenInfo(address tokenAddress) external view returns (bool isRegistered, uint256 registrationTime, string memory name, string memory symbol, uint8 decimals)",
-  "function getRegisteredTokenCount() external view returns (uint256)",
-  "function isTokenRegistered(address tokenAddress) external view returns (bool)",
-  "function getUTXOCommitment(bytes32 utxoId) external view returns (bytes32)",
-  "function isNullifierUsed(bytes32 nullifier) external view returns (bool)",
-  "function getUserUTXOCount(address user) external view returns (uint256)",
-  "function getUTXOsByOwner(address user) external view returns (bytes32[] memory)",
-  "function getUTXOInfo(bytes32 utxoId) external view returns (bool exists, bytes32 commitment, address tokenAddress, address owner, uint256 timestamp, bool isSpent, bytes32 parentUTXO, uint8 utxoType, bytes32 nullifierHash)",
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "name": "allRegisteredTokens",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "getRegisteredTokenCount",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "getRegisteredTokens",
+    "outputs": [
+      {
+        "internalType": "address[]",
+        "name": "",
+        "type": "address[]"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "tokenAddress",
+        "type": "address"
+      }
+    ],
+    "name": "getTokenDecimals",
+    "outputs": [
+      {
+        "internalType": "uint8",
+        "name": "",
+        "type": "uint8"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "tokenAddress",
+        "type": "address"
+      }
+    ],
+    "name": "getTokenInfo",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "isRegistered",
+        "type": "bool"
+      },
+      {
+        "internalType": "uint256",
+        "name": "registrationTime",
+        "type": "uint256"
+      },
+      {
+        "internalType": "string",
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "internalType": "string",
+        "name": "symbol",
+        "type": "string"
+      },
+      {
+        "internalType": "uint8",
+        "name": "decimals",
+        "type": "uint8"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "tokenAddress",
+        "type": "address"
+      }
+    ],
+    "name": "getTokenName",
+    "outputs": [
+      {
+        "internalType": "string",
+        "name": "",
+        "type": "string"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "tokenAddress",
+        "type": "address"
+      }
+    ],
+    "name": "getTokenSymbol",
+    "outputs": [
+      {
+        "internalType": "string",
+        "name": "",
+        "type": "string"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "user",
+        "type": "address"
+      }
+    ],
+    "name": "getUserUTXOCount",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "utxoId",
+        "type": "bytes32"
+      }
+    ],
+    "name": "getUTXOCommitment",
+    "outputs": [
+      {
+        "components": [
+          {
+            "internalType": "uint256",
+            "name": "x",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "y",
+            "type": "uint256"
+          }
+        ],
+        "internalType": "struct UTXOVault.CommitmentPoint",
+        "name": "",
+        "type": "tuple"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "utxoId",
+        "type": "bytes32"
+      }
+    ],
+    "name": "getUTXOCommitmentHash",
+    "outputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "utxoId",
+        "type": "bytes32"
+      }
+    ],
+    "name": "getUTXOInfo",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "exists",
+        "type": "bool"
+      },
+      {
+        "components": [
+          {
+            "internalType": "uint256",
+            "name": "x",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "y",
+            "type": "uint256"
+          }
+        ],
+        "internalType": "struct UTXOVault.CommitmentPoint",
+        "name": "commitment",
+        "type": "tuple"
+      },
+      {
+        "internalType": "address",
+        "name": "tokenAddress",
+        "type": "address"
+      },
+      {
+        "internalType": "address",
+        "name": "owner",
+        "type": "address"
+      },
+      {
+        "internalType": "uint256",
+        "name": "timestamp",
+        "type": "uint256"
+      },
+      {
+        "internalType": "bool",
+        "name": "isSpent",
+        "type": "bool"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "parentUTXO",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "enum UTXOVault.UTXOType",
+        "name": "utxoType",
+        "type": "uint8"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "nullifierHash",
+        "type": "bytes32"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "user",
+        "type": "address"
+      }
+    ],
+    "name": "getUTXOsByOwner",
+    "outputs": [
+      {
+        "internalType": "bytes32[]",
+        "name": "",
+        "type": "bytes32[]"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "nullifier",
+        "type": "bytes32"
+      }
+    ],
+    "name": "isNullifierUsed",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "tokenAddress",
+        "type": "address"
+      }
+    ],
+    "name": "isTokenRegistered",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "owner",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "name": "registeredTokens",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "name": "tokenDecimals",
+    "outputs": [
+      {
+        "internalType": "uint8",
+        "name": "",
+        "type": "uint8"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "name": "tokenNames",
+    "outputs": [
+      {
+        "internalType": "string",
+        "name": "",
+        "type": "string"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "name": "tokenRegistrationTime",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "name": "tokenSymbols",
+    "outputs": [
+      {
+        "internalType": "string",
+        "name": "",
+        "type": "string"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
   
-  // Token helper functions
-  "function getTokenName(address tokenAddress) external view returns (string memory)",
-  "function getTokenSymbol(address tokenAddress) external view returns (string memory)",
-  "function getTokenDecimals(address tokenAddress) external view returns (uint8)",
-  
-  // Events - Simplified
-  "event TokenRegistered(address indexed tokenAddress, string name, string symbol, uint8 decimals, uint256 timestamp)",
-  "event PrivateUTXOCreated(bytes32 indexed commitment, address indexed owner, address indexed tokenAddress, bytes32 nullifierHash, uint8 utxoType, uint256 amount)",
-  "event PrivateTransfer(bytes32 indexed inputCommitment, bytes32 indexed outputCommitment, bytes32 nullifierHash, address indexed newOwner)",
-  "event PrivateWithdrawal(bytes32 indexed commitment, address indexed recipient, bytes32 nullifierHash, uint256 amount)",
-  
-  // Inherited from Ownable
-  "function owner() view returns (address)",
-  "function transferOwnership(address newOwner) external",
-  "function renounceOwnership() external",
-  "event OwnershipTransferred(address indexed previousOwner, address indexed newOwner)"
+  // Events
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "previousOwner",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "newOwner",
+        "type": "address"
+      }
+    ],
+    "name": "OwnershipTransferred",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "inputCommitment",
+        "type": "bytes32"
+      },
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "outputCommitment",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "bytes32",
+        "name": "nullifierHash",
+        "type": "bytes32"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "newOwner",
+        "type": "address"
+      }
+    ],
+    "name": "PrivateTransfer",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "commitment",
+        "type": "bytes32"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "owner",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "tokenAddress",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "bytes32",
+        "name": "nullifierHash",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "enum UTXOVault.UTXOType",
+        "name": "utxoType",
+        "type": "uint8"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "amount",
+        "type": "uint256"
+      }
+    ],
+    "name": "PrivateUTXOCreated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "commitment",
+        "type": "bytes32"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "recipient",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "bytes32",
+        "name": "nullifierHash",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "amount",
+        "type": "uint256"
+      }
+    ],
+    "name": "PrivateWithdrawal",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "tokenAddress",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "string",
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "indexed": false,
+        "internalType": "string",
+        "name": "symbol",
+        "type": "string"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint8",
+        "name": "decimals",
+        "type": "uint8"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "timestamp",
+        "type": "uint256"
+      }
+    ],
+    "name": "TokenRegistered",
+    "type": "event"
+  }
 ] as const;
 
 /**
@@ -450,9 +1464,9 @@ export interface UTXOVaultInterface {
   
   // Encode function data
   encodeFunctionData(functionFragment: "depositAsPrivateUTXO", values: [DepositParams, ProofParams, GeneratorParams, bigint]): string;
-  encodeFunctionData(functionFragment: "splitPrivateUTXO", values: [string, string[], bigint[], bigint[], string, string, GeneratorParams]): string;
-  encodeFunctionData(functionFragment: "transferPrivateUTXO", values: [string, string, string, bigint, bigint, string, GeneratorParams]): string;
-  encodeFunctionData(functionFragment: "withdrawFromPrivateUTXO", values: [string, bigint, bigint, string, GeneratorParams]): string;
+  encodeFunctionData(functionFragment: "splitPrivateUTXO", values: [CommitmentPoint, CommitmentPoint[], bigint[], bigint[], string, string, GeneratorParams]): string;
+  encodeFunctionData(functionFragment: "transferPrivateUTXO", values: [CommitmentPoint, CommitmentPoint, string, bigint, bigint, string, GeneratorParams]): string;
+  encodeFunctionData(functionFragment: "withdrawFromPrivateUTXO", values: [CommitmentPoint, bigint, bigint, string, GeneratorParams]): string;
   
   // Decode function result
   decodeFunctionResult(functionFragment: "splitPrivateUTXO", data: string): Result;
