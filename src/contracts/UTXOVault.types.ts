@@ -32,6 +32,32 @@ export interface GeneratorParams {
   hX: bigint;
   hY: bigint;
 }
+
+/**
+ * Structs adicionales según ABI real
+ */
+export interface SplitParams {
+  inputCommitment: CommitmentPoint;
+  outputCommitments: CommitmentPoint[];
+  inputNullifier: string; // bytes32
+  outputNullifiers: string[]; // bytes32[]
+  attestation: BackendAttestation;
+}
+
+export interface TransferParams {
+  inputCommitment: CommitmentPoint;
+  outputCommitment: CommitmentPoint;
+  inputNullifier: string; // bytes32
+  outputNullifier: string; // bytes32
+  attestation: BackendAttestation;
+}
+
+export interface WithdrawParams {
+  commitment: CommitmentPoint;
+  nullifierHash: string; // bytes32
+  revealedAmount: bigint; // uint256
+  attestation: BackendAttestation;
+}
 /**
  * @fileoverview TypeScript type definitions for UTXOVault smart contract (simplified)
  * @description Types, ABI, and interfaces for simplified UTXOVault contract interaction
@@ -1332,47 +1358,64 @@ export const UTXO_VAULT_ABI =
 ] as const;
 
 /**
- * Contract interface for type-safe contract interaction (simplified)
+ * Contract interface for type-safe contract interaction (actualizada según ABI real)
  */
 export interface UTXOVaultInterface {
-  // Function fragments
+  // Function fragments - CORREGIDO según ABI real
   getFunction(nameOrSignatureOrTopic: 
     | "depositAsPrivateUTXO"
-    | "splitPrivateUTXO"
+    | "splitPrivateUTXO" 
     | "transferPrivateUTXO"
     | "withdrawFromPrivateUTXO"
-    | "getUTXOsByOwner"
     | "getUTXOInfo"
-    | "getUTXOCommitment"
+    | "getUTXOByCommitment"
+    | "doesCommitmentExist"
     | "isNullifierUsed"
-    | "getUserUTXOCount"
     | "getRegisteredTokens"
-    | "getTokenInfo"
     | "isTokenRegistered"
+    | "getCurrentNonce"
+    | "lastNonce"
+    | "owner"
+    | "authorizedBackend"
+    | "updateAuthorizedBackend"
+    | "transferOwnership"
+    | "renounceOwnership"
   ): ethers.FunctionFragment;
   
-  // Event fragments
+  // Event fragments - CORREGIDO según ABI real
   getEvent(nameOrSignatureOrTopic:
     | "TokenRegistered"
     | "PrivateUTXOCreated"
     | "PrivateTransfer"
+    | "PrivateSplit"
     | "PrivateWithdrawal"
+    | "BackendUpdated"
+    | "OwnershipTransferred"
   ): ethers.EventFragment;
   
-  // Encode function data
-  encodeFunctionData(functionFragment: "depositAsPrivateUTXO", values: [DepositParams, ProofParams, GeneratorParams, bigint]): string;
-  encodeFunctionData(functionFragment: "splitPrivateUTXO", values: [CommitmentPoint, CommitmentPoint[], bigint[], bigint[], string, string, GeneratorParams]): string;
-  encodeFunctionData(functionFragment: "transferPrivateUTXO", values: [CommitmentPoint, CommitmentPoint, string, bigint, bigint, string, GeneratorParams]): string;
-  encodeFunctionData(functionFragment: "withdrawFromPrivateUTXO", values: [CommitmentPoint, bigint, bigint, string, GeneratorParams]): string;
+  // Encode function data - CORREGIDO según structs del ABI
+  encodeFunctionData(functionFragment: "depositAsPrivateUTXO", values: [DepositParams]): string;
+  encodeFunctionData(functionFragment: "splitPrivateUTXO", values: [SplitParams]): string;
+  encodeFunctionData(functionFragment: "transferPrivateUTXO", values: [TransferParams]): string;
+  encodeFunctionData(functionFragment: "withdrawFromPrivateUTXO", values: [WithdrawParams]): string;
+  encodeFunctionData(functionFragment: "getUTXOInfo", values: [string]): string;
+  encodeFunctionData(functionFragment: "getUTXOByCommitment", values: [CommitmentPoint]): string;
+  encodeFunctionData(functionFragment: "doesCommitmentExist", values: [CommitmentPoint]): string;
+  encodeFunctionData(functionFragment: "isNullifierUsed", values: [string]): string;
+  encodeFunctionData(functionFragment: "isTokenRegistered", values: [string]): string;
+  encodeFunctionData(functionFragment: "updateAuthorizedBackend", values: [string]): string;
   
-  // Decode function result
+  // Decode function result - CORREGIDO según ABI real
   decodeFunctionResult(functionFragment: "splitPrivateUTXO", data: string): Result;
   decodeFunctionResult(functionFragment: "transferPrivateUTXO", data: string): Result;
-  decodeFunctionResult(functionFragment: "getUTXOsByOwner", data: string): Result;
   decodeFunctionResult(functionFragment: "getUTXOInfo", data: string): Result;
-  decodeFunctionResult(functionFragment: "getUTXOCommitment", data: string): Result;
+  decodeFunctionResult(functionFragment: "getUTXOByCommitment", data: string): Result;
+  decodeFunctionResult(functionFragment: "doesCommitmentExist", data: string): Result;
   decodeFunctionResult(functionFragment: "isNullifierUsed", data: string): Result;
-  decodeFunctionResult(functionFragment: "getUserUTXOCount", data: string): Result;
+  decodeFunctionResult(functionFragment: "getRegisteredTokens", data: string): Result;
+  decodeFunctionResult(functionFragment: "isTokenRegistered", data: string): Result;
+  decodeFunctionResult(functionFragment: "getCurrentNonce", data: string): Result;
+  decodeFunctionResult(functionFragment: "authorizedBackend", data: string): Result;
 }
 
 /**
@@ -1387,101 +1430,86 @@ export interface UTXOVaultContract {
   readonly runner: ethers.ContractRunner | null;
   readonly target: string;
   
-  // Read-only functions
+  // Read-only functions - CORREGIDO según ABI real
   registeredTokens(tokenAddress: string): Promise<boolean>;
-  tokenRegistrationTime(tokenAddress: string): Promise<bigint>;
-  tokenNames(tokenAddress: string): Promise<string>;
-  tokenSymbols(tokenAddress: string): Promise<string>;
-  tokenDecimals(tokenAddress: string): Promise<number>;
   allRegisteredTokens(index: bigint): Promise<string>;
-  getUTXOsByOwner(owner: string): Promise<string[]>;
-  getUTXOInfo(utxoId: string): Promise<[boolean, string, string, string, bigint, boolean, string, number, string]>;
-  getUTXOCommitment(utxoId: string): Promise<string>;
-  isNullifierUsed(nullifier: string): Promise<boolean>;
-  getUserUTXOCount(user: string): Promise<bigint>;
+  authorizedBackend(): Promise<string>;
+  owner(): Promise<string>;
+  lastNonce(): Promise<bigint>;
+  getCurrentNonce(): Promise<bigint>;
   getRegisteredTokens(): Promise<string[]>;
-  getTokenInfo(tokenAddress: string): Promise<[boolean, bigint, string, string, number]>;
-  getRegisteredTokenCount(): Promise<bigint>;
   isTokenRegistered(tokenAddress: string): Promise<boolean>;
-  getTokenName(tokenAddress: string): Promise<string>;
-  getTokenSymbol(tokenAddress: string): Promise<string>;
-  getTokenDecimals(tokenAddress: string): Promise<number>;
+  getUTXOInfo(utxoId: string): Promise<[boolean, string, string, bigint, boolean, string, number, bigint]>;
+  getUTXOByCommitment(commitment: CommitmentPoint): Promise<string>;
+  doesCommitmentExist(commitment: CommitmentPoint): Promise<boolean>;
+  isNullifierUsed(nullifier: string): Promise<boolean>;
   
-  // Private UTXO functions (simplified) with gas estimation
+  // Private UTXO functions - CORREGIDO según ABI real
   depositAsPrivateUTXO: ((
-    depositParams: DepositParams,
-    proofParams: ProofParams,
-    generators: GeneratorParams,
-    amount: bigint,
+    params: DepositParams,
     overrides?: ContractCallOptions
   ) => Promise<ContractTransactionResponse>) & {
     estimateGas(
-      depositParams: DepositParams,
-      proofParams: ProofParams,
-      generators: GeneratorParams,
-      amount: bigint,
+      params: DepositParams,
       overrides?: ContractCallOptions
     ): Promise<bigint>;
   };
 
   splitPrivateUTXO: ((
-    inputCommitment: string,
-    outputCommitments: string[],
-    outputAmounts: bigint[],
-    outputBlindings: bigint[],
-    equalityProof: string,
-    nullifierHash: string,
-    generators: GeneratorParams,
+    params: SplitParams,
     overrides?: ContractCallOptions
   ) => Promise<ContractTransactionResponse>) & {
     estimateGas(
-      inputCommitment: string,
-      outputCommitments: string[],
-      outputAmounts: bigint[],
-      outputBlindings: bigint[],
-      equalityProof: string,
-      nullifierHash: string,
-      generators: GeneratorParams,
+      params: SplitParams,
       overrides?: ContractCallOptions
     ): Promise<bigint>;
   };
 
   transferPrivateUTXO: ((
-    inputCommitment: string,
-    outputCommitment: string,
-    newOwner: string,
-    amount: bigint,
-    outputBlinding: bigint,
-    nullifierHash: string,
-    generators: GeneratorParams,
+    params: TransferParams,
     overrides?: ContractCallOptions
   ) => Promise<ContractTransactionResponse>) & {
     estimateGas(
-      inputCommitment: string,
-      outputCommitment: string,
-      newOwner: string,
-      amount: bigint,
-      outputBlinding: bigint,
-      nullifierHash: string,
-      generators: GeneratorParams,
+      params: TransferParams,
       overrides?: ContractCallOptions
     ): Promise<bigint>;
   };
 
   withdrawFromPrivateUTXO: ((
-    commitment: string,
-    amount: bigint,
-    blindingFactor: bigint,
-    nullifierHash: string,
-    generators: GeneratorParams,
+    params: WithdrawParams,
     overrides?: ContractCallOptions
   ) => Promise<ContractTransactionResponse>) & {
     estimateGas(
-      commitment: string,
-      amount: bigint,
-      blindingFactor: bigint,
-      nullifierHash: string,
-      generators: GeneratorParams,
+      params: WithdrawParams,
+      overrides?: ContractCallOptions
+    ): Promise<bigint>;
+  };
+
+  // Owner functions
+  updateAuthorizedBackend: ((
+    newBackend: string,
+    overrides?: ContractCallOptions
+  ) => Promise<ContractTransactionResponse>) & {
+    estimateGas(
+      newBackend: string,
+      overrides?: ContractCallOptions
+    ): Promise<bigint>;
+  };
+
+  transferOwnership: ((
+    newOwner: string,
+    overrides?: ContractCallOptions
+  ) => Promise<ContractTransactionResponse>) & {
+    estimateGas(
+      newOwner: string,
+      overrides?: ContractCallOptions
+    ): Promise<bigint>;
+  };
+
+  renounceOwnership: ((
+    overrides?: ContractCallOptions
+  ) => Promise<ContractTransactionResponse>) & {
+    estimateGas(
       overrides?: ContractCallOptions
     ): Promise<bigint>;
   };
@@ -1494,12 +1522,15 @@ export interface UTXOVaultContract {
   off(event: string, listener?: (...args: any[]) => void): UTXOVaultContract;
   once(event: string, listener: (...args: any[]) => void): UTXOVaultContract;
   
-  // Event filters - simplified
+  // Event filters - CORREGIDO según ABI real
   filters: {
     TokenRegistered(tokenAddress?: string | null): ethers.DeferredTopicFilter;
-    PrivateUTXOCreated(commitment?: string | null, owner?: string | null, tokenAddress?: string | null): ethers.DeferredTopicFilter;
-    PrivateTransfer(inputCommitment?: string | null, outputCommitment?: string | null, newOwner?: string | null): ethers.DeferredTopicFilter;
-    PrivateWithdrawal(commitment?: string | null, recipient?: string | null): ethers.DeferredTopicFilter;
+    PrivateUTXOCreated(utxoId?: string | null, commitmentHash?: string | null, tokenAddress?: string | null): ethers.DeferredTopicFilter;
+    PrivateTransfer(inputCommitmentHash?: string | null, outputCommitmentHash?: string | null): ethers.DeferredTopicFilter;
+    PrivateSplit(inputCommitmentHash?: string | null): ethers.DeferredTopicFilter;
+    PrivateWithdrawal(commitmentHash?: string | null, recipient?: string | null): ethers.DeferredTopicFilter;
+    BackendUpdated(oldBackend?: string | null, newBackend?: string | null): ethers.DeferredTopicFilter;
+    OwnershipTransferred(previousOwner?: string | null, newOwner?: string | null): ethers.DeferredTopicFilter;
   };
   getEvent(eventName: string): ethers.EventFragment;
   queryFilter(event: string | ethers.EventFilter, fromBlock?: number, toBlock?: number): Promise<ethers.EventLog[]>;

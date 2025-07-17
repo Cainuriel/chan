@@ -177,9 +177,9 @@ export class UTXOLibrary extends EventEmitter {
 
         // Crear un contrato de prueba con una ABI mínima para verificar conectividad
         const basicAbi = [
-          "function getRegisteredTokenCount() view returns (uint256)",
+          "function getRegisteredTokens() view returns (address[])",
           "function owner() view returns (address)",
-          "function paused() view returns (bool)"
+          "function authorizedBackend() view returns (address)"
         ];
         
         const testContract = new ethers.Contract(
@@ -192,30 +192,30 @@ export class UTXOLibrary extends EventEmitter {
         let contractValidated = false;
         
         try {
-          // Primer intento: getRegisteredTokenCount (método específico del UTXOVault)
-          const tokenCount = await testContract.getRegisteredTokenCount();
-          console.log('✅ Método getRegisteredTokenCount() funciona. Tokens registrados:', tokenCount.toString());
+          // Primer intento: getRegisteredTokens (método específico del UTXOVault)
+          const tokens = await testContract.getRegisteredTokens();
+          console.log('✅ Método getRegisteredTokens() funciona. Tokens registrados:', tokens.length);
           contractValidated = true;
-        } catch (tokenCountError: any) {
-          console.warn('⚠️ getRegisteredTokenCount() no disponible:', tokenCountError.message);
+        } catch (tokensError: any) {
+          console.warn('⚠️ getRegisteredTokens() no disponible:', tokensError.message);
           
           // Segundo intento: owner (método común en contratos Ownable)
           try {
             const owner = await testContract.owner();
             console.log('✅ Método owner() funciona. Owner:', owner);
-            console.log('⚠️ Este contrato no parece ser un UTXOVault completo (sin getRegisteredTokenCount)');
+            console.log('⚠️ Este contrato no parece ser un UTXOVault completo (sin getRegisteredTokens)');
             contractValidated = true;
           } catch (ownerError: any) {
             console.warn('⚠️ owner() no disponible:', ownerError.message);
             
-            // Tercer intento: paused (método común en contratos Pausable)
+            // Tercer intento: authorizedBackend (método específico de UTXOVault)
             try {
-              const paused = await testContract.paused();
-              console.log('✅ Método paused() funciona. Paused:', paused);
-              console.log('⚠️ Este contrato responde pero no tiene la interfaz UTXOVault esperada');
+              const backend = await testContract.authorizedBackend();
+              console.log('✅ Método authorizedBackend() funciona. Backend:', backend);
+              console.log('⚠️ Este contrato responde pero no tiene la interfaz UTXOVault completa');
               contractValidated = true;
-            } catch (pausedError: any) {
-              console.warn('⚠️ paused() no disponible:', pausedError.message);
+            } catch (backendError: any) {
+              console.warn('⚠️ authorizedBackend() no disponible:', backendError.message);
             }
           }
         }
@@ -227,12 +227,12 @@ export class UTXOLibrary extends EventEmitter {
         // Crear la instancia real del contrato con la ABI completa
         this.contract = createUTXOVaultContract(contractAddressOrProvider, signer);
         
-        // Verificar el contrato real (pero solo si getRegisteredTokenCount está disponible)
+        // Verificar el contrato real
         try {
-          const tokenCount = await this.contract.getRegisteredTokenCount();
-          console.log('✅ Contrato UTXO validado correctamente e inicializado. Tokens registrados:', tokenCount.toString());
+          const tokens = await this.contract.getRegisteredTokens();
+          console.log('✅ Contrato UTXO validado correctamente e inicializado. Tokens registrados:', tokens.length);
         } catch (finalTestError: any) {
-          console.warn('⚠️ Contrato conectado pero getRegisteredTokenCount() no funciona en el contrato final:', finalTestError.message);
+          console.warn('⚠️ Contrato conectado pero getRegisteredTokens() no funciona en el contrato final:', finalTestError.message);
           console.log('📢 Continuando con la inicialización - el contrato puede estar desplegado pero sin tokens registrados aún');
         }
       }
@@ -486,9 +486,6 @@ export class UTXOLibrary extends EventEmitter {
       console.log('🚀 Executing contract call...');
       const tx = await this.contract!.depositAsPrivateUTXO(
         depositParams,
-        proofParams,
-        generatorParams,
-        amount,
         { gasLimit: this.config.defaultGasLimit }
       );
 
@@ -665,14 +662,36 @@ export class UTXOLibrary extends EventEmitter {
 
       // 8. Call smart contract
       console.log('🚀 Executing split contract call...');
+      
+      // Crear estructura SplitParams según la nueva interfaz
+      const splitParams = {
+        inputCommitment: {
+          x: inputCommitmentX,
+          y: inputCommitmentY
+        },
+        outputCommitments: outputCommitments.map(commitment => {
+          const x = BigInt('0x' + commitment.slice(2, 66));
+          const y = BigInt('0x' + commitment.slice(66, 130));
+          return { x, y };
+        }),
+        inputNullifier: nullifierHash,
+        outputNullifiers: outputCommitments.map((_, index) => 
+          nullifierHash + index.toString() // Unique nullifier per output
+        ),
+        attestation: {
+          operation: "SPLIT",
+          dataHash: ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
+            ["string", "uint256[]", "string"],
+            [inputUTXO.commitment, outputValues, nullifierHash]
+          )),
+          nonce: toBigInt(Date.now()),
+          timestamp: toBigInt(Date.now()),
+          signature: "0x" // Placeholder - would be generated by backend
+        }
+      };
+      
       const tx = await this.contract!.splitPrivateUTXO(
-        inputUTXO.commitment,
-        outputCommitments,
-        outputValues.map(v => v),
-        outputBlindings.map((b: string) => ZenroomHelpers.toBigInt('0x' + b)),
-        splitProof,
-        nullifierHash,
-        generatorParams,
+        splitParams,
         { gasLimit: this.config.defaultGasLimit }
       );
 
@@ -794,12 +813,33 @@ export class UTXOLibrary extends EventEmitter {
 
       // 5. Call smart contract
       console.log('🚀 Executing withdrawal contract call...');
+      
+      // Parse commitment to get x,y coordinates
+      const commitmentX = BigInt('0x' + utxo.commitment.slice(2, 66));
+      const commitmentY = BigInt('0x' + utxo.commitment.slice(66, 130));
+      
+      // Crear estructura WithdrawParams según la nueva interfaz
+      const withdrawParams = {
+        commitment: {
+          x: commitmentX,
+          y: commitmentY
+        },
+        nullifierHash: nullifierHash,
+        revealedAmount: utxo.value,
+        attestation: {
+          operation: "WITHDRAW",
+          dataHash: ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
+            ["string", "uint256", "string"],
+            [utxo.commitment, utxo.value, nullifierHash]
+          )),
+          nonce: toBigInt(Date.now()),
+          timestamp: toBigInt(Date.now()),
+          signature: "0x" // Placeholder - would be generated by backend
+        }
+      };
+      
       const tx = await this.contract!.withdrawFromPrivateUTXO(
-        utxo.commitment,
-        utxo.value,
-        ZenroomHelpers.toBigInt('0x' + utxo.blindingFactor!),
-        nullifierHash,
-        generatorParams,
+        withdrawParams,
         { gasLimit: this.config.defaultGasLimit }
       );
 
@@ -885,14 +925,39 @@ export class UTXOLibrary extends EventEmitter {
 
       // 6. Call smart contract
       console.log('🚀 Executing transfer contract call...');
+      
+      // Parse commitments to get x,y coordinates
+      const inputCommitmentX = BigInt('0x' + utxo.commitment.slice(2, 66));
+      const inputCommitmentY = BigInt('0x' + utxo.commitment.slice(66, 130));
+      const outputCommitmentX = BigInt('0x' + outputCommitmentHex.slice(2, 66));
+      const outputCommitmentY = BigInt('0x' + outputCommitmentHex.slice(66, 130));
+      
+      // Crear estructura TransferParams según la nueva interfaz
+      const transferParams = {
+        inputCommitment: {
+          x: inputCommitmentX,
+          y: inputCommitmentY
+        },
+        outputCommitment: {
+          x: outputCommitmentX,
+          y: outputCommitmentY
+        },
+        inputNullifier: nullifierHash,
+        outputNullifier: nullifierHash + "_output",
+        attestation: {
+          operation: "TRANSFER",
+          dataHash: ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
+            ["string", "string", "address", "uint256"],
+            [utxo.commitment, outputCommitmentHex, newOwner, utxo.value]
+          )),
+          nonce: toBigInt(Date.now()),
+          timestamp: toBigInt(Date.now()),
+          signature: "0x" // Placeholder - would be generated by backend
+        }
+      };
+      
       const tx = await this.contract!.transferPrivateUTXO(
-        utxo.commitment,
-        outputCommitmentHex,
-        newOwner,
-        utxo.value,
-        ZenroomHelpers.toBigInt('0x' + outputBlinding),
-        nullifierHash,
-        generatorParams,
+        transferParams,
         { gasLimit: this.config.defaultGasLimit }
       );
 

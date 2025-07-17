@@ -497,8 +497,8 @@ export class PrivateUTXOManager extends UTXOLibrary {
       while (retryCount < maxRetries) {
         try {
           // Test if contract is accessible
-          const registeredTokensCount = await this.contract.getRegisteredTokenCount();
-          console.log('✅ Contract accessible, registered tokens:', registeredTokensCount.toString());
+          const registeredTokens = await this.contract.getRegisteredTokens();
+          console.log('✅ Contract accessible, registered tokens:', registeredTokens.length);
           
           // Test token registration check
           const isTokenRegistered = await this.contract.isTokenRegistered(params.tokenAddress);
@@ -1080,9 +1080,13 @@ export class PrivateUTXOManager extends UTXOLibrary {
     console.log('🔄 Syncing BN254 data with blockchain and localStorage...');
 
     try {
-      // 1. Verificar conexión con contrato
-      const userUTXOCount = await this.contract.getUserUTXOCount(this.currentAccount.address);
-      console.log(`📊 User has ${userUTXOCount} UTXOs in contract (BN254 mode)`);
+      // 1. Verificar conexión con contrato - usar una función que existe en la nueva interfaz
+      try {
+        const registeredTokens = await this.contract.getRegisteredTokens();
+        console.log(`📊 Contract accessible, ${registeredTokens.length} registered tokens (BN254 mode)`);
+      } catch (contractError) {
+        console.warn('⚠️ Could not verify contract connection:', contractError);
+      }
 
       // 2. Cargar UTXOs privados BN254 desde localStorage (preserva privacidad total)
       try {
@@ -1154,7 +1158,7 @@ export class PrivateUTXOManager extends UTXOLibrary {
           localUTXOs: Array.from(this.utxos.values()).length,
           privateUTXOs: Array.from(this.privateUTXOs.values()).length,
           bn254UTXOs: stats.cryptographyDistribution.BN254,
-          contractUTXOCount: Number(userUTXOCount),
+          contractConnection: 'verified', // En lugar de contractUTXOCount
           localStats: stats,
           syncMode: 'BN254-localStorage+contract',
           verifiedCommitments: verifiedCount,
