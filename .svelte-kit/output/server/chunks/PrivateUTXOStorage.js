@@ -12,19 +12,22 @@ class PrivateUTXOStorage {
    */
   static savePrivateUTXO(userAddress, utxo) {
     try {
+      if (!utxo.id || !utxo.tokenAddress || !utxo.owner || typeof utxo.value === "undefined") {
+        throw new Error("UTXO missing required fields");
+      }
       const userKey = this.getUserKey(userAddress);
       console.log(`💾 Saving UTXO for user: ${userAddress}`);
       console.log(`💾 Using key: ${userKey}`);
       console.log(`💾 UTXO data:`, {
         id: utxo.id,
-        value: utxo.value.toString(),
+        value: utxo.value?.toString(),
         tokenAddress: utxo.tokenAddress,
         owner: utxo.owner,
         isSpent: utxo.isSpent
       });
       const existingUTXOs = this.getPrivateUTXOs(userAddress);
       console.log(`💾 Existing UTXOs count: ${existingUTXOs.length}`);
-      const utxoIndex = existingUTXOs.findIndex((u) => u.id === utxo.id);
+      const utxoIndex = existingUTXOs.findIndex((u) => u.id === utxo.id && u.owner.toLowerCase() === utxo.owner.toLowerCase());
       if (utxoIndex >= 0) {
         existingUTXOs[utxoIndex] = utxo;
         console.log(`💾 Updated existing UTXO at index ${utxoIndex}`);
@@ -33,9 +36,7 @@ class PrivateUTXOStorage {
         console.log(`💾 Added new UTXO, total count: ${existingUTXOs.length}`);
       }
       const serializedData = JSON.stringify(existingUTXOs, (key, value) => {
-        if (typeof value === "bigint") {
-          return value.toString();
-        }
+        if (typeof value === "bigint") return value.toString();
         return value;
       });
       localStorage.setItem(userKey, serializedData);
@@ -58,11 +59,18 @@ class PrivateUTXOStorage {
         return [];
       }
       const utxos = JSON.parse(storedData);
-      return utxos.map((utxo) => ({
-        ...utxo,
-        value: typeof utxo.value === "string" ? BigInt(utxo.value) : utxo.value,
-        timestamp: typeof utxo.timestamp === "string" ? BigInt(utxo.timestamp) : utxo.timestamp
-      }));
+      return utxos.map((utxo) => {
+        const restored = {
+          ...utxo,
+          value: typeof utxo.value === "string" ? BigInt(utxo.value) : utxo.value,
+          timestamp: typeof utxo.timestamp === "string" ? BigInt(utxo.timestamp) : utxo.timestamp
+        };
+        if (typeof utxo.blockNumber === "string") {
+          const n = Number(utxo.blockNumber);
+          restored.blockNumber = isNaN(n) ? void 0 : n;
+        }
+        return restored;
+      });
     } catch (error) {
       console.error("❌ Failed to load private UTXOs:", error);
       return [];

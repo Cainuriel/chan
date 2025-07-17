@@ -482,20 +482,62 @@ export class PrivateUTXOManager extends UTXOLibrary {
         length: nullifierHex.length
       });
 
+      console.log('🧮 Using already extracted coordinates for parity encoding:', {
+        x: fullCommitmentX.toString(16),
+        y: fullCommitmentY.toString(16)
+      });
+      
+      // Determinar la paridad de Y para codificar en el blinding factor
+      // Calculamos ambas raíces cuadradas posibles y determinamos cuál corresponde a nuestra Y
+      
+      // Simular el cálculo del contrato: y^2 = x^3 + 3
+      const x3 = (fullCommitmentX * fullCommitmentX * fullCommitmentX) % FIELD_MODULUS;
+      const y2 = (x3 + 3n) % FIELD_MODULUS;
+      
+      // Calcular la raíz cuadrada principal (como lo hace el contrato)
+      const exp = (FIELD_MODULUS + 1n) / 4n;
+      const y_principal = this.modularExponentiation(y2, exp, FIELD_MODULUS);
+      const y_alternativa = FIELD_MODULUS - y_principal;
+      
+      // Determinar cuál Y es la que tenemos
+      const useAlternativeY = (fullCommitmentY === y_alternativa);
+      
+      console.log('🔍 Y parity calculation:', {
+        y_principal: y_principal.toString(16),
+        y_alternativa: y_alternativa.toString(16),
+        our_y: fullCommitmentY.toString(16),
+        useAlternativeY
+      });
+      
+      // Codificar la paridad en el LSB del blinding factor
+      let modifiedBlindingFactor = ZenroomHelpers.toBigInt('0x' + blindingFactor);
+      
+      // Limpiar el LSB y establecer según la paridad
+      modifiedBlindingFactor = modifiedBlindingFactor & ~1n; // Clear LSB
+      if (useAlternativeY) {
+        modifiedBlindingFactor = modifiedBlindingFactor | 1n; // Set LSB if using alternative Y
+      }
+      
+      console.log('🎯 Modified blinding factor with Y parity:', {
+        original: blindingFactor,
+        modified: modifiedBlindingFactor.toString(16),
+        parityBit: useAlternativeY ? 1 : 0
+      });
+      
       // Extraer solo la coordenada X para el commitment del contrato (bytes32)
-      // Utilizamos el contractCommitmentHex que ya se definió arriba
       const contractCommitment = '0x' + contractCommitmentHex;
       
       console.log('📊 Preparing contract parameters:', {
         fullCommitment: commitmentResult.pedersen_commitment.slice(0, 15) + '...',
-        contractCommitment: contractCommitment.slice(0, 15) + '...'
+        contractCommitment: contractCommitment.slice(0, 15) + '...',
+        blindingFactorWithParity: modifiedBlindingFactor.toString(16).slice(0, 10) + '...'
       });
       
       const depositParams: DepositParams = {
         tokenAddress: tokenAddress,
         commitment: contractCommitment, // Usamos solo la coordenada X como bytes32
         nullifierHash: nullifierHash,
-        blindingFactor: ZenroomHelpers.toBigInt('0x' + blindingFactor)
+        blindingFactor: modifiedBlindingFactor // Blinding factor con información de paridad Y
       };
 
       // Validar que el rangeProof es un valor hexadecimal válido con prefijo 0x
@@ -1576,8 +1618,9 @@ export class PrivateUTXOManager extends UTXOLibrary {
       
       // H generator - segundo punto generador independiente para Pedersen commitments
       // SOLUCIÓN REAL: Coordenadas exactas de 3*G en BN254 (matemáticamente calculadas y verificadas)
-      hX: BigInt("0x0f25929bcb43d5a57391564615c9e70a992b10eafa4db109709649cf48c50dd2"), // H1 X - 3*G verificado
-      hY: BigInt("0x16da2f5cb6be7a0aa72c440c53c9bbdfec6c36c7d515536431b3a865468acbba")  // H1 Y - 3*G verificado
+      // COORDENADAS CORREGIDAS - MATEMÁTICAMENTE VERIFICADAS
+      hX: BigInt("0x769bf9ac56bea3ff40232bcb1b6bd159315d84715b8e679f2d355961915abf0"), // H1 X - 3*G CORREGIDO
+      hY: BigInt("0x2ab799bee0489429554fdb7c8d086475319e63b40b9c5b57cdf1ff3dd9fe2261")  // H1 Y - 3*G CORREGIDO
     };
   }
 
@@ -1624,6 +1667,24 @@ export class PrivateUTXOManager extends UTXOLibrary {
       verifiedCommitments: bn254UTXOs.filter(utxo => !utxo.isSpent).length,
       isZenroomAvailable: ZenroomHelpers.isZenroomAvailable()
     };
+  }
+
+  /**
+   * Exponenciación modular para cálculos BN254
+   */
+  private modularExponentiation(base: bigint, exp: bigint, modulus: bigint): bigint {
+    let result = 1n;
+    base = base % modulus;
+    
+    while (exp > 0n) {
+      if (exp % 2n === 1n) {
+        result = (result * base) % modulus;
+      }
+      exp = exp >> 1n;
+      base = (base * base) % modulus;
+    }
+    
+    return result;
   }
 }
 

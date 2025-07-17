@@ -480,7 +480,7 @@ contract UTXOVault is ReentrancyGuard, Ownable {
         uint256 blindingFactor,
         GeneratorParams calldata generators
     ) internal view {
-        RealPedersenVerifier.G1Point memory commitmentPoint = _parseCommitmentPoint(commitment);
+        RealPedersenVerifier.G1Point memory commitmentPoint = _parseCommitmentPointWithParity(commitment, blindingFactor);
         RealPedersenVerifier.PedersenParams memory params = RealPedersenVerifier.PedersenParams({
             g: RealPedersenVerifier.G1Point(generators.gX, generators.gY),
             h: RealPedersenVerifier.G1Point(generators.hX, generators.hY)
@@ -508,7 +508,7 @@ contract UTXOVault is ReentrancyGuard, Ownable {
         require(commitment != bytes32(0), "Invalid commitment");
         
         // Parse commitment as elliptic curve point
-        RealPedersenVerifier.G1Point memory commitmentPoint = _parseCommitmentPoint(commitment);
+        RealPedersenVerifier.G1Point memory commitmentPoint = _parseCommitmentPointDeterministic(commitment);
         
         // REAL range proof verification using Bulletproofs
         require(
@@ -536,13 +536,13 @@ contract UTXOVault is ReentrancyGuard, Ownable {
         require(outputCommitments.length <= 10, "Too many outputs");
         
         // Parse commitments as elliptic curve points
-        RealPedersenVerifier.G1Point memory inputPoint = _parseCommitmentPoint(inputCommitment);
+        RealPedersenVerifier.G1Point memory inputPoint = _parseCommitmentPointDeterministic(inputCommitment);
         
         // Compute sum of output commitments using REAL elliptic curve addition
-        RealPedersenVerifier.G1Point memory outputSum = _parseCommitmentPoint(outputCommitments[0]);
+        RealPedersenVerifier.G1Point memory outputSum = _parseCommitmentPointDeterministic(outputCommitments[0]);
         
         for (uint256 i = 1; i < outputCommitments.length; i++) {
-            RealPedersenVerifier.G1Point memory outputPoint = _parseCommitmentPoint(outputCommitments[i]);
+            RealPedersenVerifier.G1Point memory outputPoint = _parseCommitmentPointDeterministic(outputCommitments[i]);
             outputSum = RealPedersenVerifier.pointAdd(outputSum, outputPoint);
         }
         
@@ -561,22 +561,99 @@ contract UTXOVault is ReentrancyGuard, Ownable {
     }
     
     /**
-     * @dev Parse commitment bytes32 as elliptic curve point
+     * @dev Parse commitment bytes32 as elliptic curve point with Y parity from blinding factor
+     * Uses the LSB of blinding factor to determine which Y coordinate to use
      */
-    function _parseCommitmentPoint(bytes32 commitment) internal pure returns (RealPedersenVerifier.G1Point memory) {
+    function _parseCommitmentPointWithParity(bytes32 commitment, uint256 blindingFactor) internal pure returns (RealPedersenVerifier.G1Point memory) {
         uint256 x = uint256(commitment);
         
+        // BN254 field modulus
+        uint256 p = 21888242871839275222246405745257275088696311157297823662689037894645226208583;
+        
         // Ensure x is valid field element  
-        x = x % 21888242871839275222246405745257275088696311157297823662689037894645226208583;
+        x = x % p;
         
-        // Compute y from curve equation: y^2 = x^3 + 3 (for BN254)
-        uint256 x3 = mulmod(mulmod(x, x, 21888242871839275222246405745257275088696311157297823662689037894645226208583), x, 21888242871839275222246405745257275088696311157297823662689037894645226208583);
-        uint256 y2 = addmod(x3, 3, 21888242871839275222246405745257275088696311157297823662689037894645226208583);
+        // Compute y^2 = x^3 + 3 (mod p) for BN254 curve
+        uint256 x3 = mulmod(mulmod(x, x, p), x, p);
+        uint256 y2 = addmod(x3, 3, p);
         
-        // Use sqrt to find y
-        uint256 y = _sqrt(y2);
+        // Compute square root
+        uint256 y = _modularSqrt(y2, p);
+        
+        // Use LSB of blinding factor to determine Y parity
+        // If LSB is 1, use the larger Y value; if 0, use the smaller Y value
+        bool useLargerY = (blindingFactor & 1) == 1;
+        uint256 y_alt = p - y;
+        
+        if (useLargerY && y_alt > y) {
+            y = y_alt;
+        } else if (!useLargerY && y > y_alt) {
+            y = y_alt;
+        }
+        
+        // Verify the point is on the curve
+        require(mulmod(y, y, p) == y2, "Invalid commitment point: not on BN254 curve");
         
         return RealPedersenVerifier.G1Point(x, y);
+    }
+    
+    /**
+     * @dev Parse commitment using deterministic Y selection (for range proofs)
+     */
+    function _parseCommitmentPointDeterministic(bytes32 commitment) internal pure returns (RealPedersenVerifier.G1Point memory) {
+        uint256 x = uint256(commitment);
+        
+        // BN254 field modulus
+        uint256 p = 21888242871839275222246405745257275088696311157297823662689037894645226208583;
+        
+        // Ensure x is valid field element  
+        x = x % p;
+        
+        // Compute y^2 = x^3 + 3 (mod p) for BN254 curve
+        uint256 x3 = mulmod(mulmod(x, x, p), x, p);
+        uint256 y2 = addmod(x3, 3, p);
+        
+        // Compute square root and choose smaller Y (lexicographic ordering)
+        uint256 y = _modularSqrt(y2, p);
+        uint256 y_alt = p - y;
+        
+        // Use smaller Y for deterministic behavior
+        if (y_alt < y) {
+            y = y_alt;
+        }
+        
+        // Verify the point is on the curve
+        require(mulmod(y, y, p) == y2, "Invalid commitment point: not on BN254 curve");
+        
+        return RealPedersenVerifier.G1Point(x, y);
+    }
+    
+    /**
+     * @dev Compute modular square root for BN254 field using Tonelli-Shanks algorithm
+     */
+    function _modularSqrt(uint256 a, uint256 p) internal pure returns (uint256) {
+        // For BN254 field where p ≡ 3 (mod 4), we can use the simple case
+        // y = a^((p+1)/4) mod p
+        uint256 exp = (p + 1) / 4;
+        return _modPow(a, exp, p);
+    }
+    
+    /**
+     * @dev Modular exponentiation: base^exp mod modulus
+     */
+    function _modPow(uint256 base, uint256 exp, uint256 modulus) internal pure returns (uint256) {
+        uint256 result = 1;
+        base = base % modulus;
+        
+        while (exp > 0) {
+            if (exp % 2 == 1) {
+                result = mulmod(result, base, modulus);
+            }
+            exp = exp >> 1;
+            base = mulmod(base, base, modulus);
+        }
+        
+        return result;
     }
     
     /**
