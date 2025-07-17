@@ -447,24 +447,25 @@ export class PrivateUTXOManager extends UTXOLibrary {
         throw new Error(`Invalid BN254 commitment format: expected 128 hex chars, got ${commitmentHex.length}`);
       }
       
-      // El formato para el contrato es bytes32 (sólo coordenada X)
-      const contractCommitmentHex = commitmentHex.substring(0, 64);
+      // El formato para el contrato ahora es el commitment completo (coordenadas X + Y)
+      // Enviamos las 128 caracteres hex completos para que el contrato pueda verificar directamente
+      const contractCommitmentFull = commitmentHex; // 128 chars: 64 (X) + 64 (Y)
       
-      if (!ZenroomHelpers.isValidHex(contractCommitmentHex, 32)) {
+      if (!ZenroomHelpers.isValidHex(contractCommitmentFull, 64)) { // 64 bytes = 128 chars hex
         console.error('Contract commitment format error:', {
           original: commitmentHex.slice(0, 10) + '...',
-          contractFormat: contractCommitmentHex,
-          length: contractCommitmentHex.length
+          fullLength: contractCommitmentFull.length,
+          expectedLength: 128
         });
         throw new Error('Invalid BN254 contract commitment format');
       }
       
       // Log detallado para depuración
-      console.log('✅ Validated commitment format:', {
+      console.log('✅ Validated commitment format (full X+Y):', {
         fullCommitment: commitmentResult.pedersen_commitment.slice(0, 10) + '...',
-        contractCommitment: '0x' + contractCommitmentHex.slice(0, 10) + '...',
-        fullLength: commitmentHex.length,
-        contractLength: contractCommitmentHex.length
+        contractFormat: '0x' + contractCommitmentFull.slice(0, 10) + '...',
+        fullLength: contractCommitmentFull.length,
+        isComplete: contractCommitmentFull.length === 128
       });
 
       // VALIDACIÓN DETALLADA DEL PUNTO BN254
@@ -625,7 +626,7 @@ export class PrivateUTXOManager extends UTXOLibrary {
       });
       
       // Extraer solo la coordenada X para el commitment del contrato (bytes32)
-      const contractCommitment = '0x' + contractCommitmentHex;
+      const contractCommitment = '0x' + contractCommitmentFull;
       
       console.log('📊 Preparing contract parameters:', {
         fullCommitment: commitmentResult.pedersen_commitment.slice(0, 15) + '...',

@@ -250,4 +250,111 @@ library RealPedersenVerifier {
     function FIELD_MODULUS() internal pure returns (uint256) {
         return FIELD_MODULUS_CONSTANT;
     }
+    
+    /**
+     * @dev Parse full commitment from coordinates (X, Y)
+     * @param x X coordinate
+     * @param y Y coordinate
+     * @return G1Point with the coordinates
+     */
+    function parseCommitmentFromCoordinates(uint256 x, uint256 y) internal pure returns (G1Point memory) {
+        G1Point memory point = G1Point(x, y);
+        require(isOnCurve(point), "Invalid commitment point: not on BN254 curve");
+        return point;
+    }
+    
+    /**
+     * @dev Hash commitment point to bytes32 for storage mapping
+     * @param commitment The commitment point
+     * @return Hash of the commitment
+     */
+    function hashCommitmentPoint(G1Point memory commitment) internal pure returns (bytes32) {
+        return keccak256(abi.encodePacked(commitment.x, commitment.y));
+    }
+    
+    /**
+     * @dev Validate commitment point coordinates
+     * @param commitment The commitment point to validate
+     * @return True if valid
+     */
+    function isValidCommitmentPoint(G1Point memory commitment) internal pure returns (bool) {
+        // Check for point at infinity (valid but special case)
+        if (commitment.x == 0 && commitment.y == 0) return true;
+        
+        // Check if point is on curve
+        return isOnCurve(commitment);
+    }
+    
+    /**
+     * @dev Convert CommitmentPoint to G1Point (compatibility function)
+     * @param x X coordinate
+     * @param y Y coordinate
+     * @return G1Point representation
+     */
+    function commitmentPointToG1(uint256 x, uint256 y) internal pure returns (G1Point memory) {
+        return parseCommitmentFromCoordinates(x, y);
+    }
+    
+    /**
+     * @dev Verify Pedersen commitment using coordinates directly
+     * @param x X coordinate of commitment
+     * @param y Y coordinate of commitment  
+     * @param amount The committed amount
+     * @param blindingFactor The blinding factor
+     * @param params Pedersen parameters
+     * @return True if valid
+     */
+    function verifyCommitmentCoordinates(
+        uint256 x,
+        uint256 y,
+        uint256 amount,
+        uint256 blindingFactor,
+        PedersenParams memory params
+    ) internal view returns (bool) {
+        G1Point memory commitment = parseCommitmentFromCoordinates(x, y);
+        return verifyOpening(commitment, amount, blindingFactor, params);
+    }
+    
+    /**
+     * @dev Verify range proof using coordinates directly
+     * @param x X coordinate of commitment
+     * @param y Y coordinate of commitment
+     * @param rangeProof The range proof
+     * @param minValue Minimum value
+     * @param maxValue Maximum value
+     * @return True if valid
+     */
+    function verifyRangeProofCoordinates(
+        uint256 x,
+        uint256 y,
+        bytes memory rangeProof,
+        uint256 minValue,
+        uint256 maxValue
+    ) internal view returns (bool) {
+        G1Point memory commitment = parseCommitmentFromCoordinates(x, y);
+        return verifyRangeProof(commitment, rangeProof, minValue, maxValue);
+    }
+    
+    /**
+     * @dev Convert bytes32 to CommitmentPoint by parsing hex coordinates
+     * Format: first 32 bytes = X, second 32 bytes = Y (total 64 bytes in hex)
+     * @param commitmentHex 128-char hex string (64 chars X + 64 chars Y)
+     * @return x X coordinate 
+     * @return y Y coordinate
+     */
+    function parseHexToCoordinates(bytes memory commitmentHex) internal pure returns (uint256 x, uint256 y) {
+        require(commitmentHex.length == 64, "Invalid commitment hex length");
+        
+        // First 32 bytes = X coordinate
+        bytes32 xBytes;
+        bytes32 yBytes;
+        
+        assembly {
+            xBytes := mload(add(commitmentHex, 32))
+            yBytes := mload(add(commitmentHex, 64))
+        }
+        
+        x = uint256(xBytes);
+        y = uint256(yBytes);
+    }
 }

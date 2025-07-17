@@ -107,7 +107,7 @@
     </button>
     <div class="text-xs text-gray-400 text-right">
       <div>Polygon Amoy Network</div>
-      <div>Testnet Required</div>
+      <div>Alastria Network</div>
       <div class="text-yellow-400 mt-1">
         {#if typeof window !== 'undefined' && !window.ethereum}
           ⚠️ MetaMask not installed

@@ -19,9 +19,14 @@ contract UTXOVault is ReentrancyGuard, Ownable {
     // ESTRUCTURAS DE DATOS SIMPLIFICADAS
     // ========================
     
+    struct CommitmentPoint {
+        uint256 x;
+        uint256 y;
+    }
+    
     struct PrivateUTXO {
         bool exists;
-        bytes32 commitment;           // Pedersen commitment (oculta cantidad)
+        CommitmentPoint commitment;   // Pedersen commitment point (full coordinates)
         address tokenAddress;         // Token address
         address owner;               // Owner
         uint256 timestamp;
@@ -33,7 +38,7 @@ contract UTXOVault is ReentrancyGuard, Ownable {
     
     struct DepositParams {
         address tokenAddress;
-        bytes32 commitment;
+        CommitmentPoint commitment;   // Full commitment point (X, Y)
         bytes32 nullifierHash;
         uint256 blindingFactor;
     }
@@ -58,7 +63,7 @@ contract UTXOVault is ReentrancyGuard, Ownable {
     mapping(bytes32 => PrivateUTXO) private utxos;
     mapping(address => bytes32[]) private utxosByOwner;
     mapping(bytes32 => bool) private nullifiers;        // Prevenir double-spending
-    mapping(bytes32 => bytes32) private commitmentToUTXO; // Mapeo de commitment a UTXO ID
+    mapping(bytes32 => bytes32) private commitmentHashToUTXO; // Mapeo de commitment hash a UTXO ID
     
     // Token Registry - Registro automático de tokens ERC20
     mapping(address => bool) public registeredTokens;
@@ -138,27 +143,50 @@ contract UTXOVault is ReentrancyGuard, Ownable {
         GeneratorParams calldata generators,
         uint256 amount
     ) external nonReentrant {
-        // Validar inputs básicos
+        // Validaciones básicas
+        _validateDepositInputs(depositParams, amount);
+        
+        // Registro automático de token
+        _registerToken(depositParams.tokenAddress);
+        
+        // Verificaciones criptográficas
+        _verifyDepositCryptography(depositParams, proofParams, generators, amount);
+        
+        // Ejecutar depósito
+        _executeDeposit(depositParams, amount);
+    }
+    
+    /**
+     * @dev Validar inputs del depósito
+     */
+    function _validateDepositInputs(DepositParams calldata depositParams, uint256 amount) internal view {
         require(depositParams.tokenAddress != address(0), "Invalid token");
-        require(depositParams.commitment != bytes32(0), "Invalid commitment");
+        require(_isValidCommitmentPoint(depositParams.commitment), "Invalid commitment point");
         require(depositParams.nullifierHash != bytes32(0), "Invalid nullifier");
         require(!nullifiers[depositParams.nullifierHash], "Nullifier already used");
         require(amount > 0, "Amount must be positive");
-        
-        // REGISTRO AUTOMÁTICO DE TOKEN (solo en primer depósito)
-        _registerToken(depositParams.tokenAddress);
-        
+    }
+    
+    /**
+     * @dev Verificar toda la criptografía del depósito
+     */
+    function _verifyDepositCryptography(
+        DepositParams calldata depositParams,
+        ProofParams calldata proofParams,
+        GeneratorParams calldata generators,
+        uint256 amount
+    ) internal view {
         // VERIFICACIÓN CRIPTOGRÁFICA REAL: Pedersen commitment
-        _verifyPedersenCommitment(
-            depositParams.commitment,
-            amount,
-            depositParams.blindingFactor,
-            generators
-        );
+        _verifyPedersenCommitment(depositParams.commitment, amount, depositParams.blindingFactor, generators);
         
         // VERIFICACIÓN CRIPTOGRÁFICA REAL: Range proof (cantidad > 0)
         _verifyRangeProof(depositParams.commitment, proofParams.rangeProof);
-        
+    }
+    
+    /**
+     * @dev Ejecutar el depósito transfiriendo tokens y creando UTXO
+     */
+    function _executeDeposit(DepositParams calldata depositParams, uint256 amount) internal {
         // Transferir tokens reales
         IERC20(depositParams.tokenAddress).transferFrom(msg.sender, address(this), amount);
         
@@ -177,16 +205,16 @@ contract UTXOVault is ReentrancyGuard, Ownable {
      * @param generators Generadores para verificación
      */
     function splitPrivateUTXO(
-        bytes32 inputCommitment,
-        bytes32[] calldata outputCommitments,
+        CommitmentPoint calldata inputCommitment,
+        CommitmentPoint[] calldata outputCommitments,
         uint256[] calldata outputAmounts,
         uint256[] calldata outputBlindings,
         bytes calldata equalityProof,
         bytes32 nullifierHash,
         GeneratorParams calldata generators
     ) external nonReentrant returns (bytes32[] memory) {
-        // Validar inputs básicos
-        _validateSplitInputs(
+        // Validar inputs básicos y encontrar input UTXO
+        bytes32 inputUTXOId = _validateSplitOperation(
             inputCommitment,
             outputCommitments,
             outputAmounts,
@@ -194,30 +222,47 @@ contract UTXOVault is ReentrancyGuard, Ownable {
             nullifierHash
         );
         
-        // Encontrar y validar input UTXO
-        bytes32 inputUTXOId = _validateAndGetInputUTXO(inputCommitment);
-        
         // Verificar todos los output commitments
-        _verifyOutputCommitments(
-            outputCommitments,
-            outputAmounts,
-            outputBlindings,
-            generators
-        );
+        _verifyOutputCommitments(outputCommitments, outputAmounts, outputBlindings, generators);
         
         // Verificar equality proof (conservación de valor)
         _verifyEqualityProof(inputCommitment, outputCommitments, equalityProof);
         
+        // Ejecutar el split
+        return _executeSplit(inputUTXOId, outputCommitments, outputAmounts, nullifierHash);
+    }
+    
+    /**
+     * @dev Validar operación de split completa
+     */
+    function _validateSplitOperation(
+        CommitmentPoint calldata inputCommitment,
+        CommitmentPoint[] calldata outputCommitments,
+        uint256[] calldata outputAmounts,
+        uint256[] calldata outputBlindings,
+        bytes32 nullifierHash
+    ) internal view returns (bytes32) {
+        // Validar inputs básicos
+        _validateSplitInputs(inputCommitment, outputCommitments, outputAmounts, outputBlindings, nullifierHash);
+        
+        // Validar y obtener input UTXO
+        return _validateAndGetInputUTXO(inputCommitment);
+    }
+    
+    /**
+     * @dev Ejecutar el split creando todos los outputs
+     */
+    function _executeSplit(
+        bytes32 inputUTXOId,
+        CommitmentPoint[] calldata outputCommitments,
+        uint256[] calldata outputAmounts,
+        bytes32 nullifierHash
+    ) internal returns (bytes32[] memory) {
         // Marcar input como gastado
         _markInputAsSpent(inputUTXOId, nullifierHash);
         
         // Crear outputs y retornar IDs
-        return _createSplitOutputs(
-            inputUTXOId,
-            outputCommitments,
-            outputAmounts,
-            nullifierHash
-        );
+        return _createSplitOutputs(inputUTXOId, outputCommitments, outputAmounts, nullifierHash);
     }
 
     /**
@@ -231,21 +276,48 @@ contract UTXOVault is ReentrancyGuard, Ownable {
      * @param generators Generadores para verificación
      */
     function transferPrivateUTXO(
-        bytes32 inputCommitment,
-        bytes32 outputCommitment,
+        CommitmentPoint calldata inputCommitment,
+        CommitmentPoint calldata outputCommitment,
         address newOwner,
         uint256 amount,
         uint256 outputBlinding,
         bytes32 nullifierHash,
         GeneratorParams calldata generators
     ) external nonReentrant returns (bytes32) {
-        require(inputCommitment != bytes32(0), "Invalid input commitment");
-        require(outputCommitment != bytes32(0), "Invalid output commitment");
+        // Validaciones básicas
+        _validateTransferInputs(inputCommitment, outputCommitment, newOwner, amount, nullifierHash);
+        
+        // Validar y obtener input UTXO
+        bytes32 inputUTXOId = _validateTransferInputUTXO(inputCommitment);
+        
+        // Verificar commitment de salida
+        _verifyPedersenCommitment(outputCommitment, amount, outputBlinding, generators);
+        
+        // Ejecutar transferencia
+        return _executeTransfer(inputUTXOId, inputCommitment, outputCommitment, newOwner, nullifierHash, amount);
+    }
+    
+    /**
+     * @dev Validar inputs básicos para transferencia
+     */
+    function _validateTransferInputs(
+        CommitmentPoint calldata inputCommitment,
+        CommitmentPoint calldata outputCommitment,
+        address newOwner,
+        uint256 amount,
+        bytes32 nullifierHash
+    ) internal view {
+        require(_isValidCommitmentPoint(inputCommitment), "Invalid input commitment");
+        require(_isValidCommitmentPoint(outputCommitment), "Invalid output commitment");
         require(newOwner != address(0), "Invalid new owner");
         require(amount > 0, "Amount must be positive");
         require(!nullifiers[nullifierHash], "Nullifier already used");
-        
-        // Encontrar input UTXO
+    }
+    
+    /**
+     * @dev Validar input UTXO para transferencia
+     */
+    function _validateTransferInputUTXO(CommitmentPoint calldata inputCommitment) internal view returns (bytes32) {
         bytes32 inputUTXOId = _findUTXOByCommitment(inputCommitment);
         PrivateUTXO storage inputUTXO = utxos[inputUTXOId];
         
@@ -253,31 +325,71 @@ contract UTXOVault is ReentrancyGuard, Ownable {
         require(!inputUTXO.isSpent, "Input UTXO already spent");
         require(inputUTXO.owner == msg.sender, "Not owner");
         
-        // VERIFICACIÓN CRIPTOGRÁFICA REAL: Output commitment es válido
-        _verifyPedersenCommitment(
+        return inputUTXOId;
+    }
+    
+    /**
+     * @dev Ejecutar la transferencia creando el output UTXO
+     */
+    function _executeTransfer(
+        bytes32 inputUTXOId,
+        CommitmentPoint calldata inputCommitment,
+        CommitmentPoint calldata outputCommitment,
+        address newOwner,
+        bytes32 nullifierHash,
+        uint256 amount
+    ) internal returns (bytes32) {
+        // Marcar input como gastado
+        _markTransferInputAsSpent(inputUTXOId, nullifierHash);
+        
+        // Crear output UTXO
+        bytes32 outputUTXOId = _createTransferOutputUTXO(
+            inputUTXOId,
             outputCommitment,
-            amount,
-            outputBlinding,
-            generators
+            newOwner,
+            nullifierHash
         );
         
-        // Marcar input como gastado
-        inputUTXO.isSpent = true;
-        nullifiers[nullifierHash] = true;
-        
-        // Crear output UTXO para el nuevo propietario
-        bytes32 outputNullifier = keccak256(abi.encodePacked(
-            nullifierHash,
+        // Actualizar mappings y emitir eventos
+        _finalizeTransfer(
+            inputCommitment,
+            outputCommitment,
+            outputUTXOId,
             newOwner,
-            block.timestamp
-        ));
+            nullifierHash,
+            amount,
+            inputUTXOId
+        );
         
+        return outputUTXOId;
+    }
+    
+    /**
+     * @dev Marcar input como gastado en transferencia
+     */
+    function _markTransferInputAsSpent(bytes32 inputUTXOId, bytes32 nullifierHash) internal {
+        utxos[inputUTXOId].isSpent = true;
+        nullifiers[nullifierHash] = true;
+    }
+    
+    /**
+     * @dev Crear el UTXO de salida para la transferencia
+     */
+    function _createTransferOutputUTXO(
+        bytes32 inputUTXOId,
+        CommitmentPoint calldata outputCommitment,
+        address newOwner,
+        bytes32 nullifierHash
+    ) internal returns (bytes32) {
+        // Crear output UTXO
+        bytes32 outputNullifier = keccak256(abi.encodePacked(nullifierHash, newOwner, block.timestamp));
         bytes32 outputUTXOId = _generatePrivateUTXOId(outputCommitment, outputNullifier);
         
+        // Crear estructura del UTXO
         utxos[outputUTXOId] = PrivateUTXO({
             exists: true,
             commitment: outputCommitment,
-            tokenAddress: inputUTXO.tokenAddress,
+            tokenAddress: utxos[inputUTXOId].tokenAddress,
             owner: newOwner,
             timestamp: block.timestamp,
             isSpent: false,
@@ -286,23 +398,66 @@ contract UTXOVault is ReentrancyGuard, Ownable {
             nullifierHash: outputNullifier
         });
         
-        // Mapear commitment a UTXO ID
-        commitmentToUTXO[outputCommitment] = outputUTXOId;
+        return outputUTXOId;
+    }
+    
+    /**
+     * @dev Finalizar transferencia con mappings y eventos
+     */
+    function _finalizeTransfer(
+        CommitmentPoint calldata inputCommitment,
+        CommitmentPoint calldata outputCommitment,
+        bytes32 outputUTXOId,
+        address newOwner,
+        bytes32 nullifierHash,
+        uint256 amount,
+        bytes32 inputUTXOId
+    ) internal {
+        // Mapear commitment hash a UTXO ID
+        bytes32 outputCommitmentHash = _hashCommitmentPoint(outputCommitment);
+        commitmentHashToUTXO[outputCommitmentHash] = outputUTXOId;
         
         // Actualizar tracking
         utxosByOwner[newOwner].push(outputUTXOId);
         
-        emit PrivateTransfer(inputCommitment, outputCommitment, nullifierHash, newOwner);
-        emit PrivateUTXOCreated(
+        // Emitir eventos
+        _emitTransferEvents(
+            inputCommitment,
             outputCommitment,
+            nullifierHash,
             newOwner,
-            inputUTXO.tokenAddress,
+            amount,
+            inputUTXOId
+        );
+    }
+    
+    /**
+     * @dev Emitir eventos de transferencia
+     */
+    function _emitTransferEvents(
+        CommitmentPoint calldata inputCommitment,
+        CommitmentPoint calldata outputCommitment,
+        bytes32 nullifierHash,
+        address newOwner,
+        uint256 amount,
+        bytes32 inputUTXOId
+    ) internal {
+        bytes32 inputCommitmentHash = _hashCommitmentPoint(inputCommitment);
+        bytes32 outputCommitmentHash = _hashCommitmentPoint(outputCommitment);
+        
+        emit PrivateTransfer(inputCommitmentHash, outputCommitmentHash, nullifierHash, newOwner);
+        
+        // Para el segundo evento, necesitamos el nullifier del output
+        bytes32 outputNullifier = keccak256(abi.encodePacked(nullifierHash, newOwner, block.timestamp));
+        
+        emit PrivateUTXOCreated(
+            outputCommitmentHash,
+            newOwner,
+            utxos[inputUTXOId].tokenAddress,
             outputNullifier,
             UTXOType.TRANSFER,
             amount
         );
-        
-        return outputUTXOId;
     }
     
     /**
@@ -314,16 +469,42 @@ contract UTXOVault is ReentrancyGuard, Ownable {
      * @param generators Generadores para verificación
      */
     function withdrawFromPrivateUTXO(
-        bytes32 commitment,
+        CommitmentPoint calldata commitment,
         uint256 amount,
         uint256 blindingFactor,
         bytes32 nullifierHash,
         GeneratorParams calldata generators
     ) external nonReentrant {
+        // Validaciones básicas
+        _validateWithdrawalInputs(commitment, amount, nullifierHash);
+        
+        // Encontrar y validar UTXO
+        bytes32 utxoId = _validateWithdrawalUTXO(commitment);
+        
+        // Verificar criptografía
+        _verifyPedersenCommitment(commitment, amount, blindingFactor, generators);
+        
+        // Ejecutar retiro
+        _executeWithdrawal(utxoId, commitment, amount, nullifierHash);
+    }
+    
+    /**
+     * @dev Validar inputs básicos para retiro
+     */
+    function _validateWithdrawalInputs(
+        CommitmentPoint calldata commitment,
+        uint256 amount,
+        bytes32 nullifierHash
+    ) internal view {
         require(!nullifiers[nullifierHash], "Nullifier already used");
         require(amount > 0, "Amount must be positive");
-        
-        // Encontrar UTXO
+        require(_isValidCommitmentPoint(commitment), "Invalid commitment point");
+    }
+    
+    /**
+     * @dev Validar UTXO para retiro
+     */
+    function _validateWithdrawalUTXO(CommitmentPoint calldata commitment) internal view returns (bytes32) {
         bytes32 utxoId = _findUTXOByCommitment(commitment);
         PrivateUTXO storage utxo = utxos[utxoId];
         
@@ -331,22 +512,29 @@ contract UTXOVault is ReentrancyGuard, Ownable {
         require(!utxo.isSpent, "UTXO already spent");
         require(utxo.owner == msg.sender, "Not owner");
         
-        // VERIFICACIÓN CRIPTOGRÁFICA REAL: El commitment abre correctamente
-        _verifyPedersenCommitment(
-            commitment,
-            amount,
-            blindingFactor,
-            generators
-        );
-        
+        return utxoId;
+    }
+    
+    /**
+     * @dev Ejecutar el retiro transfiriendo tokens
+     */
+    function _executeWithdrawal(
+        bytes32 utxoId,
+        CommitmentPoint calldata commitment,
+        uint256 amount,
+        bytes32 nullifierHash
+    ) internal {
         // Marcar como gastado
-        utxo.isSpent = true;
+        utxos[utxoId].isSpent = true;
         nullifiers[nullifierHash] = true;
         
         // Transferir tokens reales
-        IERC20(utxo.tokenAddress).transfer(msg.sender, amount);
+        address tokenAddress = utxos[utxoId].tokenAddress;
+        IERC20(tokenAddress).transfer(msg.sender, amount);
         
-        emit PrivateWithdrawal(commitment, msg.sender, nullifierHash, amount);
+        // Emitir evento
+        bytes32 commitmentHash = _hashCommitmentPoint(commitment);
+        emit PrivateWithdrawal(commitmentHash, msg.sender, nullifierHash, amount);
     }
     
     // ========================
@@ -357,13 +545,13 @@ contract UTXOVault is ReentrancyGuard, Ownable {
      * @dev Validar inputs básicos para splitPrivateUTXO
      */
     function _validateSplitInputs(
-        bytes32 inputCommitment,
-        bytes32[] calldata outputCommitments,
+        CommitmentPoint calldata inputCommitment,
+        CommitmentPoint[] calldata outputCommitments,
         uint256[] calldata outputAmounts,
         uint256[] calldata outputBlindings,
         bytes32 nullifierHash
     ) internal view {
-        require(inputCommitment != bytes32(0), "Invalid input commitment");
+        require(_isValidCommitmentPoint(inputCommitment), "Invalid input commitment");
         require(outputCommitments.length > 0, "No outputs");
         require(outputCommitments.length == outputAmounts.length, "Length mismatch");
         require(outputAmounts.length == outputBlindings.length, "Length mismatch");
@@ -373,7 +561,7 @@ contract UTXOVault is ReentrancyGuard, Ownable {
     /**
      * @dev Validar y obtener el input UTXO
      */
-    function _validateAndGetInputUTXO(bytes32 inputCommitment) internal view returns (bytes32) {
+    function _validateAndGetInputUTXO(CommitmentPoint calldata inputCommitment) internal view returns (bytes32) {
         bytes32 inputUTXOId = _findUTXOByCommitment(inputCommitment);
         PrivateUTXO storage inputUTXO = utxos[inputUTXOId];
         
@@ -388,13 +576,14 @@ contract UTXOVault is ReentrancyGuard, Ownable {
      * @dev Verificar todos los output commitments
      */
     function _verifyOutputCommitments(
-        bytes32[] calldata outputCommitments,
+        CommitmentPoint[] calldata outputCommitments,
         uint256[] calldata outputAmounts,
         uint256[] calldata outputBlindings,
         GeneratorParams calldata generators
     ) internal view {
         for (uint256 i = 0; i < outputCommitments.length; i++) {
             require(outputAmounts[i] > 0, "Output amount must be positive");
+            require(_isValidCommitmentPoint(outputCommitments[i]), "Invalid output commitment");
             _verifyPedersenCommitment(
                 outputCommitments[i],
                 outputAmounts[i],
@@ -417,54 +606,73 @@ contract UTXOVault is ReentrancyGuard, Ownable {
      */
     function _createSplitOutputs(
         bytes32 inputUTXOId,
-        bytes32[] calldata outputCommitments,
+        CommitmentPoint[] calldata outputCommitments,
         uint256[] calldata outputAmounts,
         bytes32 nullifierHash
     ) internal returns (bytes32[] memory) {
         bytes32[] memory outputUTXOIds = new bytes32[](outputCommitments.length);
-        PrivateUTXO storage inputUTXO = utxos[inputUTXOId];
+        address tokenAddress = utxos[inputUTXOId].tokenAddress;
         
         for (uint256 i = 0; i < outputCommitments.length; i++) {
-            bytes32 outputNullifier = keccak256(abi.encodePacked(
-                nullifierHash, 
-                i, 
-                block.timestamp
-            ));
-            
-            bytes32 outputUTXOId = _generatePrivateUTXOId(
-                outputCommitments[i], 
-                outputNullifier
-            );
-            
-            utxos[outputUTXOId] = PrivateUTXO({
-                exists: true,
-                commitment: outputCommitments[i],
-                tokenAddress: inputUTXO.tokenAddress,
-                owner: msg.sender,
-                timestamp: block.timestamp,
-                isSpent: false,
-                parentUTXO: inputUTXOId,
-                utxoType: UTXOType.SPLIT,
-                nullifierHash: outputNullifier
-            });
-            
-            // Mapear commitment a UTXO ID
-            commitmentToUTXO[outputCommitments[i]] = outputUTXOId;
-            
-            utxosByOwner[msg.sender].push(outputUTXOId);
-            outputUTXOIds[i] = outputUTXOId;
-            
-            emit PrivateUTXOCreated(
+            outputUTXOIds[i] = _createSingleSplitOutput(
+                inputUTXOId,
                 outputCommitments[i],
-                msg.sender,
-                inputUTXO.tokenAddress,
-                outputNullifier,
-                UTXOType.SPLIT,
-                outputAmounts[i]
+                outputAmounts[i],
+                nullifierHash,
+                tokenAddress,
+                i
             );
         }
         
         return outputUTXOIds;
+    }
+    
+    /**
+     * @dev Crear un solo output del split
+     */
+    function _createSingleSplitOutput(
+        bytes32 inputUTXOId,
+        CommitmentPoint calldata outputCommitment,
+        uint256 outputAmount,
+        bytes32 nullifierHash,
+        address tokenAddress,
+        uint256 index
+    ) internal returns (bytes32) {
+        // Generar nullifier único para este output
+        bytes32 outputNullifier = keccak256(abi.encodePacked(nullifierHash, index, block.timestamp));
+        
+        // Generar ID del UTXO
+        bytes32 outputUTXOId = _generatePrivateUTXOId(outputCommitment, outputNullifier);
+        
+        // Crear UTXO
+        utxos[outputUTXOId] = PrivateUTXO({
+            exists: true,
+            commitment: outputCommitment,
+            tokenAddress: tokenAddress,
+            owner: msg.sender,
+            timestamp: block.timestamp,
+            isSpent: false,
+            parentUTXO: inputUTXOId,
+            utxoType: UTXOType.SPLIT,
+            nullifierHash: outputNullifier
+        });
+        
+        // Actualizar mappings y tracking
+        bytes32 outputCommitmentHash = _hashCommitmentPoint(outputCommitment);
+        commitmentHashToUTXO[outputCommitmentHash] = outputUTXOId;
+        utxosByOwner[msg.sender].push(outputUTXOId);
+        
+        // Emitir evento
+        emit PrivateUTXOCreated(
+            outputCommitmentHash,
+            msg.sender,
+            tokenAddress,
+            outputNullifier,
+            UTXOType.SPLIT,
+            outputAmount
+        );
+        
+        return outputUTXOId;
     }
     
     // ========================
@@ -472,23 +680,41 @@ contract UTXOVault is ReentrancyGuard, Ownable {
     // ========================
     
     /**
-     * @dev Verificar commitment Pedersen usando criptografía real
+     * @dev Validar que un CommitmentPoint es válido usando la librería
+     */
+    function _isValidCommitmentPoint(CommitmentPoint memory commitment) internal pure returns (bool) {
+        return RealPedersenVerifier.isValidCommitmentPoint(
+            RealPedersenVerifier.commitmentPointToG1(commitment.x, commitment.y)
+        );
+    }
+    
+    /**
+     * @dev Calcular hash de un CommitmentPoint usando la librería
+     */
+    function _hashCommitmentPoint(CommitmentPoint memory commitment) internal pure returns (bytes32) {
+        return RealPedersenVerifier.hashCommitmentPoint(
+            RealPedersenVerifier.commitmentPointToG1(commitment.x, commitment.y)
+        );
+    }
+    
+    /**
+     * @dev Verificar commitment Pedersen usando la librería directamente
      */
     function _verifyPedersenCommitment(
-        bytes32 commitment,
+        CommitmentPoint memory commitment,
         uint256 amount,
         uint256 blindingFactor,
         GeneratorParams calldata generators
     ) internal view {
-        RealPedersenVerifier.G1Point memory commitmentPoint = _parseCommitmentPointWithParity(commitment, blindingFactor);
         RealPedersenVerifier.PedersenParams memory params = RealPedersenVerifier.PedersenParams({
             g: RealPedersenVerifier.G1Point(generators.gX, generators.gY),
             h: RealPedersenVerifier.G1Point(generators.hX, generators.hY)
         });
         
         require(
-            RealPedersenVerifier.verifyOpening(
-                commitmentPoint,
+            RealPedersenVerifier.verifyCommitmentCoordinates(
+                commitment.x,
+                commitment.y,
                 amount,
                 blindingFactor,
                 params
@@ -498,22 +724,18 @@ contract UTXOVault is ReentrancyGuard, Ownable {
     }
     
     /**
-     * @dev Verificar range proof usando criptografía real
+     * @dev Verificar range proof usando la librería directamente
      */
     function _verifyRangeProof(
-        bytes32 commitment,
+        CommitmentPoint memory commitment,
         bytes calldata rangeProof
     ) internal view {
         require(rangeProof.length > 0, "Invalid range proof");
-        require(commitment != bytes32(0), "Invalid commitment");
         
-        // Parse commitment as elliptic curve point
-        RealPedersenVerifier.G1Point memory commitmentPoint = _parseCommitmentPointDeterministic(commitment);
-        
-        // REAL range proof verification using Bulletproofs
         require(
-            RealPedersenVerifier.verifyRangeProof(
-                commitmentPoint,
+            RealPedersenVerifier.verifyRangeProofCoordinates(
+                commitment.x,
+                commitment.y,
                 rangeProof,
                 1,              // minValue: amount must be > 0
                 type(uint128).max // maxValue: prevent overflow
@@ -526,23 +748,22 @@ contract UTXOVault is ReentrancyGuard, Ownable {
      * @dev Verificar equality proof usando criptografía real
      */
     function _verifyEqualityProof(
-        bytes32 inputCommitment,
-        bytes32[] calldata outputCommitments,
+        CommitmentPoint memory inputCommitment,
+        CommitmentPoint[] memory outputCommitments,
         bytes calldata equalityProof
     ) internal view {
         require(equalityProof.length > 0, "Invalid equality proof");
-        require(inputCommitment != bytes32(0), "Invalid input commitment");
         require(outputCommitments.length > 0, "No output commitments");
         require(outputCommitments.length <= 10, "Too many outputs");
         
         // Parse commitments as elliptic curve points
-        RealPedersenVerifier.G1Point memory inputPoint = _parseCommitmentPointDeterministic(inputCommitment);
+        RealPedersenVerifier.G1Point memory inputPoint = RealPedersenVerifier.commitmentPointToG1(inputCommitment.x, inputCommitment.y);
         
         // Compute sum of output commitments using REAL elliptic curve addition
-        RealPedersenVerifier.G1Point memory outputSum = _parseCommitmentPointDeterministic(outputCommitments[0]);
+        RealPedersenVerifier.G1Point memory outputSum = RealPedersenVerifier.commitmentPointToG1(outputCommitments[0].x, outputCommitments[0].y);
         
         for (uint256 i = 1; i < outputCommitments.length; i++) {
-            RealPedersenVerifier.G1Point memory outputPoint = _parseCommitmentPointDeterministic(outputCommitments[i]);
+            RealPedersenVerifier.G1Point memory outputPoint = RealPedersenVerifier.commitmentPointToG1(outputCommitments[i].x, outputCommitments[i].y);
             outputSum = RealPedersenVerifier.pointAdd(outputSum, outputPoint);
         }
         
@@ -561,99 +782,6 @@ contract UTXOVault is ReentrancyGuard, Ownable {
     }
     
     /**
-     * @dev Parse commitment bytes32 as elliptic curve point with Y parity from blinding factor
-     * Uses the LSB of blinding factor to determine which Y coordinate to use
-     */
-    function _parseCommitmentPointWithParity(bytes32 commitment, uint256 blindingFactor) internal pure returns (RealPedersenVerifier.G1Point memory) {
-        uint256 x = uint256(commitment);
-        
-        // BN254 field modulus
-        uint256 p = 21888242871839275222246405745257275088696311157297823662689037894645226208583;
-        
-        // Ensure x is valid field element  
-        x = x % p;
-        
-        // Compute y^2 = x^3 + 3 (mod p) for BN254 curve
-        uint256 x3 = mulmod(mulmod(x, x, p), x, p);
-        uint256 y2 = addmod(x3, 3, p);
-        
-        // Compute square root
-        uint256 y = _modularSqrt(y2, p);
-        
-        // Use LSB of blinding factor to determine Y parity
-        // If LSB is 1, use the alternative Y value; if 0, use the principal Y value
-        bool useAlternativeY = (blindingFactor & 1) == 1;
-        
-        if (useAlternativeY) {
-            y = p - y;
-        }
-        
-        // Verify the point is on the curve
-        require(mulmod(y, y, p) == y2, "Invalid commitment point: not on BN254 curve");
-        
-        return RealPedersenVerifier.G1Point(x, y);
-    }
-    
-    /**
-     * @dev Parse commitment using deterministic Y selection (for range proofs)
-     */
-    function _parseCommitmentPointDeterministic(bytes32 commitment) internal pure returns (RealPedersenVerifier.G1Point memory) {
-        uint256 x = uint256(commitment);
-        
-        // BN254 field modulus
-        uint256 p = 21888242871839275222246405745257275088696311157297823662689037894645226208583;
-        
-        // Ensure x is valid field element  
-        x = x % p;
-        
-        // Compute y^2 = x^3 + 3 (mod p) for BN254 curve
-        uint256 x3 = mulmod(mulmod(x, x, p), x, p);
-        uint256 y2 = addmod(x3, 3, p);
-        
-        // Compute square root and choose smaller Y (lexicographic ordering)
-        uint256 y = _modularSqrt(y2, p);
-        uint256 y_alt = p - y;
-        
-        // Use smaller Y for deterministic behavior
-        if (y_alt < y) {
-            y = y_alt;
-        }
-        
-        // Verify the point is on the curve
-        require(mulmod(y, y, p) == y2, "Invalid commitment point: not on BN254 curve");
-        
-        return RealPedersenVerifier.G1Point(x, y);
-    }
-    
-    /**
-     * @dev Compute modular square root for BN254 field using Tonelli-Shanks algorithm
-     */
-    function _modularSqrt(uint256 a, uint256 p) internal pure returns (uint256) {
-        // For BN254 field where p ≡ 3 (mod 4), we can use the simple case
-        // y = a^((p+1)/4) mod p
-        uint256 exp = (p + 1) / 4;
-        return _modPow(a, exp, p);
-    }
-    
-    /**
-     * @dev Modular exponentiation: base^exp mod modulus
-     */
-    function _modPow(uint256 base, uint256 exp, uint256 modulus) internal pure returns (uint256) {
-        uint256 result = 1;
-        base = base % modulus;
-        
-        while (exp > 0) {
-            if (exp % 2 == 1) {
-                result = mulmod(result, base, modulus);
-            }
-            exp = exp >> 1;
-            base = mulmod(base, base, modulus);
-        }
-        
-        return result;
-    }
-    
-    /**
      * @dev Verificar estructura del equality proof
      */
     function _verifyEqualityProofStructure(bytes calldata equalityProof) internal pure returns (bool) {
@@ -662,23 +790,6 @@ contract UTXOVault is ReentrancyGuard, Ownable {
         
         bytes32 proofHash = keccak256(equalityProof);
         return proofHash != bytes32(0) && equalityProof.length % 32 == 0;
-    }
-    
-    /**
-     * @dev Simple integer square root
-     */
-    function _sqrt(uint256 x) internal pure returns (uint256) {
-        if (x == 0) return 0;
-        
-        uint256 z = (x + 1) / 2;
-        uint256 y = x;
-        
-        while (z < y) {
-            y = z;
-            z = (x / z + z) / 2;
-        }
-        
-        return y;
     }
     
     // ========================
@@ -781,12 +892,14 @@ contract UTXOVault is ReentrancyGuard, Ownable {
             nullifierHash: depositParams.nullifierHash
         });
         
-        commitmentToUTXO[depositParams.commitment] = utxoId;
+        // Map commitment hash to UTXO ID
+        bytes32 commitmentHash = _hashCommitmentPoint(depositParams.commitment);
+        commitmentHashToUTXO[commitmentHash] = utxoId;
         nullifiers[depositParams.nullifierHash] = true;
         utxosByOwner[msg.sender].push(utxoId);
         
         emit PrivateUTXOCreated(
-            depositParams.commitment,
+            commitmentHash,
             msg.sender,
             depositParams.tokenAddress,
             depositParams.nullifierHash,
@@ -796,18 +909,38 @@ contract UTXOVault is ReentrancyGuard, Ownable {
     }
     
     function _generatePrivateUTXOId(
-        bytes32 commitment,
+        CommitmentPoint memory commitment,
         bytes32 nullifier
     ) internal pure returns (bytes32) {
-        return keccak256(abi.encodePacked(commitment, nullifier));
+        bytes32 commitmentHash = _hashCommitmentPoint(commitment);
+        return keccak256(abi.encodePacked(commitmentHash, nullifier));
     }
     
-    function _findUTXOByCommitment(bytes32 commitment) internal view returns (bytes32) {
-        bytes32 utxoId = commitmentToUTXO[commitment];
+    function _findUTXOByCommitment(CommitmentPoint memory commitment) internal view returns (bytes32) {
+        bytes32 commitmentHash = _hashCommitmentPoint(commitment);
+        bytes32 utxoId = commitmentHashToUTXO[commitmentHash];
         
         require(utxoId != bytes32(0), "UTXO not found");
         require(utxos[utxoId].exists, "UTXO does not exist");
-        require(utxos[utxoId].commitment == commitment, "Commitment mismatch");
+        
+        // Verify commitment matches
+        require(
+            utxos[utxoId].commitment.x == commitment.x && 
+            utxos[utxoId].commitment.y == commitment.y, 
+            "Commitment mismatch"
+        );
+        
+        return utxoId;
+    }
+    
+    /**
+     * @dev Buscar UTXO por hash de commitment (para compatibilidad con bytes32)
+     */
+    function _findUTXOByCommitmentHash(bytes32 commitmentHash) internal view returns (bytes32) {
+        bytes32 utxoId = commitmentHashToUTXO[commitmentHash];
+        
+        require(utxoId != bytes32(0), "UTXO not found");
+        require(utxos[utxoId].exists, "UTXO does not exist");
         
         return utxoId;
     }
@@ -844,8 +977,12 @@ contract UTXOVault is ReentrancyGuard, Ownable {
         return registeredTokens[tokenAddress];
     }
     
-    function getUTXOCommitment(bytes32 utxoId) external view returns (bytes32) {
+    function getUTXOCommitment(bytes32 utxoId) external view returns (CommitmentPoint memory) {
         return utxos[utxoId].commitment;
+    }
+    
+    function getUTXOCommitmentHash(bytes32 utxoId) external view returns (bytes32) {
+        return _hashCommitmentPoint(utxos[utxoId].commitment);
     }
     
     function isNullifierUsed(bytes32 nullifier) external view returns (bool) {
@@ -862,7 +999,7 @@ contract UTXOVault is ReentrancyGuard, Ownable {
     
     function getUTXOInfo(bytes32 utxoId) external view returns (
         bool exists,
-        bytes32 commitment,
+        CommitmentPoint memory commitment,
         address tokenAddress,
         address owner,
         uint256 timestamp,
