@@ -55,7 +55,7 @@ Un sistema avanzado de gestión de tokens ERC20 con **privacidad criptográfica 
 - **Generator Trust**: Generadores G, H con NUMS (Nothing Up My Sleeve)
 - **Homomorphic Addition**: `C₁ + C₂ = (v₁ + v₂)G + (r₁ + r₂)H`
 
-## 🚀 Quick Start
+
 
 ### **1. Instalación**
 ```bash
@@ -63,10 +63,15 @@ npm install
 npm run dev
 ```
 
+
 ### **2. Configuración Multi-Red**
 - **Polygon Amoy**: `0xE4e35290Dda72e6fA426E23e8E805219246f415e`
 - **Alastria**: `0x733bEe37FE6c2a6F4f445852Ea44E088EBe143D6` (gas-free)
 - Auto-detección de red y configuración de gas inteligente
+
+### .env
+VITE_ADDRESS_CONTRACT_AMOY=
+VITE_ADDRESS_CONTRACT_ALASTRIA=
 
 ### **3. Operaciones Criptográficas**
 1. **Connect MetaMask** → Detecta automáticamente la red
