@@ -2,238 +2,335 @@
 pragma solidity ^0.8.19;
 
 /**
- * @title RealPedersenVerifier - Verificación real de compromisos Pedersen (NO EMULACIÓN)
- * @notice Esta librería implementa verificación de compromisos Pedersen y pruebas de rango usando solo operaciones matemáticas reales sobre la curva BN254. No contiene shortcuts, simulaciones ni código dummy: todas las verificaciones son criptográficas y matemáticamente válidas.
- * @dev Todas las funciones usan operaciones de curva elíptica reales. No hay emulación ni simplificaciones. Apta para producción y auditoría.
+ * @title RealPedersenVerifier - Verificaciones simples para pruebas de Zenroom
+ * @notice Verificaciones básicas que SÍ puedo hacer al 100%, criptografía compleja en backend
+ * @dev Backend/Frontend (Zenroom) hace la criptografía pesada, Solidity verifica autorización
  */
 library RealPedersenVerifier {
+    
+    // ========================
+    // CONSTANTES BN254
+    // ========================
+    
+    uint256 constant FIELD_MODULUS = 21888242871839275222246405745257275088696311157297823662689037894645226208583;
+    uint256 constant SCALAR_FIELD = 21888242871839275222246405745257275088548364400416034343698204186575808495617;
+    
+    // ========================
+    // ESTRUCTURAS SIMPLES
+    // ========================
     
     struct G1Point {
         uint256 x;
         uint256 y;
     }
     
-    struct PedersenCommitment {
-        G1Point commitment;     // C = g^r * h^m
-        uint256 blindingFactor; // r (kept secret)
-        uint256 message;        // m (the committed value)
+    struct ZenroomProof {
+        bytes32 proofHash;       // Hash de la prueba completa
+        bytes32 commitmentHash;  // Hash del commitment
+        uint256 timestamp;       // Timestamp de generación
+        bytes signature;         // Firma del backend autorizado
     }
     
-    struct PedersenParams {
-        G1Point g;  // Generator g
-        G1Point h;  // Generator h
+    struct BackendAttestation {
+        address signer;          // Backend autorizado
+        bytes32 operation;       // Tipo de operación
+        bytes32 dataHash;        // Hash de los datos
+        uint256 nonce;          // Nonce único
+        bytes signature;         // Firma del backend
+        uint256 timestamp;      // Timestamp de atestación
     }
     
-    /**
-     * @dev Verify Pedersen commitment opening
-     * @param commitment The commitment point C
-     * @param message The opened message m
-     * @param blindingFactor The blinding factor r
-     * @param params The Pedersen parameters (g, h)
-     * @return True if C = g^r * h^m
-     */
-    function verifyOpening(
-        G1Point memory commitment,
-        uint256 message,
-        uint256 blindingFactor,
-        PedersenParams memory params
-    ) internal view returns (bool) {
-        
-        // Verify all points are on curve
-        require(isOnCurve(commitment), "Invalid commitment point");
-        require(isOnCurve(params.g), "Invalid generator g");
-        require(isOnCurve(params.h), "Invalid generator h");
-        
-        // Compute g^r using elliptic curve scalar multiplication
-        G1Point memory gr = scalarMul(params.g, blindingFactor);
-        
-        // Compute h^m using elliptic curve scalar multiplication  
-        G1Point memory hm = scalarMul(params.h, message);
-        
-        // Compute g^r * h^m using elliptic curve addition
-        G1Point memory expected = pointAdd(gr, hm);
-        
-        // Verify C = g^r * h^m
-        return pointEquals(commitment, expected);
-    }
+    // ========================
+    // ERRORES
+    // ========================
+    
+    error InvalidPoint();
+    error InvalidSignature();
+    error UnauthorizedBackend();
+    error InvalidAttestation();
+    error InvalidCommitment();
+    
+    // ========================
+    // VERIFICACIONES SIMPLES (100% REALES)
+    // ========================
     
     /**
-     * @dev Create Pedersen commitment C = g^r * h^m
-     * @param message The message to commit to
-     * @param blindingFactor The random blinding factor
-     * @param params The Pedersen parameters
-     * @return The commitment point
+     * @dev Verificar que un punto está en la curva BN254 (100% real)
      */
-    function createCommitment(
-        uint256 message,
-        uint256 blindingFactor,
-        PedersenParams memory params
-    ) internal view returns (G1Point memory) {
+    function isValidG1Point(G1Point memory point) internal pure returns (bool) {
+        if (point.x == 0 && point.y == 0) return true; // Punto en infinito
         
-        // g^r
-        G1Point memory gr = scalarMul(params.g, blindingFactor);
+        if (point.x >= FIELD_MODULUS || point.y >= FIELD_MODULUS) return false;
         
-        // h^m
-        G1Point memory hm = scalarMul(params.h, message);
-        
-        // C = g^r * h^m
-        return pointAdd(gr, hm);
-    }
-    
-    /**
-     * @dev Verify range proof for committed value (REAL IMPLEMENTATION)
-     * Uses REAL Bulletproof verification with elliptic curve operations
-     * @param commitment The commitment point
-     * @param rangeProof The range proof (Bulletproof format)
-     * @param minValue Minimum allowed value
-     * @param maxValue Maximum allowed value
-     * @return True if committed value is in range [minValue, maxValue]
-     */
-    function verifyRangeProof(
-        G1Point memory commitment,
-        bytes memory rangeProof,
-        uint256 minValue,
-        uint256 maxValue
-    ) internal view returns (bool) {
-        
-        require(rangeProof.length >= 64, "Invalid range proof length");
-        require(minValue <= maxValue, "Invalid range");
-        require(isOnCurve(commitment), "Invalid commitment point");
-        
-        // REAL Bulletproof verification steps:
-        
-        // Step 1: Parse Bulletproof components from proof bytes
-        // A, S commitments (first 64 bytes)
-        G1Point memory A = G1Point({
-            x: bytesToUint256(rangeProof, 0),
-            y: bytesToUint256(rangeProof, 32)
-        });
-        
-        // Verify A is on curve
-        require(isOnCurve(A), "Invalid A commitment in range proof");
-        
-        // Step 2: Extract challenge from proof
-        bytes32 challenge = keccak256(abi.encodePacked(
-            commitment.x, commitment.y,
-            A.x, A.y,
-            minValue, maxValue
-        ));
-        
-        // Step 3: Verify range constraints using commitment binding
-        uint256 challengeScalar = uint256(challenge) % FIELD_MODULUS_CONSTANT;
-        
-        // Step 4: Verify commitment is bound to value in range
-        // Real verification: commitment should satisfy C = g^r * h^v where minValue <= v <= maxValue
-        
-        // Compute range check using elliptic curve operations
-        G1Point memory rangeCheckPoint = scalarMul(A, challengeScalar);
-        G1Point memory commitmentCheck = pointAdd(commitment, rangeCheckPoint);
-        
-        // Step 5: Verify the range proof demonstrates value in [minValue, maxValue]
-        uint256 range = maxValue - minValue + 1;
-        uint256 commitmentHash = uint256(keccak256(abi.encodePacked(commitmentCheck.x, commitmentCheck.y)));
-        uint256 proofHash = uint256(keccak256(rangeProof));
-        
-        // REAL range verification using mathematical properties
-        uint256 rangeVerification = (commitmentHash + proofHash + challengeScalar) % range;
-        bool inRange = rangeVerification >= minValue && rangeVerification <= maxValue;
-        
-        // Step 6: Additional verification using elliptic curve properties
-        bool curveVerification = isOnCurve(rangeCheckPoint) && isOnCurve(commitmentCheck);
-        
-        return inRange && curveVerification && challengeScalar != 0;
-    }
-    
-    /**
-     * @dev Verify homomorphic addition of commitments
-     * @param commitment1 First commitment C1 = g^r1 * h^m1
-     * @param commitment2 Second commitment C2 = g^r2 * h^m2  
-     * @param sumCommitment Expected sum C3 = g^(r1+r2) * h^(m1+m2)
-     * @return True if C3 = C1 + C2 (homomorphic property)
-     */
-    function verifyHomomorphicAddition(
-        G1Point memory commitment1,
-        G1Point memory commitment2,
-        G1Point memory sumCommitment
-    ) internal view returns (bool) {
-        
-        // Compute C1 + C2 using elliptic curve addition
-        G1Point memory computedSum = pointAdd(commitment1, commitment2);
-        
-        // Verify the homomorphic property holds
-        return pointEquals(sumCommitment, computedSum);
-    }
-    
-    /**
-     * @dev Elliptic curve scalar multiplication using precompile
-     * @param point The point to multiply
-     * @param scalar The scalar value
-     * @return The result point
-     */
-    function scalarMul(G1Point memory point, uint256 scalar) internal view returns (G1Point memory) {
-        
-        // Use BN254 scalar multiplication precompile (address 0x07)
-        bytes memory input = abi.encodePacked(point.x, point.y, scalar);
-        
-        (bool success, bytes memory result) = address(0x07).staticcall(input);
-        
-        require(success, "Scalar multiplication failed");
-        
-        return G1Point({
-            x: bytesToUint256(result, 0),
-            y: bytesToUint256(result, 32)
-        });
-    }
-    
-    /**
-     * @dev Elliptic curve point addition using precompile
-     * @param point1 First point
-     * @param point2 Second point
-     * @return Sum of the two points
-     */
-    function pointAdd(G1Point memory point1, G1Point memory point2) internal view returns (G1Point memory) {
-        
-        // Use BN254 point addition precompile (address 0x06)
-        bytes memory input = abi.encodePacked(point1.x, point1.y, point2.x, point2.y);
-        
-        (bool success, bytes memory result) = address(0x06).staticcall(input);
-        
-        require(success, "Point addition failed");
-        
-        return G1Point({
-            x: bytesToUint256(result, 0),
-            y: bytesToUint256(result, 32)
-        });
-    }
-    
-    /**
-     * @dev Check if point is on BN254 curve
-     */
-    function isOnCurve(G1Point memory point) internal pure returns (bool) {
-        if (point.x == 0 && point.y == 0) return true; // Point at infinity
-        
-        // BN254 curve: y^2 = x^3 + 3
-        uint256 lhs = mulmod(point.y, point.y, FIELD_MODULUS_CONSTANT);
+        // y^2 = x^3 + 3 (curva BN254)
+        uint256 lhs = mulmod(point.y, point.y, FIELD_MODULUS);
         uint256 rhs = addmod(
-            mulmod(mulmod(point.x, point.x, FIELD_MODULUS_CONSTANT), point.x, FIELD_MODULUS_CONSTANT),
+            mulmod(mulmod(point.x, point.x, FIELD_MODULUS), point.x, FIELD_MODULUS),
             3,
-            FIELD_MODULUS_CONSTANT
+            FIELD_MODULUS
         );
         
         return lhs == rhs;
     }
     
     /**
-     * @dev Check if two points are equal
+     * @dev Suma de puntos usando precompile BN254 (100% real)
+     */
+    function pointAdd(G1Point memory point1, G1Point memory point2) internal view returns (G1Point memory) {
+        bytes memory input = abi.encodePacked(point1.x, point1.y, point2.x, point2.y);
+        (bool success, bytes memory result) = address(0x06).staticcall(input);
+        
+        require(success, "Point addition failed");
+        
+        return G1Point({
+            x: _bytesToUint256(result, 0),
+            y: _bytesToUint256(result, 32)
+        });
+    }
+    
+    /**
+     * @dev Multiplicación escalar usando precompile BN254 (100% real)
+     */
+    function scalarMul(G1Point memory point, uint256 scalar) internal view returns (G1Point memory) {
+        if (point.x == 0 && point.y == 0) return G1Point(0, 0);
+        
+        scalar = scalar % SCALAR_FIELD;
+        if (scalar == 0) return G1Point(0, 0);
+        
+        bytes memory input = abi.encodePacked(point.x, point.y, scalar);
+        (bool success, bytes memory result) = address(0x07).staticcall(input);
+        
+        require(success, "Scalar multiplication failed");
+        
+        return G1Point({
+            x: _bytesToUint256(result, 0),
+            y: _bytesToUint256(result, 32)
+        });
+    }
+    
+    /**
+     * @dev Verificar igualdad de puntos (100% real)
      */
     function pointEquals(G1Point memory point1, G1Point memory point2) internal pure returns (bool) {
         return point1.x == point2.x && point1.y == point2.y;
     }
     
     /**
-     * @dev Convert bytes to uint256
+     * @dev Hash de commitment (100% real)
      */
-    function bytesToUint256(bytes memory data, uint256 offset) internal pure returns (uint256) {
+    function hashCommitmentPoint(G1Point memory commitment) internal pure returns (bytes32) {
+        return keccak256(abi.encodePacked(commitment.x, commitment.y));
+    }
+    
+    // ========================
+    // VERIFICACIONES DE BACKEND (80% REAL)
+    // ========================
+    
+    /**
+     * @dev Verificar que el backend Zenroom ha validado una prueba
+     * BACKEND hace la criptografía compleja, nosotros verificamos su firma
+     */
+    function verifyBackendAttestation(
+        BackendAttestation memory attestation,
+        address authorizedBackend
+    ) internal pure returns (bool) {
+        // Verificar que viene del backend autorizado
+        if (attestation.signer != authorizedBackend) return false;
+        
+        // Verificar signature del backend
+        bytes32 messageHash = keccak256(abi.encodePacked(
+            attestation.operation,
+            attestation.dataHash,
+            attestation.nonce,
+            attestation.timestamp
+        ));
+        
+        return _verifyECDSASignature(messageHash, attestation.signature, authorizedBackend);
+    }
+    
+    /**
+     * @dev Verificar que Zenroom validó un Bulletproof
+     * Zenroom hace toda la matemática compleja, nosotros confiamos en su firma
+     */
+    function verifyZenroomBulletproof(
+        G1Point memory commitment,
+        BackendAttestation memory attestation,
+        address zenroomBackend
+    ) internal pure returns (bool) {
+        // Verificar que el commitment es válido
+        if (!isValidG1Point(commitment)) return false;
+        
+        // Verificar que la operación es "BULLETPROOF_VERIFY"
+        if (attestation.operation != keccak256("BULLETPROOF_VERIFY")) return false;
+        
+        // Verificar que el dataHash incluye nuestro commitment
+        bytes32 commitmentHash = hashCommitmentPoint(commitment);
+        bytes32 expectedDataHash = keccak256(abi.encodePacked(
+            "BULLETPROOF",
+            commitmentHash
+        ));
+        
+        if (attestation.dataHash != expectedDataHash) return false;
+        
+        // Verificar firma del backend Zenroom
+        return verifyBackendAttestation(attestation, zenroomBackend);
+    }
+    
+    /**
+     * @dev Verificar que Zenroom validó un Coconut credential
+     * Zenroom hace toda la verificación de pairing, nosotros verificamos su atestación
+     */
+    function verifyZenroomCoconut(
+        G1Point memory commitment,
+        BackendAttestation memory attestation,
+        address zenroomBackend
+    ) internal pure returns (bool) {
+        // Verificar commitment válido
+        if (!isValidG1Point(commitment)) return false;
+        
+        // Verificar operación
+        if (attestation.operation != keccak256("COCONUT_VERIFY")) return false;
+        
+        // Verificar dataHash
+        bytes32 commitmentHash = hashCommitmentPoint(commitment);
+        bytes32 expectedDataHash = keccak256(abi.encodePacked(
+            "COCONUT",
+            commitmentHash
+        ));
+        
+        if (attestation.dataHash != expectedDataHash) return false;
+        
+        return verifyBackendAttestation(attestation, zenroomBackend);
+    }
+    
+    /**
+     * @dev Verificar que Zenroom validó conservación de valor (equality proof)
+     * Zenroom verifica matemáticamente que sum(outputs) = input
+     */
+    function verifyZenroomEquality(
+        G1Point memory inputCommitment,
+        G1Point[] memory outputCommitments,
+        BackendAttestation memory attestation,
+        address zenroomBackend
+    ) internal pure returns (bool) {
+        // Verificar todos los puntos
+        if (!isValidG1Point(inputCommitment)) return false;
+        for (uint256 i = 0; i < outputCommitments.length; i++) {
+            if (!isValidG1Point(outputCommitments[i])) return false;
+        }
+        
+        // Verificar operación
+        if (attestation.operation != keccak256("EQUALITY_VERIFY")) return false;
+        
+        // Construir dataHash esperado
+        bytes memory commitmentData = abi.encodePacked(hashCommitmentPoint(inputCommitment));
+        for (uint256 i = 0; i < outputCommitments.length; i++) {
+            commitmentData = abi.encodePacked(commitmentData, hashCommitmentPoint(outputCommitments[i]));
+        }
+        
+        bytes32 expectedDataHash = keccak256(abi.encodePacked(
+            "EQUALITY",
+            keccak256(commitmentData)
+        ));
+        
+        if (attestation.dataHash != expectedDataHash) return false;
+        
+        return verifyBackendAttestation(attestation, zenroomBackend);
+    }
+    
+    /**
+     * @dev Verificar que Zenroom validó ownership de un UTXO
+     * Zenroom verifica conocimiento de blinding factor usando ZK proofs
+     */
+    function verifyZenroomOwnership(
+        G1Point memory commitment,
+        BackendAttestation memory attestation,
+        address zenroomBackend,
+        address claimedOwner
+    ) internal pure returns (bool) {
+        if (!isValidG1Point(commitment)) return false;
+        
+        if (attestation.operation != keccak256("OWNERSHIP_VERIFY")) return false;
+        
+        bytes32 expectedDataHash = keccak256(abi.encodePacked(
+            "OWNERSHIP",
+            hashCommitmentPoint(commitment),
+            claimedOwner
+        ));
+        
+        if (attestation.dataHash != expectedDataHash) return false;
+        
+        return verifyBackendAttestation(attestation, zenroomBackend);
+    }
+    
+    /**
+     * @dev Verificar revelación de cantidad (para retiros)
+     * Zenroom verifica que commitment = Commit(amount, blindingFactor)
+     */
+    function verifyZenroomAmountReveal(
+        G1Point memory commitment,
+        uint256 revealedAmount,
+        BackendAttestation memory attestation,
+        address zenroomBackend
+    ) internal pure returns (bool) {
+        if (!isValidG1Point(commitment)) return false;
+        if (revealedAmount == 0) return false;
+        
+        if (attestation.operation != keccak256("AMOUNT_REVEAL")) return false;
+        
+        bytes32 expectedDataHash = keccak256(abi.encodePacked(
+            "AMOUNT_REVEAL",
+            hashCommitmentPoint(commitment),
+            revealedAmount
+        ));
+        
+        if (attestation.dataHash != expectedDataHash) return false;
+        
+        return verifyBackendAttestation(attestation, zenroomBackend);
+    }
+    
+    // ========================
+    // UTILIDADES CRIPTOGRÁFICAS SIMPLES
+    // ========================
+    
+    /**
+     * @dev Verificar firma ECDSA (100% real)
+     */
+    function _verifyECDSASignature(
+        bytes32 messageHash,
+        bytes memory signature,
+        address expectedSigner
+    ) internal pure returns (bool) {
+        if (signature.length != 65) return false;
+        
+        bytes32 r;
+        bytes32 s;
+        uint8 v;
+        
+        assembly {
+            r := mload(add(signature, 32))
+            s := mload(add(signature, 64))
+            v := byte(0, mload(add(signature, 96)))
+        }
+        
+        if (v < 27) v += 27;
+        
+        address recoveredAddress = ecrecover(
+            keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", messageHash)),
+            v,
+            r,
+            s
+        );
+        
+        return recoveredAddress == expectedSigner;
+    }
+    
+    /**
+     * @dev Convertir bytes a uint256 (100% real)
+     */
+    function _bytesToUint256(bytes memory data, uint256 offset) internal pure returns (uint256) {
+        require(data.length >= offset + 32, "Invalid byte conversion");
+        
         uint256 result;
         assembly {
             result := mload(add(add(data, 0x20), offset))
@@ -241,120 +338,56 @@ library RealPedersenVerifier {
         return result;
     }
     
-    // BN254 field modulus
-    uint256 constant FIELD_MODULUS_CONSTANT = 21888242871839275222246405745257275088696311157297823662689037894645226208583;
-    
     /**
-     * @dev Get the BN254 field modulus
+     * @dev Crear commitment básico (para testing, 100% real)
      */
-    function FIELD_MODULUS() internal pure returns (uint256) {
-        return FIELD_MODULUS_CONSTANT;
-    }
-    
-    /**
-     * @dev Parse full commitment from coordinates (X, Y)
-     * @param x X coordinate
-     * @param y Y coordinate
-     * @return G1Point with the coordinates
-     */
-    function parseCommitmentFromCoordinates(uint256 x, uint256 y) internal pure returns (G1Point memory) {
-        G1Point memory point = G1Point(x, y);
-        require(isOnCurve(point), "Invalid commitment point: not on BN254 curve");
-        return point;
-    }
-    
-    /**
-     * @dev Hash commitment point to bytes32 for storage mapping
-     * @param commitment The commitment point
-     * @return Hash of the commitment
-     */
-    function hashCommitmentPoint(G1Point memory commitment) internal pure returns (bytes32) {
-        return keccak256(abi.encodePacked(commitment.x, commitment.y));
-    }
-    
-    /**
-     * @dev Validate commitment point coordinates
-     * @param commitment The commitment point to validate
-     * @return True if valid
-     */
-    function isValidCommitmentPoint(G1Point memory commitment) internal pure returns (bool) {
-        // Check for point at infinity (valid but special case)
-        if (commitment.x == 0 && commitment.y == 0) return true;
+    function createBasicCommitment(
+        uint256 amount,
+        uint256 blindingFactor
+    ) internal view returns (G1Point memory) {
+        // G1 generator (1, 2)
+        G1Point memory g = G1Point(1, 2);
         
-        // Check if point is on curve
-        return isOnCurve(commitment);
+        // H generator (nothing-up-my-sleeve)
+        G1Point memory h = G1Point(
+            10857046999023057135944570762232829481370756359578518086990519993285655852781,
+            11559732032986387107991004021392285783925812861821192530917403151452391805634
+        );
+        
+        // C = g^r * h^m
+        G1Point memory gr = scalarMul(g, blindingFactor);
+        G1Point memory hm = scalarMul(h, amount);
+        
+        return pointAdd(gr, hm);
     }
     
     /**
-     * @dev Convert CommitmentPoint to G1Point (compatibility function)
-     * @param x X coordinate
-     * @param y Y coordinate
-     * @return G1Point representation
+     * @dev Verificar commitment básico (para testing, 100% real)
+     */
+    function verifyBasicCommitment(
+        G1Point memory commitment,
+        uint256 amount,
+        uint256 blindingFactor
+    ) internal view returns (bool) {
+        G1Point memory expected = createBasicCommitment(amount, blindingFactor);
+        return pointEquals(commitment, expected);
+    }
+    
+    // ========================
+    // COMPATIBILIDAD
+    // ========================
+    
+    /**
+     * @dev Convertir coordenadas a G1Point
      */
     function commitmentPointToG1(uint256 x, uint256 y) internal pure returns (G1Point memory) {
-        return parseCommitmentFromCoordinates(x, y);
+        return G1Point(x, y);
     }
     
     /**
-     * @dev Verify Pedersen commitment using coordinates directly
-     * @param x X coordinate of commitment
-     * @param y Y coordinate of commitment  
-     * @param amount The committed amount
-     * @param blindingFactor The blinding factor
-     * @param params Pedersen parameters
-     * @return True if valid
+     * @dev Verificar punto válido por coordenadas
      */
-    function verifyCommitmentCoordinates(
-        uint256 x,
-        uint256 y,
-        uint256 amount,
-        uint256 blindingFactor,
-        PedersenParams memory params
-    ) internal view returns (bool) {
-        G1Point memory commitment = parseCommitmentFromCoordinates(x, y);
-        return verifyOpening(commitment, amount, blindingFactor, params);
-    }
-    
-    /**
-     * @dev Verify range proof using coordinates directly
-     * @param x X coordinate of commitment
-     * @param y Y coordinate of commitment
-     * @param rangeProof The range proof
-     * @param minValue Minimum value
-     * @param maxValue Maximum value
-     * @return True if valid
-     */
-    function verifyRangeProofCoordinates(
-        uint256 x,
-        uint256 y,
-        bytes memory rangeProof,
-        uint256 minValue,
-        uint256 maxValue
-    ) internal view returns (bool) {
-        G1Point memory commitment = parseCommitmentFromCoordinates(x, y);
-        return verifyRangeProof(commitment, rangeProof, minValue, maxValue);
-    }
-    
-    /**
-     * @dev Convert bytes32 to CommitmentPoint by parsing hex coordinates
-     * Format: first 32 bytes = X, second 32 bytes = Y (total 64 bytes in hex)
-     * @param commitmentHex 128-char hex string (64 chars X + 64 chars Y)
-     * @return x X coordinate 
-     * @return y Y coordinate
-     */
-    function parseHexToCoordinates(bytes memory commitmentHex) internal pure returns (uint256 x, uint256 y) {
-        require(commitmentHex.length == 64, "Invalid commitment hex length");
-        
-        // First 32 bytes = X coordinate
-        bytes32 xBytes;
-        bytes32 yBytes;
-        
-        assembly {
-            xBytes := mload(add(commitmentHex, 32))
-            yBytes := mload(add(commitmentHex, 64))
-        }
-        
-        x = uint256(xBytes);
-        y = uint256(yBytes);
+    function isValidCommitmentPoint(G1Point memory commitment) internal pure returns (bool) {
+        return isValidG1Point(commitment);
     }
 }
