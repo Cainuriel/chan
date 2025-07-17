@@ -29,6 +29,7 @@ declare module '$env/static/private' {
 	export const VITE_ADDRESS_CONTRACT_AMOY: string;
 	export const VITE_ADDRESS_CONTRACT_ALASTRIA: string;
 	export const PRIVATE_KEY_ADMIN: string;
+	export const VITE_PRIVATE_KEY_ADMIN: string;
 	export const ALLUSERSPROFILE: string;
 	export const ANDROID_SDK_ROOT: string;
 	export const APPDATA: string;
@@ -49,7 +50,6 @@ declare module '$env/static/private' {
 	export const FPS_BROWSER_APP_PROFILE_STRING: string;
 	export const FPS_BROWSER_USER_PROFILE_STRING: string;
 	export const GIT_ASKPASS: string;
-	export const GIT_PAGER: string;
 	export const HOME: string;
 	export const HOMEDRIVE: string;
 	export const HOMEPATH: string;
@@ -149,6 +149,7 @@ declare module '$env/dynamic/private' {
 		VITE_ADDRESS_CONTRACT_AMOY: string;
 		VITE_ADDRESS_CONTRACT_ALASTRIA: string;
 		PRIVATE_KEY_ADMIN: string;
+		VITE_PRIVATE_KEY_ADMIN: string;
 		ALLUSERSPROFILE: string;
 		ANDROID_SDK_ROOT: string;
 		APPDATA: string;
@@ -169,7 +170,6 @@ declare module '$env/dynamic/private' {
 		FPS_BROWSER_APP_PROFILE_STRING: string;
 		FPS_BROWSER_USER_PROFILE_STRING: string;
 		GIT_ASKPASS: string;
-		GIT_PAGER: string;
 		HOME: string;
 		HOMEDRIVE: string;
 		HOMEPATH: string;

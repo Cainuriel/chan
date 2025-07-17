@@ -146,14 +146,28 @@
     privateUTXOManager.on('wallet:connected', (account: EOAData) => {
       console.log('🔌 Wallet connected:', account);
       currentAccount = account;
-      isInitialized = true;
-      addNotification('success', `Wallet connected: ${account.address.slice(0, 6)}...${account.address.slice(-4)}`);
-      refreshData();
       
-      // If no private UTXOs loaded, try loading all user UTXOs
-      if (privateUTXOs.length === 0) {
-        console.log('🔄 No UTXOs from sync, trying to load stored UTXOs...');
-        loadAllUserUTXOs();
+      // NO setear isInitialized aquí - solo cuando se complete el flujo completo
+      // isInitialized solo debe ser true después de initializeLibrary()
+      
+      addNotification('success', `Wallet connected: ${account.address.slice(0, 6)}...${account.address.slice(-4)}`);
+      
+      // Si estamos en el flujo controlado, avanzar al siguiente paso
+      if (currentStep === 1) {
+        isWalletConnected = true;
+        currentStep = 2;
+        console.log('✅ Step 1 complete: Advancing to network selection');
+      }
+      
+      // Solo refrescar datos si ya estamos completamente inicializados
+      if (isInitialized && isLibraryInitialized) {
+        refreshData();
+        
+        // If no private UTXOs loaded, try loading all user UTXOs
+        if (privateUTXOs.length === 0) {
+          console.log('🔄 No UTXOs from sync, trying to load stored UTXOs...');
+          loadAllUserUTXOs();
+        }
       }
     });
     
@@ -161,9 +175,13 @@
       console.log('🔌 Wallet disconnected');
       currentAccount = null;
       isInitialized = false;
+      isWalletConnected = false;
+      isNetworkSelected = false;
+      isLibraryInitialized = false;
+      currentStep = 1;
       privateUTXOs = [];
       stats = null;
-      addNotification('info', 'Wallet disconnected');
+      addNotification('info', 'Wallet disconnected - Please restart the setup process');
     });
   }
 
@@ -222,11 +240,13 @@
       selectedNetwork = networkKey;
       CONTRACT_ADDRESS = network.contractAddress;
 
-      // Reinitialize with new network
-      if (isInitialized) {
-        console.log('🔄 Reinitializing with new network...');
+      // Si ya estamos en el flujo y cambiamos de red, necesitamos reinicializar
+      if (isLibraryInitialized) {
+        console.log('🔄 Network changed after initialization, reinitializing...');
+        isLibraryInitialized = false;
         isInitialized = false;
-        await initializeLibrary();
+        currentStep = 3; // Volver al paso de inicialización
+        addNotification('info', 'Network changed - Please reinitialize the library');
       }
 
       addNotification('success', `✅ Switched to ${network.name}`);
@@ -247,6 +267,31 @@
     NETWORKS[selectedNetwork].contractAddress = address;
     CONTRACT_ADDRESS = address;
     addNotification('success', `Contract address updated for ${NETWORKS[selectedNetwork].name}: ${address}`);
+  }
+
+  // Handle network change from header selector (when fully initialized)
+  async function handleNetworkChange(networkKey: NetworkKey) {
+    if (!isLibraryInitialized) {
+      // Si no estamos inicializados, solo cambiar la selección
+      selectedNetwork = networkKey;
+      CONTRACT_ADDRESS = NETWORKS[selectedNetwork].contractAddress || '';
+      console.log(`🌐 Network selection changed to ${NETWORKS[selectedNetwork].name} (not initialized yet)`);
+      return;
+    }
+
+    // Si ya estamos inicializados, necesitamos reinicializar
+    console.log(`🌐 Network change from ${NETWORKS[selectedNetwork].name} to ${NETWORKS[networkKey].name} - reinitializing...`);
+    
+    try {
+      // Cambiar red
+      await switchNetwork(networkKey);
+      
+      // El switchNetwork ya maneja la reinicialización
+      
+    } catch (error: any) {
+      console.error('❌ Failed to change network:', error);
+      addNotification('error', `Failed to change network: ${error.message || error}`);
+    }
   }
 
   // ========================
@@ -331,8 +376,9 @@
       
       const success = await privateUTXOManager.connectWallet(PREFERRED_PROVIDER);
       if (success) {
-        isWalletConnected = true;
-        currentStep = 2;
+        // El estado se actualiza automáticamente en el evento 'wallet:connected'
+        // isWalletConnected = true;
+        // currentStep = 2;
         const account = privateUTXOManager.currentAccount;
         if (account) {
           currentAccount = account;
@@ -383,10 +429,18 @@
       const success = await initializeLibrary();
       if (success !== false) {
         isLibraryInitialized = true;
+        isInitialized = true; // Solo aquí se marca como completamente inicializado
         currentStep = 4; // All steps complete
         addNotification('success', '✅ Step 3 complete: UTXO Library initialized!');
         addNotification('success', '🎉 All steps complete! You can now use the UTXO system.');
         console.log('✅ All steps complete! UTXO system ready');
+        
+        // Ahora sí podemos cargar datos
+        await refreshData();
+        if (privateUTXOs.length === 0) {
+          console.log('🔄 Loading stored UTXOs after initialization...');
+          loadAllUserUTXOs();
+        }
       } else {
         addNotification('error', 'Failed to initialize UTXO Library');
       }
@@ -398,16 +452,27 @@
 
   // Reset flow (for testing or if user wants to start over)
   function resetFlow() {
+    console.log('🔄 Resetting flow - all states will be cleared');
+    
+    // Reset all flow states
     isWalletConnected = false;
     isNetworkSelected = false;
     isLibraryInitialized = false;
     currentStep = 1;
     isInitialized = false;
+    
+    // Clear data
     currentAccount = null;
     privateUTXOs = [];
     stats = null;
-    addNotification('info', 'Flow reset. Please start from Step 1.');
-    console.log('🔄 Flow reset');
+    
+    // Disconnect wallet if connected
+    if (privateUTXOManager.currentAccount) {
+      privateUTXOManager.disconnect();
+    }
+    
+    addNotification('info', '🔄 Flow reset complete. Please start from Step 1.');
+    console.log('🔄 Flow reset complete - ready for new setup');
   }
 
   // ========================
@@ -418,28 +483,61 @@
     try {
       console.log('🚀 Initializing library with contract address:', CONTRACT_ADDRESS);
       console.log('🌐 Selected network:', NETWORKS[selectedNetwork].name);
+      console.log('🔗 Network config:', {
+        name: NETWORKS[selectedNetwork].name,
+        chainId: NETWORKS[selectedNetwork].chainId,
+        rpcUrl: NETWORKS[selectedNetwork].rpcUrl,
+        contractAddress: CONTRACT_ADDRESS,
+        requiresGas: NETWORKS[selectedNetwork].requiresGas
+      });
 
       if (!CONTRACT_ADDRESS) {
         addNotification('warning', `⚠️ No contract deployed on ${NETWORKS[selectedNetwork].name}. Deploy contract first.`);
+        console.error('❌ No contract address provided');
         return false;
       }
+
+      // Verificar que la dirección del contrato es válida
+      if (!CONTRACT_ADDRESS.match(/^0x[a-fA-F0-9]{40}$/)) {
+        addNotification('error', `❌ Invalid contract address format: ${CONTRACT_ADDRESS}`);
+        console.error('❌ Invalid contract address format:', CONTRACT_ADDRESS);
+        return false;
+      }
+
+      console.log('📋 Starting library initialization...');
+      addNotification('info', 'Connecting to contract and verifying deployment...');
       
       const success = await privateUTXOManager.initialize(CONTRACT_ADDRESS);
       if (success) {
-        isInitialized = true;
+        // NO setear isInitialized aquí - se hace en step3_initializeLibrary
+        // isInitialized = true;
         const account = privateUTXOManager.currentAccount;
         if (account) {
           currentAccount = account;
-          await refreshData();
+          // NO llamar refreshData aquí - se hace después de marcar como completamente inicializado
         }
+        console.log('✅ Library initialization completed successfully');
         addNotification('success', `Library initialized successfully on ${NETWORKS[selectedNetwork].name}`);
         return true;
       } else {
-        throw new Error('Library initialization failed');
+        console.error('❌ Library initialization returned false');
+        throw new Error('Library initialization failed - returned false');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('❌ Library initialization failed:', error);
-      addNotification('error', 'Failed to initialize library');
+      
+      // Provide more specific error messages based on error type
+      if (error.message?.includes('getRegisteredTokenCount is not a function')) {
+        addNotification('error', '❌ Contract missing required methods. This may not be a valid UTXOVault contract.');
+        console.error('💡 Suggestion: Verify that the correct UTXOVault contract is deployed at:', CONTRACT_ADDRESS);
+      } else if (error.message?.includes('No hay contrato desplegado')) {
+        addNotification('error', '❌ No contract found at the specified address. Deploy the contract first.');
+      } else if (error.message?.includes('Invalid contract address')) {
+        addNotification('error', '❌ Invalid contract address format.');
+      } else {
+        addNotification('error', `Failed to initialize library: ${error.message || error}`);
+      }
+      
       return false;
     }
   }
@@ -890,8 +988,9 @@
               <div class="relative">
                 <select 
                   bind:value={selectedNetwork}
-                  on:change={(e) => switchNetwork((e.target as HTMLSelectElement).value as NetworkKey)}
+                  on:change={(e) => handleNetworkChange((e.target as HTMLSelectElement).value as NetworkKey)}
                   class="appearance-none bg-gray-800/50 text-white border border-gray-600 rounded-lg px-4 py-2 pr-8 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  disabled={currentStep < 4}
                 >
                   <option value="amoy">🔵 Polygon Amoy</option>
                   <option value="alastria">⚡ Alastria</option>
@@ -901,6 +1000,11 @@
                     <path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/>
                   </svg>
                 </div>
+                {#if currentStep < 4}
+                  <div class="absolute inset-0 bg-gray-800/50 rounded-lg flex items-center justify-center">
+                    <span class="text-xs text-gray-400">Complete setup first</span>
+                  </div>
+                {/if}
               </div>
               
               <!-- Network Status Indicator -->
@@ -911,7 +1015,8 @@
                 </span>
               </div>
               
-              <!-- Debug Tools -->
+              <!-- Debug Tools - Commented for production, uncomment for development -->
+              <!--
               {#if currentAccount}
                 <button
                   on:click={clearAllLocalData}
@@ -976,6 +1081,7 @@
                   <span class="text-sm">Network Info</span>
                 </button>
               {/if}
+              -->
               
               <!-- Connection Status -->
               <div class="flex items-center space-x-2 text-green-400">

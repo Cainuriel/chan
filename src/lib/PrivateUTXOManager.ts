@@ -594,48 +594,50 @@ export class PrivateUTXOManager extends UTXOLibrary {
       // 4. Marcar UTXO original como gastado
       utxo.isSpent = true;
 
-      // 5. Crear nuevo UTXO privado para el destinatario (si es para nosotros)
+      // 5. Crear nuevo UTXO privado para el destinatario - CORREGIDO: Siempre crear
       let createdUTXOIds: string[] = [];
-      if (newOwner === this.currentAccount?.address) {
-        const newUtxoId = await this.generateBN254UTXOId(
-          outputCommitment.x.toString(16) + outputCommitment.y.toString(16),
-          newOwner,
-          Date.now()
-        );
+      const newUtxoId = await this.generateBN254UTXOId(
+        outputCommitment.x.toString(16) + outputCommitment.y.toString(16),
+        newOwner,
+        Date.now()
+      );
 
-        const newPrivateUTXO: PrivateUTXO = {
-          id: newUtxoId,
-          exists: true,
-          value: utxo.value,
-          tokenAddress: utxo.tokenAddress,
-          owner: newOwner,
-          timestamp: toBigInt(Date.now()),
-          isSpent: false,
-          commitment: '0x' + outputCommitment.x.toString(16).padStart(64, '0') + outputCommitment.y.toString(16).padStart(64, '0'),
-          parentUTXO: utxoId,
-          utxoType: UTXOType.TRANSFER,
-          blindingFactor: outputCommitment.blindingFactor,
-          nullifierHash: attestation.dataHash,
-          localCreatedAt: Date.now(),
-          confirmed: true,
-          isPrivate: true,
-          cryptographyType: 'BN254'
-        };
+      const newPrivateUTXO: PrivateUTXO = {
+        id: newUtxoId,
+        exists: true,
+        value: utxo.value,
+        tokenAddress: utxo.tokenAddress,
+        owner: newOwner,
+        timestamp: toBigInt(Date.now()),
+        isSpent: false,
+        commitment: '0x' + outputCommitment.x.toString(16).padStart(64, '0') + outputCommitment.y.toString(16).padStart(64, '0'),
+        parentUTXO: utxoId,
+        utxoType: UTXOType.TRANSFER,
+        blindingFactor: outputCommitment.blindingFactor,
+        nullifierHash: attestation.dataHash,
+        localCreatedAt: Date.now(),
+        confirmed: true,
+        isPrivate: true,
+        cryptographyType: 'BN254'
+      };
 
-        // Almacenar nuevo UTXO
+      // SIEMPRE guardar en localStorage del destinatario
+      try {
+        const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
+        PrivateUTXOStorage.savePrivateUTXO(newOwner, newPrivateUTXO);
+        console.log(`💾 Transfer UTXO saved for recipient ${newOwner.substring(0, 8)}...`);
+      } catch (storageError) {
+        console.warn('⚠️ Could not save transfer UTXO to localStorage:', storageError);
+      }
+
+      // Solo almacenar en caché si es para el usuario actual
+      if (newOwner.toLowerCase() === this.currentAccount?.address?.toLowerCase()) {
         this.utxos.set(newUtxoId, newPrivateUTXO);
         this.privateUTXOs.set(newUtxoId, newPrivateUTXO);
         createdUTXOIds.push(newUtxoId);
-
-        // Guardar en localStorage
-        try {
-          const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
-          PrivateUTXOStorage.savePrivateUTXO(newOwner, newPrivateUTXO);
-        } catch (storageError) {
-          console.warn('⚠️ Could not save new UTXO to localStorage:', storageError);
-        }
-
         this.emit('private:utxo:created', newPrivateUTXO);
+      } else {
+        console.log(`📤 Transfer UTXO created for external recipient: ${newOwner.substring(0, 8)}...`);
       }
 
       // 6. Actualizar UTXO original en localStorage
@@ -737,51 +739,52 @@ export class PrivateUTXOManager extends UTXOLibrary {
 
       this.emit('private:utxo:spent', inputUTXOId);
 
-      // 7. Crear UTXOs de salida
+      // 7. Crear UTXOs de salida - CORREGIDO: Crear TODOS los UTXOs de salida
       const createdUTXOIds: string[] = [];
 
       for (let i = 0; i < outputValues.length; i++) {
-        // Solo crear UTXOs para nosotros mismos
-        if (outputOwners[i] === this.currentAccount?.address) {
-          const outputUtxoId = await this.generateBN254UTXOId(
-            outputCommitments[i].x.toString(16) + outputCommitments[i].y.toString(16),
-            outputOwners[i],
-            Date.now() + i
-          );
+        const outputUtxoId = await this.generateBN254UTXOId(
+          outputCommitments[i].x.toString(16) + outputCommitments[i].y.toString(16),
+          outputOwners[i],
+          Date.now() + i
+        );
 
-          const outputPrivateUTXO: PrivateUTXO = {
-            id: outputUtxoId,
-            exists: true,
-            value: outputValues[i],
-            tokenAddress: inputUTXO.tokenAddress,
-            owner: outputOwners[i],
-            timestamp: toBigInt(Date.now()),
-            isSpent: false,
-            commitment: '0x' + outputCommitments[i].x.toString(16).padStart(64, '0') + outputCommitments[i].y.toString(16).padStart(64, '0'),
-            parentUTXO: inputUTXOId,
-            utxoType: UTXOType.SPLIT,
-            blindingFactor: outputCommitments[i].blindingFactor,
-            nullifierHash: attestation.dataHash + i.toString(), // Unique nullifier per output
-            localCreatedAt: Date.now(),
-            confirmed: true,
-            isPrivate: true,
-            cryptographyType: 'BN254'
-          };
+        const outputPrivateUTXO: PrivateUTXO = {
+          id: outputUtxoId,
+          exists: true,
+          value: outputValues[i],
+          tokenAddress: inputUTXO.tokenAddress,
+          owner: outputOwners[i],
+          timestamp: toBigInt(Date.now()),
+          isSpent: false,
+          commitment: '0x' + outputCommitments[i].x.toString(16).padStart(64, '0') + outputCommitments[i].y.toString(16).padStart(64, '0'),
+          parentUTXO: inputUTXOId,
+          utxoType: UTXOType.SPLIT,
+          blindingFactor: outputCommitments[i].blindingFactor,
+          nullifierHash: attestation.dataHash + i.toString(), // Unique nullifier per output
+          localCreatedAt: Date.now(),
+          confirmed: true,
+          isPrivate: true,
+          cryptographyType: 'BN254'
+        };
 
-          // Almacenar UTXO de salida
+        // SIEMPRE guardar en localStorage del propietario correspondiente
+        try {
+          const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
+          PrivateUTXOStorage.savePrivateUTXO(outputOwners[i], outputPrivateUTXO);
+          console.log(`💾 UTXO ${i} saved for owner ${outputOwners[i].substring(0, 8)}...`);
+        } catch (storageError) {
+          console.warn(`⚠️ Could not save output UTXO ${i} to localStorage:`, storageError);
+        }
+
+        // Solo almacenar en caché si es para el usuario actual
+        if (outputOwners[i].toLowerCase() === this.currentAccount?.address?.toLowerCase()) {
           this.utxos.set(outputUtxoId, outputPrivateUTXO);
           this.privateUTXOs.set(outputUtxoId, outputPrivateUTXO);
           createdUTXOIds.push(outputUtxoId);
-
-          // Guardar en localStorage
-          try {
-            const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
-            PrivateUTXOStorage.savePrivateUTXO(outputOwners[i], outputPrivateUTXO);
-          } catch (storageError) {
-            console.warn(`⚠️ Could not save output UTXO ${i} to localStorage:`, storageError);
-          }
-
           this.emit('private:utxo:created', outputPrivateUTXO);
+        } else {
+          console.log(`📤 UTXO created for external owner: ${outputOwners[i].substring(0, 8)}...`);
         }
       }
 
@@ -844,7 +847,8 @@ export class PrivateUTXOManager extends UTXOLibrary {
       const { attestation } = await ZenroomHelpers.createWithdrawWithAttestation(
         commitment,
         recipient || utxo.owner,
-        utxo.owner
+        utxo.owner,
+        utxo.tokenAddress
       );
 
       console.log('✅ Withdrawal attestation created:', {
@@ -890,37 +894,114 @@ export class PrivateUTXOManager extends UTXOLibrary {
   // ========================
 
   /**
+   * Cargar UTXOs desde localStorage a la caché
+   */
+  private loadUTXOsFromStorage(owner: string): void {
+    try {
+      const { PrivateUTXOStorage } = require('./PrivateUTXOStorage');
+      const storedUTXOs = PrivateUTXOStorage.getPrivateUTXOs(owner);
+      
+      // Cargar UTXOs en la caché
+      for (const utxo of storedUTXOs) {
+        const privateUTXO: PrivateUTXO = {
+          ...utxo,
+          cryptographyType: 'BN254',
+          isPrivate: true
+        };
+        
+        this.privateUTXOs.set(utxo.id, privateUTXO);
+        this.utxos.set(utxo.id, privateUTXO);
+      }
+      
+      console.log(`📂 Loaded ${storedUTXOs.length} UTXOs from localStorage for ${owner.substring(0, 8)}...`);
+    } catch (error) {
+      console.error('❌ Failed to load UTXOs from storage:', error);
+    }
+  }
+
+  /**
    * Obtener UTXOs privados BN254 por propietario
+   * CORREGIDO: Ahora carga desde localStorage si no están en caché
    */
   getPrivateUTXOsByOwner(owner: string): PrivateUTXO[] {
-    const utxos: PrivateUTXO[] = [];
-    
-    for (const [utxoId, utxo] of this.privateUTXOs.entries()) {
-      if (utxo.owner.toLowerCase() === owner.toLowerCase() && 
-          !utxo.isSpent && 
-          utxo.cryptographyType === 'BN254') {
-        utxos.push(utxo);
+    try {
+      // 1. Primero intentar cargar desde localStorage si la caché está vacía
+      if (this.privateUTXOs.size === 0) {
+        console.log('📂 Cache empty, loading UTXOs from localStorage...');
+        this.loadUTXOsFromStorage(owner);
       }
+
+      // 2. Obtener UTXOs de la caché actualizada
+      const utxos: PrivateUTXO[] = [];
+      
+      for (const [utxoId, utxo] of this.privateUTXOs.entries()) {
+        if (utxo.owner.toLowerCase() === owner.toLowerCase() && 
+            !utxo.isSpent && 
+            utxo.cryptographyType === 'BN254') {
+          utxos.push(utxo);
+        }
+      }
+
+      // 3. Si aún no hay UTXOs, cargar directamente desde localStorage
+      if (utxos.length === 0) {
+        console.log('📂 Loading UTXOs directly from localStorage...');
+        const { PrivateUTXOStorage } = require('./PrivateUTXOStorage');
+        const storedUTXOs = PrivateUTXOStorage.getPrivateUTXOs(owner);
+        
+        return storedUTXOs.filter((utxo: PrivateUTXO) => 
+          !utxo.isSpent && 
+          (utxo.cryptographyType === 'BN254' || utxo.isPrivate) // Backward compatibility
+        );
+      }
+      
+      return utxos;
+    } catch (error) {
+      console.error('❌ Failed to get private UTXOs by owner:', error);
+      return [];
     }
-    
-    return utxos;
   }
 
   /**
    * Obtener balance privado BN254 total
+   * CORREGIDO: Ahora consulta localStorage si la caché está vacía
    */
-  getPrivateBalance(tokenAddress?: string): bigint {
-    let balance = BigInt(0);
-    
-    for (const utxo of this.privateUTXOs.values()) {
-      if (!utxo.isSpent && 
-          utxo.cryptographyType === 'BN254' &&
-          (!tokenAddress || utxo.tokenAddress === tokenAddress)) {
-        balance += utxo.value;
+  getPrivateBalance(tokenAddress?: string, owner?: string): bigint {
+    try {
+      // Si no hay owner específico, usar la cuenta actual
+      const targetOwner = owner || this.currentAccount?.address;
+      if (!targetOwner) {
+        console.warn('⚠️ No owner specified and no current account');
+        return BigInt(0);
       }
+
+      // 1. Cargar desde localStorage si la caché está vacía
+      if (this.privateUTXOs.size === 0) {
+        this.loadUTXOsFromStorage(targetOwner);
+      }
+
+      // 2. Calcular balance desde caché
+      let balance = BigInt(0);
+      
+      for (const utxo of this.privateUTXOs.values()) {
+        if (!utxo.isSpent && 
+            utxo.cryptographyType === 'BN254' &&
+            utxo.owner.toLowerCase() === targetOwner.toLowerCase() &&
+            (!tokenAddress || utxo.tokenAddress === tokenAddress)) {
+          balance += utxo.value;
+        }
+      }
+
+      // 3. Si no encontramos balance en caché, consultar directamente localStorage
+      if (balance === BigInt(0)) {
+        const { PrivateUTXOStorage } = require('./PrivateUTXOStorage');
+        return PrivateUTXOStorage.getBalance(targetOwner, tokenAddress);
+      }
+      
+      return balance;
+    } catch (error) {
+      console.error('❌ Failed to get private balance:', error);
+      return BigInt(0);
     }
-    
-    return balance;
   }
 
   /**
@@ -1100,6 +1181,91 @@ export class PrivateUTXOManager extends UTXOLibrary {
     this.privateUTXOs.clear();
     this.bn254OperationCount = 0;
     console.log('🧹 BN254 private data cleared');
+  }
+
+  /**
+   * Función de debug para verificar el estado del localStorage del usuario
+   */
+  debugUserStorage(userAddress?: string): void {
+    try {
+      const targetUser = userAddress || this.currentAccount?.address;
+      if (!targetUser) {
+        console.error('❌ No user address provided for debug');
+        return;
+      }
+
+      console.log(`🔍 === DEBUG STORAGE FOR USER ${targetUser} ===`);
+      
+      const { PrivateUTXOStorage } = require('./PrivateUTXOStorage');
+      
+      // Debug completo del storage
+      PrivateUTXOStorage.debugStorage(targetUser);
+      
+      // Estadísticas mejoradas
+      const enhancedStats = PrivateUTXOStorage.getEnhancedUserStats(targetUser);
+      console.log('📊 Enhanced User Stats:', enhancedStats);
+      
+      // Verificar consistencia entre caché y localStorage
+      const cacheUTXOs = Array.from(this.privateUTXOs.values()).filter(
+        utxo => utxo.owner.toLowerCase() === targetUser.toLowerCase()
+      );
+      const storageUTXOs = PrivateUTXOStorage.getPrivateUTXOs(targetUser);
+      
+      console.log('🔍 Consistency Check:');
+      console.log(`  - Cache UTXOs: ${cacheUTXOs.length}`);
+      console.log(`  - Storage UTXOs: ${storageUTXOs.length}`);
+      console.log(`  - Consistent: ${cacheUTXOs.length === storageUTXOs.length ? '✅' : '❌'}`);
+      
+      // Mostrar diferencias si las hay
+      if (cacheUTXOs.length !== storageUTXOs.length) {
+        const cacheIds = new Set(cacheUTXOs.map(u => u.id));
+        const storageIds = new Set(storageUTXOs.map((u: PrivateUTXO) => u.id));
+        
+        const onlyInCache = cacheUTXOs.filter(u => !storageIds.has(u.id));
+        const onlyInStorage = storageUTXOs.filter((u: PrivateUTXO) => !cacheIds.has(u.id));
+        
+        console.log('📋 Differences:');
+        console.log(`  - Only in cache (${onlyInCache.length}):`, onlyInCache.map(u => u.id));
+        console.log(`  - Only in storage (${onlyInStorage.length}):`, onlyInStorage.map((u: PrivateUTXO) => u.id));
+      }
+      
+      console.log('🔍 === END DEBUG STORAGE ===');
+      
+    } catch (error) {
+      console.error('❌ Debug storage failed:', error);
+    }
+  }
+
+  /**
+   * Función para verificar si un usuario tiene UTXOs almacenados
+   */
+  hasStoredUTXOs(userAddress?: string): boolean {
+    try {
+      const targetUser = userAddress || this.currentAccount?.address;
+      if (!targetUser) return false;
+
+      const { PrivateUTXOStorage } = require('./PrivateUTXOStorage');
+      return PrivateUTXOStorage.hasUserData(targetUser);
+    } catch (error) {
+      console.error('❌ Failed to check stored UTXOs:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Función para obtener estadísticas completas del usuario desde localStorage
+   */
+  getCompleteUserStats(userAddress?: string) {
+    try {
+      const targetUser = userAddress || this.currentAccount?.address;
+      if (!targetUser) return null;
+
+      const { PrivateUTXOStorage } = require('./PrivateUTXOStorage');
+      return PrivateUTXOStorage.getEnhancedUserStats(targetUser);
+    } catch (error) {
+      console.error('❌ Failed to get complete user stats:', error);
+      return null;
+    }
   }
 
   // ========================

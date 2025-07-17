@@ -6,11 +6,20 @@ export interface DepositParams {
   commitment: CommitmentPoint; // Updated to use CommitmentPoint structure
   nullifierHash: string; // bytes32
   blindingFactor: bigint;
+  attestation: BackendAttestation; // Required for all operations
 }
 
 export interface CommitmentPoint {
   x: bigint;
   y: bigint;
+}
+
+export interface BackendAttestation {
+  operation: string; // "DEPOSIT", "SPLIT", "TRANSFER", "WITHDRAW"
+  dataHash: string; // bytes32 - hash of all relevant data
+  nonce: bigint; // uint256 - unique nonce
+  timestamp: bigint; // uint256 - timestamp 
+  signature: string; // bytes - ECDSA signature from authorized backend
 }
 
 export interface ProofParams {
@@ -66,6 +75,7 @@ export interface DepositAsPrivateUTXOParams {
   commitment: string; // bytes32
   nullifierHash: string; // bytes32
   rangeProof: string; // bytes
+  attestation: BackendAttestation; // Required attestation from backend
 }
 
 export interface SplitPrivateUTXOParams {
@@ -75,6 +85,7 @@ export interface SplitPrivateUTXOParams {
   outputBlindings: bigint[]; // uint256[]
   equalityProof: string; // bytes
   nullifierHash: string; // bytes32
+  attestation: BackendAttestation; // Required attestation from backend
 }
 
 export interface TransferPrivateUTXOParams {
@@ -84,6 +95,7 @@ export interface TransferPrivateUTXOParams {
   amount: bigint; // uint256
   outputBlinding: bigint; // uint256
   nullifierHash: string; // bytes32
+  attestation: BackendAttestation; // Required attestation from backend
 }
 
 export interface WithdrawFromPrivateUTXOParams {
@@ -91,6 +103,7 @@ export interface WithdrawFromPrivateUTXOParams {
   amount: bigint; // uint256
   blindingFactor: bigint; // uint256
   nullifierHash: string; // bytes32
+  attestation: BackendAttestation; // Required attestation from backend
 }
 
 /**
