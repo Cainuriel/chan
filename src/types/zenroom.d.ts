@@ -48,6 +48,67 @@ export interface ZenroomCommitmentResult {
   commitment_proof?: string;
 }
 
+export interface PedersenCommitment {
+  /** X coordinate of commitment point on BN254 */
+  x: bigint;
+  /** Y coordinate of commitment point on BN254 */
+  y: bigint;
+  /** Blinding factor used in commitment */
+  blindingFactor: string;
+  /** Value committed */
+  value: bigint;
+}
+
+export interface BulletproofRangeProof {
+  /** Point A in bulletproof */
+  A: string;
+  /** Point S in bulletproof */
+  S: string;
+  /** Point T1 in bulletproof */
+  T1: string;
+  /** Point T2 in bulletproof */
+  T2: string;
+  /** Scalar taux */
+  taux: string;
+  /** Scalar mu */
+  mu: string;
+  /** Inner product proof */
+  proof: string;
+  /** Associated commitment */
+  commitment: string;
+}
+
+export interface CoconutCredential {
+  /** Credential signature */
+  signature: string;
+  /** Zero-knowledge proof */
+  proof: string;
+  /** Signed attributes */
+  attributes: string[];
+}
+
+export interface EqualityProof {
+  /** Challenge scalar */
+  challenge: string;
+  /** First response scalar */
+  response1: string;
+  /** Second response scalar */
+  response2: string;
+}
+
+export interface Attestation {
+  /** Unique nonce for this attestation */
+  nonce: bigint;
+  /** Hash of the operation data */
+  dataHash: string;
+  /** ECDSA signature from backend */
+  signature: string;
+  /** Timestamp of creation */
+  timestamp: bigint;
+  /** Address of the signer */
+  signer: string;
+}
+
 export interface ZenroomSplitProofResult {
   /** Proof that input equals sum of outputs */
   split_proof: string;
@@ -154,7 +215,12 @@ declare module 'zenroom' {
     ZenroomCommitmentResult,
     ZenroomSplitProofResult,
     ZenroomOwnershipProofResult,
-    ZenroomKeyDerivationResult
+    ZenroomKeyDerivationResult,
+    PedersenCommitment,
+    BulletproofRangeProof,
+    CoconutCredential,
+    EqualityProof,
+    Attestation
   };
 
   export {

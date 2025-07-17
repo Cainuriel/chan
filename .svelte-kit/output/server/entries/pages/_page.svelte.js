@@ -1,4 +1,4 @@
-import { V as fallback, W as attr, T as escape_html, X as bind_props, O as pop, K as push, Y as head, Z as ensure_array_like, _ as attr_class } from "../../chunks/index.js";
+import { V as fallback, W as attr, T as escape_html, X as bind_props, O as pop, K as push, Y as head, Z as ensure_array_like, _ as attr_class, $ as stringify } from "../../chunks/index.js";
 import { ethers, toBigInt } from "ethers";
 var UTXOType = /* @__PURE__ */ ((UTXOType2) => {
   UTXOType2["DEPOSIT"] = "DEPOSIT";
@@ -118,651 +118,945 @@ const ERC20_ABI_FRAGMENTS = {
   decimals: "function decimals() view returns (uint8)"
 };
 const UTXO_VAULT_ABI = [
-  // Constructor
-  "constructor()",
-  // Public variables (auto-generated getters)
-  "function registeredTokens(address) view returns (bool)",
-  "function tokenRegistrationTime(address) view returns (uint256)",
-  "function tokenNames(address) view returns (string)",
-  "function tokenSymbols(address) view returns (string)",
-  "function tokenDecimals(address) view returns (uint8)",
-  "function allRegisteredTokens(uint256) view returns (address)",
-  // Core private UTXO functions with real cryptography
-  "function depositAsPrivateUTXO((address tokenAddress, bytes32 commitment, bytes32 nullifierHash, uint256 blindingFactor) depositParams, (bytes rangeProof) proofParams, (uint256 gX, uint256 gY, uint256 hX, uint256 hY) generators, uint256 amount) external",
-  "function splitPrivateUTXO(bytes32 inputCommitment, bytes32[] calldata outputCommitments, uint256[] calldata outputAmounts, uint256[] calldata outputBlindings, bytes calldata equalityProof, bytes32 nullifierHash, (uint256 gX, uint256 gY, uint256 hX, uint256 hY) generators) external returns (bytes32[] memory)",
-  "function transferPrivateUTXO(bytes32 inputCommitment, bytes32 outputCommitment, address newOwner, uint256 amount, uint256 outputBlinding, bytes32 nullifierHash, (uint256 gX, uint256 gY, uint256 hX, uint256 hY) generators) external returns (bytes32)",
-  "function withdrawFromPrivateUTXO(bytes32 commitment, uint256 amount, uint256 blindingFactor, bytes32 nullifierHash, (uint256 gX, uint256 gY, uint256 hX, uint256 hY) generators) external",
-  // View functions
-  "function getRegisteredTokens() external view returns (address[] memory)",
-  "function getTokenInfo(address tokenAddress) external view returns (bool isRegistered, uint256 registrationTime, string memory name, string memory symbol, uint8 decimals)",
-  "function getRegisteredTokenCount() external view returns (uint256)",
-  "function isTokenRegistered(address tokenAddress) external view returns (bool)",
-  "function getUTXOCommitment(bytes32 utxoId) external view returns (bytes32)",
-  "function isNullifierUsed(bytes32 nullifier) external view returns (bool)",
-  "function getUserUTXOCount(address user) external view returns (uint256)",
-  "function getUTXOsByOwner(address user) external view returns (bytes32[] memory)",
-  "function getUTXOInfo(bytes32 utxoId) external view returns (bool exists, bytes32 commitment, address tokenAddress, address owner, uint256 timestamp, bool isSpent, bytes32 parentUTXO, uint8 utxoType, bytes32 nullifierHash)",
-  // Token helper functions
-  "function getTokenName(address tokenAddress) external view returns (string memory)",
-  "function getTokenSymbol(address tokenAddress) external view returns (string memory)",
-  "function getTokenDecimals(address tokenAddress) external view returns (uint8)",
-  // Events - Simplified
-  "event TokenRegistered(address indexed tokenAddress, string name, string symbol, uint8 decimals, uint256 timestamp)",
-  "event PrivateUTXOCreated(bytes32 indexed commitment, address indexed owner, address indexed tokenAddress, bytes32 nullifierHash, uint8 utxoType, uint256 amount)",
-  "event PrivateTransfer(bytes32 indexed inputCommitment, bytes32 indexed outputCommitment, bytes32 nullifierHash, address indexed newOwner)",
-  "event PrivateWithdrawal(bytes32 indexed commitment, address indexed recipient, bytes32 nullifierHash, uint256 amount)",
-  // Inherited from Ownable
-  "function owner() view returns (address)",
-  "function transferOwnership(address newOwner) external",
-  "function renounceOwnership() external",
-  "event OwnershipTransferred(address indexed previousOwner, address indexed newOwner)"
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "_authorizedBackend",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "nonpayable",
+    "type": "constructor"
+  },
+  {
+    "inputs": [],
+    "name": "InvalidAmount",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InvalidAttestation",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InvalidNullifier",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InvalidToken",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "NullifierAlreadyUsed",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "owner",
+        "type": "address"
+      }
+    ],
+    "name": "OwnableInvalidOwner",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "account",
+        "type": "address"
+      }
+    ],
+    "name": "OwnableUnauthorizedAccount",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "ReentrancyGuardReentrantCall",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "ReplayAttack",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "StaleAttestation",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "UTXOAlreadySpent",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "UTXONotFound",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "UnauthorizedBackend",
+    "type": "error"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "oldBackend",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "newBackend",
+        "type": "address"
+      }
+    ],
+    "name": "BackendUpdated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "previousOwner",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "newOwner",
+        "type": "address"
+      }
+    ],
+    "name": "OwnershipTransferred",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "inputCommitmentHash",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "bytes32[]",
+        "name": "outputCommitmentHashes",
+        "type": "bytes32[]"
+      },
+      {
+        "indexed": false,
+        "internalType": "bytes32",
+        "name": "inputNullifier",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "bytes32[]",
+        "name": "outputNullifiers",
+        "type": "bytes32[]"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "timestamp",
+        "type": "uint256"
+      }
+    ],
+    "name": "PrivateSplit",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "inputCommitmentHash",
+        "type": "bytes32"
+      },
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "outputCommitmentHash",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "bytes32",
+        "name": "inputNullifier",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "bytes32",
+        "name": "outputNullifier",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "timestamp",
+        "type": "uint256"
+      }
+    ],
+    "name": "PrivateTransfer",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "utxoId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "commitmentHash",
+        "type": "bytes32"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "tokenAddress",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "bytes32",
+        "name": "nullifierHash",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "enum UTXOVault.UTXOType",
+        "name": "utxoType",
+        "type": "uint8"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "timestamp",
+        "type": "uint256"
+      }
+    ],
+    "name": "PrivateUTXOCreated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "commitmentHash",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "bytes32",
+        "name": "nullifier",
+        "type": "bytes32"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "recipient",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "revealedAmount",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "timestamp",
+        "type": "uint256"
+      }
+    ],
+    "name": "PrivateWithdrawal",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "tokenAddress",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "timestamp",
+        "type": "uint256"
+      }
+    ],
+    "name": "TokenRegistered",
+    "type": "event"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "name": "allRegisteredTokens",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "authorizedBackend",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "components": [
+          {
+            "internalType": "address",
+            "name": "tokenAddress",
+            "type": "address"
+          },
+          {
+            "components": [
+              {
+                "internalType": "uint256",
+                "name": "x",
+                "type": "uint256"
+              },
+              {
+                "internalType": "uint256",
+                "name": "y",
+                "type": "uint256"
+              }
+            ],
+            "internalType": "struct UTXOVault.CommitmentPoint",
+            "name": "commitment",
+            "type": "tuple"
+          },
+          {
+            "internalType": "bytes32",
+            "name": "nullifierHash",
+            "type": "bytes32"
+          },
+          {
+            "internalType": "uint256",
+            "name": "amount",
+            "type": "uint256"
+          },
+          {
+            "components": [
+              {
+                "internalType": "string",
+                "name": "operation",
+                "type": "string"
+              },
+              {
+                "internalType": "bytes32",
+                "name": "dataHash",
+                "type": "bytes32"
+              },
+              {
+                "internalType": "uint256",
+                "name": "nonce",
+                "type": "uint256"
+              },
+              {
+                "internalType": "uint256",
+                "name": "timestamp",
+                "type": "uint256"
+              },
+              {
+                "internalType": "bytes",
+                "name": "signature",
+                "type": "bytes"
+              }
+            ],
+            "internalType": "struct UTXOVault.BackendAttestation",
+            "name": "attestation",
+            "type": "tuple"
+          }
+        ],
+        "internalType": "struct UTXOVault.DepositParams",
+        "name": "params",
+        "type": "tuple"
+      }
+    ],
+    "name": "depositAsPrivateUTXO",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "components": [
+          {
+            "internalType": "uint256",
+            "name": "x",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "y",
+            "type": "uint256"
+          }
+        ],
+        "internalType": "struct UTXOVault.CommitmentPoint",
+        "name": "commitment",
+        "type": "tuple"
+      }
+    ],
+    "name": "doesCommitmentExist",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "getCurrentNonce",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "getRegisteredTokens",
+    "outputs": [
+      {
+        "internalType": "address[]",
+        "name": "",
+        "type": "address[]"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "components": [
+          {
+            "internalType": "uint256",
+            "name": "x",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "y",
+            "type": "uint256"
+          }
+        ],
+        "internalType": "struct UTXOVault.CommitmentPoint",
+        "name": "commitment",
+        "type": "tuple"
+      }
+    ],
+    "name": "getUTXOByCommitment",
+    "outputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "utxoId",
+        "type": "bytes32"
+      }
+    ],
+    "name": "getUTXOInfo",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "exists",
+        "type": "bool"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "commitmentHash",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "address",
+        "name": "tokenAddress",
+        "type": "address"
+      },
+      {
+        "internalType": "uint256",
+        "name": "timestamp",
+        "type": "uint256"
+      },
+      {
+        "internalType": "bool",
+        "name": "isSpent",
+        "type": "bool"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "parentUTXO",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "enum UTXOVault.UTXOType",
+        "name": "utxoType",
+        "type": "uint8"
+      },
+      {
+        "internalType": "uint256",
+        "name": "blockNumber",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "nullifier",
+        "type": "bytes32"
+      }
+    ],
+    "name": "isNullifierUsed",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "tokenAddress",
+        "type": "address"
+      }
+    ],
+    "name": "isTokenRegistered",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "lastNonce",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "owner",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "name": "registeredTokens",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "renounceOwnership",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "components": [
+          {
+            "components": [
+              {
+                "internalType": "uint256",
+                "name": "x",
+                "type": "uint256"
+              },
+              {
+                "internalType": "uint256",
+                "name": "y",
+                "type": "uint256"
+              }
+            ],
+            "internalType": "struct UTXOVault.CommitmentPoint",
+            "name": "inputCommitment",
+            "type": "tuple"
+          },
+          {
+            "components": [
+              {
+                "internalType": "uint256",
+                "name": "x",
+                "type": "uint256"
+              },
+              {
+                "internalType": "uint256",
+                "name": "y",
+                "type": "uint256"
+              }
+            ],
+            "internalType": "struct UTXOVault.CommitmentPoint[]",
+            "name": "outputCommitments",
+            "type": "tuple[]"
+          },
+          {
+            "internalType": "bytes32",
+            "name": "inputNullifier",
+            "type": "bytes32"
+          },
+          {
+            "internalType": "bytes32[]",
+            "name": "outputNullifiers",
+            "type": "bytes32[]"
+          },
+          {
+            "components": [
+              {
+                "internalType": "string",
+                "name": "operation",
+                "type": "string"
+              },
+              {
+                "internalType": "bytes32",
+                "name": "dataHash",
+                "type": "bytes32"
+              },
+              {
+                "internalType": "uint256",
+                "name": "nonce",
+                "type": "uint256"
+              },
+              {
+                "internalType": "uint256",
+                "name": "timestamp",
+                "type": "uint256"
+              },
+              {
+                "internalType": "bytes",
+                "name": "signature",
+                "type": "bytes"
+              }
+            ],
+            "internalType": "struct UTXOVault.BackendAttestation",
+            "name": "attestation",
+            "type": "tuple"
+          }
+        ],
+        "internalType": "struct UTXOVault.SplitParams",
+        "name": "params",
+        "type": "tuple"
+      }
+    ],
+    "name": "splitPrivateUTXO",
+    "outputs": [
+      {
+        "internalType": "bytes32[]",
+        "name": "",
+        "type": "bytes32[]"
+      }
+    ],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "newOwner",
+        "type": "address"
+      }
+    ],
+    "name": "transferOwnership",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "components": [
+          {
+            "components": [
+              {
+                "internalType": "uint256",
+                "name": "x",
+                "type": "uint256"
+              },
+              {
+                "internalType": "uint256",
+                "name": "y",
+                "type": "uint256"
+              }
+            ],
+            "internalType": "struct UTXOVault.CommitmentPoint",
+            "name": "inputCommitment",
+            "type": "tuple"
+          },
+          {
+            "components": [
+              {
+                "internalType": "uint256",
+                "name": "x",
+                "type": "uint256"
+              },
+              {
+                "internalType": "uint256",
+                "name": "y",
+                "type": "uint256"
+              }
+            ],
+            "internalType": "struct UTXOVault.CommitmentPoint",
+            "name": "outputCommitment",
+            "type": "tuple"
+          },
+          {
+            "internalType": "bytes32",
+            "name": "inputNullifier",
+            "type": "bytes32"
+          },
+          {
+            "internalType": "bytes32",
+            "name": "outputNullifier",
+            "type": "bytes32"
+          },
+          {
+            "components": [
+              {
+                "internalType": "string",
+                "name": "operation",
+                "type": "string"
+              },
+              {
+                "internalType": "bytes32",
+                "name": "dataHash",
+                "type": "bytes32"
+              },
+              {
+                "internalType": "uint256",
+                "name": "nonce",
+                "type": "uint256"
+              },
+              {
+                "internalType": "uint256",
+                "name": "timestamp",
+                "type": "uint256"
+              },
+              {
+                "internalType": "bytes",
+                "name": "signature",
+                "type": "bytes"
+              }
+            ],
+            "internalType": "struct UTXOVault.BackendAttestation",
+            "name": "attestation",
+            "type": "tuple"
+          }
+        ],
+        "internalType": "struct UTXOVault.TransferParams",
+        "name": "params",
+        "type": "tuple"
+      }
+    ],
+    "name": "transferPrivateUTXO",
+    "outputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      }
+    ],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "newBackend",
+        "type": "address"
+      }
+    ],
+    "name": "updateAuthorizedBackend",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "components": [
+          {
+            "components": [
+              {
+                "internalType": "uint256",
+                "name": "x",
+                "type": "uint256"
+              },
+              {
+                "internalType": "uint256",
+                "name": "y",
+                "type": "uint256"
+              }
+            ],
+            "internalType": "struct UTXOVault.CommitmentPoint",
+            "name": "commitment",
+            "type": "tuple"
+          },
+          {
+            "internalType": "bytes32",
+            "name": "nullifierHash",
+            "type": "bytes32"
+          },
+          {
+            "internalType": "uint256",
+            "name": "revealedAmount",
+            "type": "uint256"
+          },
+          {
+            "components": [
+              {
+                "internalType": "string",
+                "name": "operation",
+                "type": "string"
+              },
+              {
+                "internalType": "bytes32",
+                "name": "dataHash",
+                "type": "bytes32"
+              },
+              {
+                "internalType": "uint256",
+                "name": "nonce",
+                "type": "uint256"
+              },
+              {
+                "internalType": "uint256",
+                "name": "timestamp",
+                "type": "uint256"
+              },
+              {
+                "internalType": "bytes",
+                "name": "signature",
+                "type": "bytes"
+              }
+            ],
+            "internalType": "struct UTXOVault.BackendAttestation",
+            "name": "attestation",
+            "type": "tuple"
+          }
+        ],
+        "internalType": "struct UTXOVault.WithdrawParams",
+        "name": "params",
+        "type": "tuple"
+      }
+    ],
+    "name": "withdrawFromPrivateUTXO",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  }
 ];
 function createUTXOVaultContract(address, signerOrProvider) {
   return new ethers.Contract(address, UTXO_VAULT_ABI, signerOrProvider);
-}
-const BN254_FIELD_SIZE = BigInt("0x30644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd47");
-BigInt("0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001");
-const G1_GENERATOR = {
-  x: BigInt("0x01"),
-  y: BigInt("0x02")
-};
-const H1_GENERATOR = {
-  x: BigInt("0x769bf9ac56bea3ff40232bcb1b6bd159315d84715b8e679f2d355961915abf0"),
-  y: BigInt("0x2ab799bee0489429554fdb7c8d086475319e63b40b9c5b57cdf1ff3dd9fe2261")
-};
-function isValidBN254Point(x, y) {
-  try {
-    const p = BN254_FIELD_SIZE;
-    if (x >= p || y >= p || x < 0n || y < 0n) {
-      console.error("Point coordinates out of field range:", {
-        x: x.toString(16),
-        y: y.toString(16)
-      });
-      return false;
-    }
-    const y_squared = y * y % p;
-    const x_cubed = x * x * x % p;
-    const right_side = (x_cubed + 3n) % p;
-    const isValid = y_squared === right_side;
-    if (!isValid) {
-      console.error("Point not on BN254 curve:", {
-        x: x.toString(16),
-        y: y.toString(16),
-        y_squared: y_squared.toString(16),
-        x_cubed_plus_3: right_side.toString(16)
-      });
-    }
-    return isValid;
-  } catch (error) {
-    console.error("Error validating BN254 point:", error);
-    return false;
-  }
-}
-class BN254Ops {
-  // BN254 curve parameters (REALES y verificados)
-  static FIELD_MODULUS = BigInt("0x30644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd47");
-  static CURVE_ORDER = BigInt("0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001");
-  // Generator points (REALES y verificados)
-  static G1_GENERATOR = {
-    x: BigInt("0x0000000000000000000000000000000000000000000000000000000000000001"),
-    y: BigInt("0x0000000000000000000000000000000000000000000000000000000000000002")
-  };
-  // H1 generator - PUNTO REAL de la curva BN254 linealmente independiente de G1
-  // SOLUCIÓN VERIFICADA: Coordenadas exactas de 3*G en BN254 (matemáticamente calculadas)
-  // COORDENADAS CORREGIDAS - VERIFICADAS MATEMÁTICAMENTE
-  static H1_GENERATOR = {
-    x: BigInt("0x769bf9ac56bea3ff40232bcb1b6bd159315d84715b8e679f2d355961915abf0"),
-    y: BigInt("0x2ab799bee0489429554fdb7c8d086475319e63b40b9c5b57cdf1ff3dd9fe2261")
-  };
-  /**
-   * Modular inverse using Extended Euclidean Algorithm - MEJORADO
-   */
-  static modInverse(a, m) {
-    if (m <= 0n) {
-      throw new Error("Modulus must be positive");
-    }
-    a = (a % m + m) % m;
-    if (a === 0n) {
-      throw new Error("Modular inverse of 0 does not exist");
-    }
-    if (a === 1n) {
-      return 1n;
-    }
-    let old_r = a;
-    let r = m;
-    let old_s = 1n;
-    let s = 0n;
-    while (r !== 0n) {
-      const quotient = old_r / r;
-      const temp_r = old_r;
-      old_r = r;
-      r = temp_r - quotient * r;
-      const temp_s = old_s;
-      old_s = s;
-      s = temp_s - quotient * s;
-    }
-    if (old_r !== 1n) {
-      console.error("GCD is not 1, no modular inverse exists");
-      throw new Error(`Modular inverse does not exist. GCD(${a}, ${m}) = ${old_r}`);
-    }
-    if (old_s < 0n) {
-      old_s = old_s + m;
-    }
-    if (a * old_s % m !== 1n) {
-      console.error(`Verification failed: ${a} * ${old_s} % ${m} = ${a * old_s % m}`);
-      throw new Error("Modular inverse verification failed");
-    }
-    return old_s;
-  }
-  /**
-   * Field arithmetic - operaciones en el campo finito
-   */
-  static fieldAdd(a, b) {
-    return (a + b) % this.FIELD_MODULUS;
-  }
-  static fieldSub(a, b) {
-    return ((a - b) % this.FIELD_MODULUS + this.FIELD_MODULUS) % this.FIELD_MODULUS;
-  }
-  static fieldMul(a, b) {
-    return a * b % this.FIELD_MODULUS;
-  }
-  static fieldInv(a) {
-    return this.modInverse(a, this.FIELD_MODULUS);
-  }
-  /**
-   * Point validation - MEJORADO
-   */
-  static isValidPoint(point) {
-    try {
-      if (point.x >= this.FIELD_MODULUS || point.y >= this.FIELD_MODULUS) {
-        return false;
-      }
-      const y2 = this.fieldMul(point.y, point.y);
-      const x3 = this.fieldMul(this.fieldMul(point.x, point.x), point.x);
-      const right = this.fieldAdd(x3, 3n);
-      return y2 === right;
-    } catch {
-      return false;
-    }
-  }
-  /**
-   * Point addition - CORREGIDO
-   */
-  static addPoints(p1, p2) {
-    if (p1.x === 0n && p1.y === 0n) return p2;
-    if (p2.x === 0n && p2.y === 0n) return p1;
-    if (p1.x === p2.x) {
-      if (p1.y === p2.y) {
-        return this.doublePoint(p1);
-      } else {
-        return { x: 0n, y: 0n };
-      }
-    }
-    const dx = this.fieldSub(p2.x, p1.x);
-    const dy = this.fieldSub(p2.y, p1.y);
-    try {
-      const slope = this.fieldMul(dy, this.fieldInv(dx));
-      const x3 = this.fieldSub(this.fieldSub(this.fieldMul(slope, slope), p1.x), p2.x);
-      const y3 = this.fieldSub(this.fieldMul(slope, this.fieldSub(p1.x, x3)), p1.y);
-      return { x: x3, y: y3 };
-    } catch (error) {
-      console.error("Point addition failed:", error);
-      if (error instanceof Error) {
-        throw new Error(`Point addition failed: ${error.message}`);
-      } else {
-        throw new Error("Point addition failed: Unknown error");
-      }
-    }
-  }
-  /**
-   * Point doubling - NUEVO
-   */
-  static doublePoint(point) {
-    if (point.x === 0n && point.y === 0n) return point;
-    if (point.y === 0n) return { x: 0n, y: 0n };
-    try {
-      const numerator = this.fieldMul(3n, this.fieldMul(point.x, point.x));
-      const denominator = this.fieldMul(2n, point.y);
-      const slope = this.fieldMul(numerator, this.fieldInv(denominator));
-      const x3 = this.fieldSub(this.fieldMul(slope, slope), this.fieldMul(2n, point.x));
-      const y3 = this.fieldSub(this.fieldMul(slope, this.fieldSub(point.x, x3)), point.y);
-      return { x: x3, y: y3 };
-    } catch (error) {
-      console.error("Point doubling failed:", error);
-      if (error instanceof Error) {
-        throw new Error(`Point doubling failed: ${error.message}`);
-      } else {
-        throw new Error("Point doubling failed: Unknown error");
-      }
-    }
-  }
-  /**
-   * Scalar multiplication usando double-and-add - CORREGIDO
-   */
-  static scalarMultiply(point, scalar) {
-    if (!this.isValidPoint(point)) {
-      throw new Error("Invalid point for scalar multiplication");
-    }
-    scalar = (scalar % this.CURVE_ORDER + this.CURVE_ORDER) % this.CURVE_ORDER;
-    if (scalar === 0n) {
-      return { x: 0n, y: 0n };
-    }
-    if (scalar === 1n) {
-      return point;
-    }
-    let result = { x: 0n, y: 0n };
-    let addend = { ...point };
-    while (scalar > 0n) {
-      if (scalar & 1n) {
-        result = this.addPoints(result, addend);
-      }
-      addend = this.doublePoint(addend);
-      scalar = scalar >> 1n;
-    }
-    return result;
-  }
-}
-class ZenroomHelpers {
-  static bn254 = new BN254Ops();
-  /**
-   * Check if Zenroom/BN254 is available
-   */
-  static isZenroomAvailable() {
-    try {
-      return !!BN254Ops;
-    } catch (error) {
-      console.warn("Zenroom/BN254 not available:", error);
-      return false;
-    }
-  }
-  /**
-   * Convert a value to BigInt safely
-   */
-  static toBigInt(value) {
-    if (typeof value === "bigint") return value;
-    if (typeof value === "number") return BigInt(value);
-    if (typeof value === "string") {
-      if (value.startsWith("0x")) {
-        return BigInt(value);
-      }
-      return BigInt(value);
-    }
-    throw new Error(`Cannot convert ${typeof value} to BigInt`);
-  }
-  /**
-   * Generate a range proof for a value
-   */
-  static async generateRangeProof(value, blindingFactor, min = 0n, max = 2n ** 64n - 1n) {
-    try {
-      if (value < min || value > max) {
-        throw new Error(`Value ${value} out of range [${min}, ${max}]`);
-      }
-      if (blindingFactor >= BN254Ops.CURVE_ORDER || blindingFactor < 0n) {
-        throw new Error("Blinding factor out of range");
-      }
-      const vG = BN254Ops.scalarMultiply(BN254Ops.G1_GENERATOR, value);
-      const rH = BN254Ops.scalarMultiply(BN254Ops.H1_GENERATOR, blindingFactor);
-      const commitment = BN254Ops.addPoints(vG, rH);
-      const bitCommitments = [];
-      let tempValue = value;
-      for (let i = 0; i < 64; i++) {
-        const bit = tempValue & 1n;
-        const randomBytes2 = new Uint8Array(16);
-        crypto.getRandomValues(randomBytes2);
-        const bitBlinding = BigInt("0x" + Array.from(randomBytes2, (b) => b.toString(16).padStart(2, "0")).join("")) % BN254Ops.CURVE_ORDER;
-        const bitG = BN254Ops.scalarMultiply(BN254Ops.G1_GENERATOR, bit);
-        const bitH = BN254Ops.scalarMultiply(BN254Ops.H1_GENERATOR, bitBlinding);
-        const bitCommitment = BN254Ops.addPoints(bitG, bitH);
-        bitCommitments.push({
-          x: bitCommitment.x.toString(16),
-          y: bitCommitment.y.toString(16),
-          blinding: bitBlinding.toString(16)
-        });
-        tempValue = tempValue >> 1n;
-      }
-      const rangeProofObj = {
-        commitment: {
-          x: commitment.x.toString(16),
-          y: commitment.y.toString(16)
-        },
-        bitCommitments,
-        min: min.toString(),
-        max: max.toString(),
-        timestamp: Date.now()
-      };
-      const rangeProofJson = JSON.stringify(rangeProofObj);
-      const xBytes = commitment.x.toString(16).padStart(64, "0");
-      const yBytes = commitment.y.toString(16).padStart(64, "0");
-      const randomBytes = new Uint8Array(32);
-      crypto.getRandomValues(randomBytes);
-      const extraDataHex = Array.from(randomBytes, (b) => b.toString(16).padStart(2, "0")).join("");
-      const rangeProofHex = "0x" + xBytes + yBytes + extraDataHex;
-      console.log("🔢 Range proof created for Bulletproof verifier:", {
-        jsonProofLength: rangeProofJson.length,
-        hexProofLength: rangeProofHex.length - 2,
-        // sin contar '0x'
-        xCoord: "0x" + xBytes.slice(0, 10) + "...",
-        yCoord: "0x" + yBytes.slice(0, 10) + "..."
-      });
-      return rangeProofHex;
-    } catch (error) {
-      console.error("Range proof generation failed:", error);
-      throw new Error(`Range proof failed: ${error instanceof Error ? error.message : "Unknown error"}`);
-    }
-  }
-  /**
-   * Generate split proof (value conservation)
-   */
-  static async generateSplitProof(inputValue, outputValues, inputBlinding, outputBlindings) {
-    try {
-      const totalOutput = outputValues.reduce((sum, val) => sum + val, 0n);
-      if (inputValue !== totalOutput) {
-        throw new Error(`Value not conserved: input ${inputValue} != output ${totalOutput}`);
-      }
-      if (outputBlindings.length !== outputValues.length) {
-        throw new Error("Mismatched blinding factors and output values");
-      }
-      const inputVG = BN254Ops.scalarMultiply(BN254Ops.G1_GENERATOR, inputValue);
-      const inputRH = BN254Ops.scalarMultiply(BN254Ops.H1_GENERATOR, inputBlinding);
-      const inputCommitment = BN254Ops.addPoints(inputVG, inputRH);
-      const outputCommitments = outputValues.map((value, i) => {
-        const vG = BN254Ops.scalarMultiply(BN254Ops.G1_GENERATOR, value);
-        const rH = BN254Ops.scalarMultiply(BN254Ops.H1_GENERATOR, outputBlindings[i]);
-        return BN254Ops.addPoints(vG, rH);
-      });
-      let sumOutputCommitment = outputCommitments[0];
-      for (let i = 1; i < outputCommitments.length; i++) {
-        sumOutputCommitment = BN254Ops.addPoints(sumOutputCommitment, outputCommitments[i]);
-      }
-      const splitProof = {
-        inputCommitment: {
-          x: inputCommitment.x.toString(16),
-          y: inputCommitment.y.toString(16)
-        },
-        outputCommitments: outputCommitments.map((c) => ({
-          x: c.x.toString(16),
-          y: c.y.toString(16)
-        })),
-        sumOutputCommitment: {
-          x: sumOutputCommitment.x.toString(16),
-          y: sumOutputCommitment.y.toString(16)
-        },
-        timestamp: Date.now()
-      };
-      return JSON.stringify(splitProof);
-    } catch (error) {
-      console.error("Split proof generation failed:", error);
-      throw new Error(`Split proof failed: ${error instanceof Error ? error.message : "Unknown error"}`);
-    }
-  }
-  /**
-   * Verify Pedersen commitment
-   */
-  static async verifyPedersenCommitment(commitment, value, blindingFactor) {
-    try {
-      commitment = commitment.startsWith("0x") ? commitment.substring(2) : commitment;
-      if (commitment.length !== 128) {
-        throw new Error(`Invalid commitment length: ${commitment.length} (expected 128)`);
-      }
-      const pointX = BigInt("0x" + commitment.substring(0, 64));
-      const pointY = BigInt("0x" + commitment.substring(64, 128));
-      const commitmentPoint = { x: pointX, y: pointY };
-      if (!BN254Ops.isValidPoint(commitmentPoint)) {
-        console.error("Invalid commitment point");
-        return false;
-      }
-      const vG = BN254Ops.scalarMultiply(BN254Ops.G1_GENERATOR, value);
-      const rH = BN254Ops.scalarMultiply(BN254Ops.H1_GENERATOR, blindingFactor);
-      const expectedCommitment = BN254Ops.addPoints(vG, rH);
-      return expectedCommitment.x === commitmentPoint.x && expectedCommitment.y === commitmentPoint.y;
-    } catch (error) {
-      console.error("Pedersen commitment verification failed:", error);
-      return false;
-    }
-  }
-  /**
-   * Check if the value is a valid hexadecimal string of specified length
-   * @param value The string to validate
-   * @param byteLength The expected length in bytes (1 byte = 2 hex chars)
-   * @returns boolean indicating if the value is valid hex of correct length
-   */
-  static isValidHex(value, byteLength) {
-    try {
-      if (!value) {
-        console.warn("isValidHex: Empty value provided");
-        return false;
-      }
-      const hex = value.startsWith("0x") ? value.substring(2) : value;
-      console.log(`🔍 Validating hex [${byteLength} bytes]`, {
-        original: value,
-        withoutPrefix: hex,
-        actualLength: hex.length,
-        expectedLength: byteLength * 2
-      });
-      if (!/^[0-9a-fA-F]+$/.test(hex)) {
-        console.warn("isValidHex: Invalid characters in hex string");
-        return false;
-      }
-      const isValidLength = hex.length === byteLength * 2;
-      if (!isValidLength) {
-        console.warn(`isValidHex: Length mismatch - got ${hex.length}, expected ${byteLength * 2}`);
-      }
-      return isValidLength;
-    } catch (error) {
-      console.error("Hex validation error:", error);
-      return false;
-    }
-  }
-  /**
-   * Generate secure blinding factor for BN254
-   */
-  static async generateSecureBlindingFactor() {
-    try {
-      const randomBytes = new Uint8Array(32);
-      crypto.getRandomValues(randomBytes);
-      let blindingFactor = BigInt("0x" + Array.from(randomBytes, (b) => b.toString(16).padStart(2, "0")).join(""));
-      blindingFactor = blindingFactor % BN254Ops.CURVE_ORDER;
-      if (blindingFactor === 0n) {
-        blindingFactor = 1n;
-      }
-      return blindingFactor.toString(16).padStart(64, "0");
-    } catch (error) {
-      console.error("Failed generateSecureBlindingFactor:", error);
-      if (error instanceof Error) {
-        throw new Error(`Failed generateSecureBlindingFactor: ${error.message}`);
-      } else {
-        throw new Error("Failed generateSecureBlindingFactor Unknown error");
-      }
-    }
-  }
-  /**
-   * Create Pedersen commitment: C = vG + rH
-   */
-  static async createPedersenCommitment(value, blindingFactor) {
-    try {
-      console.log("🔐 Creating BN254 Pedersen commitment...");
-      console.log("📊 DEBUG - Starting with corrected generators");
-      const v = BigInt(value);
-      const r = BigInt("0x" + blindingFactor);
-      if (v < 0n) {
-        throw new Error("Value must be non-negative");
-      }
-      console.log("📊 Commitment inputs:", {
-        value: v.toString(),
-        blindingFactor: r.toString(16),
-        generatorG: BN254Ops.G1_GENERATOR,
-        generatorH: BN254Ops.H1_GENERATOR
-      });
-      console.log("🔍 DEBUG - Validating generators with simple check...");
-      const simpleValidatePoint = (point) => {
-        const y2 = point.y * point.y % BN254Ops.FIELD_MODULUS;
-        const x3 = point.x * point.x * point.x % BN254Ops.FIELD_MODULUS;
-        const right = (x3 + 3n) % BN254Ops.FIELD_MODULUS;
-        return y2 === right;
-      };
-      const gValid = simpleValidatePoint(BN254Ops.G1_GENERATOR);
-      const hValid = simpleValidatePoint(BN254Ops.H1_GENERATOR);
-      console.log("🔍 DEBUG - Simple generator validation:", { gValid, hValid });
-      const gValidClass = BN254Ops.isValidPoint(BN254Ops.G1_GENERATOR);
-      const hValidClass = BN254Ops.isValidPoint(BN254Ops.H1_GENERATOR);
-      console.log("🔍 DEBUG - Class function validation:", { gValidClass, hValidClass });
-      if (!gValid || !hValid) {
-        throw new Error(`Invalid generators detected: G=${gValid}, H=${hValid}`);
-      }
-      if (!gValidClass || !hValidClass) {
-        console.warn("⚠️ Class validation differs from simple validation");
-        console.warn("Using simple validation results");
-      }
-      console.log("🔢 Computing vG...");
-      const vG = BN254Ops.scalarMultiply(BN254Ops.G1_GENERATOR, v);
-      console.log("✅ vG computed:", { x: vG.x.toString(16), y: vG.y.toString(16) });
-      const vGValid = simpleValidatePoint(vG);
-      console.log("🔍 DEBUG - vG validation:", vGValid);
-      if (!vGValid) {
-        throw new Error("vG point is invalid");
-      }
-      console.log("🔢 Computing rH...");
-      const rH = BN254Ops.scalarMultiply(BN254Ops.H1_GENERATOR, r);
-      console.log("✅ rH computed:", { x: rH.x.toString(16), y: rH.y.toString(16) });
-      const rHValid = simpleValidatePoint(rH);
-      console.log("🔍 DEBUG - rH validation:", rHValid);
-      if (!rHValid) {
-        throw new Error("rH point is invalid");
-      }
-      console.log("🔢 Computing commitment vG + rH...");
-      const commitment = BN254Ops.addPoints(vG, rH);
-      console.log("✅ Commitment computed:", { x: commitment.x.toString(16), y: commitment.y.toString(16) });
-      const commitmentValid = simpleValidatePoint(commitment);
-      console.log("🔍 DEBUG - Commitment validation (simple):", commitmentValid);
-      const commitmentValidClass = BN254Ops.isValidPoint(commitment);
-      console.log("🔍 DEBUG - Commitment validation (class):", commitmentValidClass);
-      if (!commitmentValid) {
-        console.error("❌ DEBUG - Commitment validation failed with simple function");
-        throw new Error("Generated commitment is not a valid curve point (simple validation)");
-      }
-      if (!commitmentValidClass) {
-        console.warn("⚠️ DEBUG - Class validation failed but simple passed");
-      }
-      console.log("🔍 DEBUG - Manual reconstruction check...");
-      const y2_manual = commitment.y * commitment.y % BN254Ops.FIELD_MODULUS;
-      const x3_manual = commitment.x * commitment.x * commitment.x % BN254Ops.FIELD_MODULUS;
-      const right_manual = (x3_manual + 3n) % BN254Ops.FIELD_MODULUS;
-      console.log("🔍 DEBUG - Manual calculation:", {
-        y2: y2_manual.toString(16),
-        x3plus3: right_manual.toString(16),
-        equal: y2_manual === right_manual
-      });
-      if (y2_manual !== right_manual) {
-        console.error("❌ DEBUG - Manual reconstruction failed");
-        throw new Error("Manual point reconstruction failed");
-      }
-      console.log("✅ Point can be reconstructed manually");
-      const commitmentHex = commitment.x.toString(16).padStart(64, "0") + commitment.y.toString(16).padStart(64, "0");
-      console.log("✅ BN254 Pedersen commitment created successfully");
-      console.log("📊 Commitment format details:", {
-        fullLength: commitmentHex.length,
-        coordX: commitmentHex.substring(0, 64).slice(0, 10) + "...",
-        coordY: commitmentHex.substring(64).slice(0, 10) + "..."
-      });
-      return {
-        pedersen_commitment: "0x" + commitmentHex,
-        blinding_factor: blindingFactor
-      };
-    } catch (error) {
-      console.error("Failed createPedersenCommitment", error);
-      if (error instanceof Error) {
-        throw new Error(`Failed createPedersenCommitment: ${error.message}`);
-      } else {
-        throw new Error("Failed createPedersenCommitment: Unknown error");
-      }
-    }
-  }
-  /**
-   * Generate nullifier hash using cryptographic hash function
-   * @param address Owner address
-   * @param commitment Pedersen commitment
-   * @param nonce Unique nonce (typically timestamp)
-   * @returns Promise<string> Nullifier hash with 0x prefix
-   */
-  static async generateNullifierHash(address, commitment, nonce) {
-    try {
-      console.log("🔐 Generating nullifier hash with inputs:", {
-        address: address.slice(0, 10) + "...",
-        commitment: commitment.slice(0, 10) + "...",
-        nonce
-      });
-      const normalizedAddress = address.toLowerCase().replace(/^0x/, "");
-      const normalizedCommitment = commitment.toLowerCase().replace(/^0x/, "");
-      const input = normalizedAddress + normalizedCommitment + nonce;
-      const encoder = new TextEncoder();
-      const data = encoder.encode(input);
-      const hashBuffer = await crypto.subtle.digest("SHA-256", data);
-      const hashArray = new Uint8Array(hashBuffer);
-      const nullifierHex = "0x" + Array.from(hashArray, (byte) => byte.toString(16).padStart(2, "0")).join("");
-      console.log("✅ Generated nullifier hash:", nullifierHex.slice(0, 10) + "...");
-      if (!this.isValidHex(nullifierHex.substring(2), 32)) {
-        throw new Error("Generated nullifier has invalid format");
-      }
-      return nullifierHex;
-    } catch (error) {
-      console.error("Failed to generate nullifier hash:", error);
-      if (error instanceof Error) {
-        throw new Error(`Failed to generate nullifier hash: ${error.message}`);
-      } else {
-        throw new Error("Failed to generate nullifier hash: Unknown error");
-      }
-    }
-  }
-  /**
-   * Test BN254 operations
-   */
-  static async testBN254Operations() {
-    try {
-      console.log("🧪 Testing BN254 generators with direct validation...");
-      const g1Valid = isValidBN254Point(G1_GENERATOR.x, G1_GENERATOR.y);
-      console.log("G1 generator validation:", g1Valid ? "✅ VALID" : "❌ INVALID");
-      if (!g1Valid) {
-        throw new Error("G1 generator is not valid");
-      }
-      const h1Valid = isValidBN254Point(H1_GENERATOR.x, H1_GENERATOR.y);
-      console.log("H1 generator validation:", h1Valid ? "✅ VALID" : "❌ INVALID");
-      if (!h1Valid) {
-        console.error("H1 validation failed. Coordinates:", {
-          x: H1_GENERATOR.x.toString(16),
-          y: H1_GENERATOR.y.toString(16)
-        });
-        throw new Error("H1 generator is not valid");
-      }
-      console.log("✅ All BN254 generators validated successfully");
-      try {
-        const testBlindingFactor = await this.generateSecureBlindingFactor();
-        const testCommitment = await this.createPedersenCommitment("100", testBlindingFactor);
-        console.log("✅ Pedersen commitment created successfully:", testCommitment.pedersen_commitment.slice(0, 20) + "...");
-      } catch (error) {
-        console.error("❌ Pedersen commitment failed:", error);
-        const errorMessage = error instanceof Error ? error.message : "Unknown error";
-        throw new Error(`Failed createPedersenCommitment: ${errorMessage}`);
-      }
-      try {
-        const testNullifier = await this.generateNullifierHash(
-          "0x1234567890123456789012345678901234567890",
-          "0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-          "12345"
-        );
-        console.log("✅ Nullifier generated successfully:", testNullifier.slice(0, 20) + "...");
-      } catch (error) {
-        console.error("❌ Nullifier generation failed:", error);
-        const errorMessage = error instanceof Error ? error.message : "Unknown error";
-        throw new Error(`Failed generateNullifierHash: ${errorMessage}`);
-      }
-      console.log("🎉 All BN254 tests passed successfully!");
-      return true;
-      return true;
-    } catch (error) {
-      console.error("❌ BN254 test failed:", error);
-      return false;
-    }
-  }
 }
 class EthereumHelpers {
   static provider = null;
@@ -1413,6 +1707,470 @@ Timestamp: ${Date.now()}`;
         { txHash, confirmations, error: error instanceof Error ? error.message : "Unknown error" }
       );
     }
+  }
+}
+class AttestationService {
+  signer = null;
+  nonceCounter = /* @__PURE__ */ new Map();
+  constructor() {
+    this.initializeSigner();
+  }
+  /**
+   * Inicializar el signer autorizado desde variables de entorno
+   */
+  initializeSigner() {
+    try {
+      const privateKey = process.env.PRIVATE_KEY_ADMIN;
+      if (!privateKey) {
+        console.warn("⚠️ No admin private key found - attestations will not be available");
+        return;
+      }
+      if (!privateKey.match(/^[0-9a-fA-F]{64}$/)) {
+        throw new Error("Invalid private key format - must be 64 hex characters");
+      }
+      const provider = EthereumHelpers.getProvider();
+      this.signer = new ethers.Wallet("0x" + privateKey, provider);
+      console.log("✅ Attestation service initialized with authorized signer:", this.signer.address);
+    } catch (error) {
+      console.error("❌ Failed to initialize attestation signer:", error);
+      this.signer = null;
+    }
+  }
+  /**
+   * Obtener el siguiente nonce para un usuario
+   */
+  getNextNonce(userAddress) {
+    const current = this.nonceCounter.get(userAddress.toLowerCase()) || 0n;
+    const next = current + 1n;
+    this.nonceCounter.set(userAddress.toLowerCase(), next);
+    return next;
+  }
+  /**
+   * Crear hash de datos para DEPOSIT
+   */
+  createDepositDataHash(data) {
+    const encoded = ethers.AbiCoder.defaultAbiCoder().encode(
+      ["address", "uint256", "uint256", "bytes32", "uint256", "address"],
+      [data.tokenAddress, data.commitmentX, data.commitmentY, data.nullifier, data.amount, data.userAddress]
+    );
+    return ethers.keccak256(encoded);
+  }
+  /**
+   * Crear hash de datos para TRANSFER
+   */
+  createTransferDataHash(data) {
+    const encoded = ethers.AbiCoder.defaultAbiCoder().encode(
+      ["uint256", "uint256", "uint256", "uint256", "bytes32", "address", "address"],
+      [
+        data.inputCommitmentX,
+        data.inputCommitmentY,
+        data.outputCommitmentX,
+        data.outputCommitmentY,
+        data.nullifier,
+        data.newOwner,
+        data.userAddress
+      ]
+    );
+    return ethers.keccak256(encoded);
+  }
+  /**
+   * Crear hash de datos para SPLIT
+   */
+  createSplitDataHash(data) {
+    const encoded = ethers.AbiCoder.defaultAbiCoder().encode(
+      ["uint256", "uint256", "uint256[]", "uint256[]", "uint256[]", "address[]", "bytes32", "address"],
+      [
+        data.inputCommitmentX,
+        data.inputCommitmentY,
+        data.outputCommitmentsX,
+        data.outputCommitmentsY,
+        data.outputValues,
+        data.outputOwners,
+        data.nullifier,
+        data.userAddress
+      ]
+    );
+    return ethers.keccak256(encoded);
+  }
+  /**
+   * Crear hash de datos para WITHDRAW
+   */
+  createWithdrawDataHash(data) {
+    const encoded = ethers.AbiCoder.defaultAbiCoder().encode(
+      ["uint256", "uint256", "uint256", "bytes32", "address", "address"],
+      [data.commitmentX, data.commitmentY, data.amount, data.nullifier, data.recipient, data.userAddress]
+    );
+    return ethers.keccak256(encoded);
+  }
+  /**
+   * Crear y firmar attestation genérica
+   */
+  async createAttestation(operation, dataHash, userAddress) {
+    if (!this.signer) {
+      throw new Error("Attestation signer not initialized");
+    }
+    const nonce = this.getNextNonce(userAddress);
+    const timestamp = BigInt(Math.floor(Date.now() / 1e3));
+    const attestationData = {
+      operation,
+      dataHash,
+      nonce,
+      timestamp
+    };
+    const messageHash = ethers.solidityPackedKeccak256(
+      ["string", "bytes32", "uint256", "uint256"],
+      [operation, dataHash, nonce, timestamp]
+    );
+    const signature = await this.signer.signMessage(ethers.getBytes(messageHash));
+    console.log(`✅ Created ${operation} attestation:`, {
+      operation,
+      dataHash: dataHash.slice(0, 10) + "...",
+      nonce: nonce.toString(),
+      timestamp: timestamp.toString(),
+      signature: signature.slice(0, 10) + "...",
+      signer: this.signer.address
+    });
+    return {
+      ...attestationData,
+      signature,
+      signer: this.signer.address
+    };
+  }
+  /**
+   * Crear attestation para DEPOSIT
+   */
+  async createDepositAttestation(data) {
+    console.log("🔏 Creating DEPOSIT attestation...");
+    const dataHash = this.createDepositDataHash(data);
+    return this.createAttestation("DEPOSIT", dataHash, data.userAddress);
+  }
+  /**
+   * Crear attestation para TRANSFER
+   */
+  async createTransferAttestation(data) {
+    console.log("🔏 Creating TRANSFER attestation...");
+    const dataHash = this.createTransferDataHash(data);
+    return this.createAttestation("TRANSFER", dataHash, data.userAddress);
+  }
+  /**
+   * Crear attestation para SPLIT
+   */
+  async createSplitAttestation(data) {
+    console.log("🔏 Creating SPLIT attestation...");
+    const dataHash = this.createSplitDataHash(data);
+    return this.createAttestation("SPLIT", dataHash, data.userAddress);
+  }
+  /**
+   * Crear attestation para WITHDRAW
+   */
+  async createWithdrawAttestation(data) {
+    console.log("🔏 Creating WITHDRAW attestation...");
+    const dataHash = this.createWithdrawDataHash(data);
+    return this.createAttestation("WITHDRAW", dataHash, data.userAddress);
+  }
+  /**
+   * Verificar una attestation firmada (para testing)
+   */
+  async verifyAttestation(attestation) {
+    try {
+      const messageHash = ethers.solidityPackedKeccak256(
+        ["string", "bytes32", "uint256", "uint256"],
+        [attestation.operation, attestation.dataHash, attestation.nonce, attestation.timestamp]
+      );
+      const recoveredAddress = ethers.verifyMessage(ethers.getBytes(messageHash), attestation.signature);
+      const isValid = recoveredAddress.toLowerCase() === attestation.signer.toLowerCase();
+      console.log("🔍 Attestation verification:", {
+        operation: attestation.operation,
+        expectedSigner: attestation.signer,
+        recoveredSigner: recoveredAddress,
+        isValid
+      });
+      return isValid;
+    } catch (error) {
+      console.error("❌ Attestation verification failed:", error);
+      return false;
+    }
+  }
+  /**
+   * Obtener dirección del signer autorizado
+   */
+  getAuthorizedSigner() {
+    return this.signer?.address || null;
+  }
+  /**
+   * Verificar si el servicio está disponible
+   */
+  isAvailable() {
+    return this.signer !== null;
+  }
+}
+new AttestationService();
+class ZenroomHelpers {
+  static attestationService = new AttestationService();
+  // ========================
+  // BN254 CURVE OPERATIONS
+  // ========================
+  /**
+   * Convertir string a BigInt con validación BN254
+   */
+  static toBigInt(value) {
+    const result = BigInt(value);
+    const BN254_MODULUS = BigInt("0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001");
+    return result % BN254_MODULUS;
+  }
+  /**
+   * Generar factor de cegado seguro para BN254
+   */
+  static async generateSecureBlindingFactor() {
+    const script = `
+      rule input
+      rule output
+      Given nothing
+      When I create the random object of '256' bits
+      Then print the random object as 'hex'
+    `;
+    const result = await zenroom.exec(script);
+    const randomHex = JSON.parse(result.result).random_object;
+    return this.toBigInt("0x" + randomHex).toString(16).padStart(64, "0");
+  }
+  /**
+   * Crear Pedersen commitment usando BN254
+   */
+  static async createPedersenCommitment(value, blindingFactor) {
+    const script = `
+      Scenario 'ecdh': Create commitment
+      Given I have a 'string' named 'value'
+      Given I have a 'string' named 'blinding_factor'
+      When I create the pedersen commitment of 'value' with blinding factor 'blinding_factor'
+      Then print the 'pedersen commitment'
+    `;
+    const data = {
+      value,
+      blinding_factor: blindingFactor
+    };
+    const result = await zenroom.exec(script, { data: JSON.stringify(data) });
+    const commitment = JSON.parse(result.result);
+    const commitmentHex = commitment.pedersen_commitment;
+    const x = BigInt("0x" + commitmentHex.substring(2, 66));
+    const y = BigInt("0x" + commitmentHex.substring(66, 130));
+    return {
+      x,
+      y,
+      blindingFactor,
+      value: BigInt(value)
+    };
+  }
+  /**
+   * Verificar Pedersen commitment
+   */
+  static async verifyPedersenCommitment(commitmentHex, value, blindingFactor) {
+    try {
+      const script = `
+        Scenario 'ecdh': Verify commitment
+        Given I have a 'string' named 'commitment'
+        Given I have a 'string' named 'value'
+        Given I have a 'string' named 'blinding_factor'
+        When I verify the pedersen commitment 'commitment' with value 'value' and blinding factor 'blinding_factor'
+        Then print the string 'verified'
+      `;
+      const data = {
+        commitment: commitmentHex,
+        value: value.toString(),
+        blinding_factor: blindingFactor.toString(16)
+      };
+      const result = await zenroom.exec(script, { data: JSON.stringify(data) });
+      return JSON.parse(result.result) === "verified";
+    } catch (error) {
+      console.warn("Pedersen commitment verification failed:", error);
+      return false;
+    }
+  }
+  /**
+   * Generar Bulletproof range proof
+   */
+  static async generateBulletproof(value, blindingFactor, minRange = BigInt(0), maxRange = BigInt(2n ** 64n - 1n)) {
+    const script = `
+      Scenario 'bulletproof': Create range proof
+      Given I have a 'string' named 'value'
+      Given I have a 'string' named 'blinding_factor'
+      Given I have a 'string' named 'min_range'
+      Given I have a 'string' named 'max_range'
+      When I create the bulletproof range proof of 'value' in range 'min_range' to 'max_range' with blinding factor 'blinding_factor'
+      Then print the 'bulletproof range proof'
+    `;
+    const data = {
+      value: value.toString(),
+      blinding_factor: blindingFactor,
+      min_range: minRange.toString(),
+      max_range: maxRange.toString()
+    };
+    const result = await zenroom.exec(script, { data: JSON.stringify(data) });
+    const proof = JSON.parse(result.result);
+    return {
+      A: proof.bulletproof_range_proof.A,
+      S: proof.bulletproof_range_proof.S,
+      T1: proof.bulletproof_range_proof.T1,
+      T2: proof.bulletproof_range_proof.T2,
+      taux: proof.bulletproof_range_proof.taux,
+      mu: proof.bulletproof_range_proof.mu,
+      proof: proof.bulletproof_range_proof.proof,
+      commitment: proof.bulletproof_range_proof.commitment
+    };
+  }
+  /**
+   * Generar Coconut credential
+   */
+  static async generateCoconutCredential(attributes, issuerKeys) {
+    const script = `
+      Scenario 'coconut': Create credential
+      Given I have a 'string array' named 'attributes'
+      Given I have a 'coconut issuer keypair' named 'issuer_keys'
+      When I create the coconut credential request
+      When I create the coconut credential signature
+      Then print the 'coconut credential'
+    `;
+    const data = {
+      attributes,
+      issuer_keys: issuerKeys
+    };
+    const result = await zenroom.exec(script, { data: JSON.stringify(data) });
+    const credential = JSON.parse(result.result);
+    return {
+      signature: credential.coconut_credential.signature,
+      proof: credential.coconut_credential.proof,
+      attributes
+    };
+  }
+  /**
+   * Generar equality proof
+   */
+  static async generateEqualityProof(commitment1, commitment2) {
+    const script = `
+      Scenario 'ecdh': Create equality proof
+      Given I have a 'string' named 'commitment1'
+      Given I have a 'string' named 'commitment2'
+      Given I have a 'string' named 'blinding1'
+      Given I have a 'string' named 'blinding2'
+      When I create the equality proof between 'commitment1' and 'commitment2'
+      Then print the 'equality proof'
+    `;
+    const commitment1Hex = "0x" + commitment1.x.toString(16).padStart(64, "0") + commitment1.y.toString(16).padStart(64, "0");
+    const commitment2Hex = "0x" + commitment2.x.toString(16).padStart(64, "0") + commitment2.y.toString(16).padStart(64, "0");
+    const data = {
+      commitment1: commitment1Hex,
+      commitment2: commitment2Hex,
+      blinding1: commitment1.blindingFactor,
+      blinding2: commitment2.blindingFactor
+    };
+    const result = await zenroom.exec(script, { data: JSON.stringify(data) });
+    const proof = JSON.parse(result.result);
+    return {
+      challenge: proof.equality_proof.challenge,
+      response1: proof.equality_proof.response1,
+      response2: proof.equality_proof.response2
+    };
+  }
+  /**
+   * Generar nullifier hash
+   */
+  static async generateNullifierHash(commitment, owner, nonce) {
+    const script = `
+      rule input
+      rule output
+      Given I have a 'string' named 'commitment'
+      Given I have a 'string' named 'owner'
+      Given I have a 'string' named 'nonce'
+      When I create the hash of 'commitment' and 'owner' and 'nonce'
+      Then print the 'hash' as 'hex'
+    `;
+    const data = { commitment, owner, nonce };
+    const result = await zenroom.exec(script, { data: JSON.stringify(data) });
+    return JSON.parse(result.result).hash;
+  }
+  // ========================
+  // OPERATIONS WITH ATTESTATIONS
+  // ========================
+  /**
+   * Crear depósito con attestation del backend
+   */
+  static async createDepositWithAttestation(value, recipient, tokenAddress) {
+    console.log("🔐 Creating deposit with Zenroom + Backend attestation...");
+    const blindingFactor = await this.generateSecureBlindingFactor();
+    const commitment = await this.createPedersenCommitment(value.toString(), blindingFactor);
+    const attestation = await this.attestationService.createDepositAttestation({
+      tokenAddress,
+      commitmentX: commitment.x,
+      commitmentY: commitment.y,
+      nullifier: await this.generateNullifierHash("0x" + commitment.x.toString(16) + commitment.y.toString(16), recipient, Date.now().toString()),
+      amount: value,
+      userAddress: recipient
+    });
+    console.log("✅ Deposit commitment + attestation created");
+    return { commitment, attestation };
+  }
+  /**
+   * Crear transferencia con attestation del backend
+   */
+  static async createTransferWithAttestation(inputCommitment, outputValue, outputRecipient, sender) {
+    console.log("🔐 Creating transfer with Zenroom + Backend attestation...");
+    const outputBlindingFactor = await this.generateSecureBlindingFactor();
+    const outputCommitment = await this.createPedersenCommitment(outputValue.toString(), outputBlindingFactor);
+    const inputCommitmentHex = "0x" + inputCommitment.x.toString(16).padStart(64, "0") + inputCommitment.y.toString(16).padStart(64, "0");
+    const attestation = await this.attestationService.createTransferAttestation({
+      inputCommitmentX: inputCommitment.x,
+      inputCommitmentY: inputCommitment.y,
+      outputCommitmentX: outputCommitment.x,
+      outputCommitmentY: outputCommitment.y,
+      nullifier: await this.generateNullifierHash(inputCommitmentHex, sender, Date.now().toString()),
+      newOwner: outputRecipient,
+      userAddress: sender
+    });
+    console.log("✅ Transfer commitment + attestation created");
+    return { outputCommitment, attestation };
+  }
+  /**
+   * Crear split con attestation del backend
+   */
+  static async createSplitWithAttestation(inputCommitment, outputValues, outputOwners, sender) {
+    console.log("🔐 Creating split with Zenroom + Backend attestation...");
+    const outputCommitments = [];
+    for (const value of outputValues) {
+      const blindingFactor = await this.generateSecureBlindingFactor();
+      const commitment = await this.createPedersenCommitment(value.toString(), blindingFactor);
+      outputCommitments.push(commitment);
+    }
+    const inputCommitmentHex = "0x" + inputCommitment.x.toString(16).padStart(64, "0") + inputCommitment.y.toString(16).padStart(64, "0");
+    const outputCommitmentsX = outputCommitments.map((c) => c.x);
+    const outputCommitmentsY = outputCommitments.map((c) => c.y);
+    const attestation = await this.attestationService.createSplitAttestation({
+      inputCommitmentX: inputCommitment.x,
+      inputCommitmentY: inputCommitment.y,
+      outputCommitmentsX,
+      outputCommitmentsY,
+      outputValues,
+      outputOwners,
+      nullifier: await this.generateNullifierHash(inputCommitmentHex, sender, Date.now().toString()),
+      userAddress: sender
+    });
+    console.log("✅ Split commitments + attestation created");
+    return { outputCommitments, attestation };
+  }
+  /**
+   * Crear withdrawal con attestation del backend
+   */
+  static async createWithdrawWithAttestation(commitment, recipient, sender) {
+    console.log("🔐 Creating withdrawal with Backend attestation...");
+    const commitmentHex = "0x" + commitment.x.toString(16).padStart(64, "0") + commitment.y.toString(16).padStart(64, "0");
+    const attestation = await this.attestationService.createWithdrawAttestation({
+      commitmentX: commitment.x,
+      commitmentY: commitment.y,
+      amount: commitment.value,
+      nullifier: await this.generateNullifierHash(commitmentHex, sender, Date.now().toString()),
+      recipient,
+      userAddress: sender
+    });
+    console.log("✅ Withdrawal attestation created");
+    return { attestation };
   }
 }
 class EventEmitter {
@@ -2317,10 +3075,194 @@ class UTXOLibrary extends EventEmitter {
   }
 }
 new UTXOLibrary();
+class GasManager {
+  networkConfigs = /* @__PURE__ */ new Map();
+  constructor() {
+    this.networkConfigs.set(80002, {
+      // Polygon Amoy
+      requiresGas: true,
+      defaultGasLimit: BigInt(5e5),
+      defaultGasPrice: BigInt(3e10),
+      // 30 Gwei
+      gasMultiplier: 1.2
+      // +20% para operaciones BN254
+    });
+    this.networkConfigs.set(2020, {
+      // Alastria
+      requiresGas: false
+      // Red sin costes de gas
+    });
+    this.networkConfigs.set(137, {
+      // Polygon Mainnet
+      requiresGas: true,
+      defaultGasLimit: BigInt(5e5),
+      defaultGasPrice: BigInt(5e10),
+      // 50 Gwei
+      gasMultiplier: 1.5
+      // +50% para operaciones complejas
+    });
+    this.networkConfigs.set(1, {
+      // Ethereum Mainnet
+      requiresGas: true,
+      defaultGasLimit: BigInt(5e5),
+      defaultGasPrice: BigInt(2e10),
+      // 20 Gwei
+      gasMultiplier: 1.3
+      // +30% para asegurar procesamiento
+    });
+  }
+  /**
+   * Registra una nueva configuración de red
+   */
+  registerNetwork(chainId, config) {
+    this.networkConfigs.set(chainId, config);
+    console.log(`⛽ Registered gas config for chain ${chainId}:`, config);
+  }
+  /**
+   * Verifica si una red requiere gas
+   */
+  requiresGas(chainId) {
+    const config = this.networkConfigs.get(chainId);
+    return config?.requiresGas ?? true;
+  }
+  /**
+   * Obtiene opciones de gas para una transacción
+   */
+  async getGasOptions(chainId, provider, operation = "default") {
+    const config = this.networkConfigs.get(chainId);
+    if (!config?.requiresGas) {
+      console.log(`⛽ Chain ${chainId} is gas-free, skipping gas calculations`);
+      return null;
+    }
+    console.log(`⛽ Calculating gas for chain ${chainId}, operation: ${operation}`);
+    try {
+      const gasOptions = {};
+      gasOptions.gasLimit = this.getGasLimitForOperation(operation, config);
+      if (provider) {
+        const feeData = await provider.getFeeData();
+        console.log(`⛽ Current fee data:`, {
+          gasPrice: feeData.gasPrice ? ethers.formatUnits(feeData.gasPrice, "gwei") + " gwei" : "N/A",
+          maxFeePerGas: feeData.maxFeePerGas ? ethers.formatUnits(feeData.maxFeePerGas, "gwei") + " gwei" : "N/A",
+          maxPriorityFeePerGas: feeData.maxPriorityFeePerGas ? ethers.formatUnits(feeData.maxPriorityFeePerGas, "gwei") + " gwei" : "N/A"
+        });
+        if (feeData.maxFeePerGas && feeData.maxPriorityFeePerGas) {
+          gasOptions.maxFeePerGas = this.applyMultiplier(feeData.maxFeePerGas, config.gasMultiplier);
+          gasOptions.maxPriorityFeePerGas = this.applyMultiplier(feeData.maxPriorityFeePerGas, config.gasMultiplier);
+          console.log(`⛽ Using EIP-1559 pricing with ${config.gasMultiplier}x multiplier`);
+        } else if (feeData.gasPrice) {
+          gasOptions.gasPrice = this.applyMultiplier(feeData.gasPrice, config.gasMultiplier);
+          console.log(`⛽ Using legacy gas pricing with ${config.gasMultiplier}x multiplier`);
+        } else {
+          gasOptions.gasPrice = config.defaultGasPrice || BigInt(2e10);
+          console.log(`⛽ Using default gas price fallback`);
+        }
+      } else {
+        gasOptions.gasPrice = config.defaultGasPrice || BigInt(2e10);
+        console.log(`⛽ Using default config (no provider)`);
+      }
+      console.log(`⛽ Final gas options:`, {
+        gasLimit: gasOptions.gasLimit?.toString(),
+        gasPrice: gasOptions.gasPrice ? ethers.formatUnits(gasOptions.gasPrice, "gwei") + " gwei" : "N/A",
+        maxFeePerGas: gasOptions.maxFeePerGas ? ethers.formatUnits(gasOptions.maxFeePerGas, "gwei") + " gwei" : "N/A",
+        maxPriorityFeePerGas: gasOptions.maxPriorityFeePerGas ? ethers.formatUnits(gasOptions.maxPriorityFeePerGas, "gwei") + " gwei" : "N/A"
+      });
+      return gasOptions;
+    } catch (error) {
+      console.warn(`⚠️ Failed to get gas options for chain ${chainId}:`, error.message);
+      return {
+        gasLimit: config.defaultGasLimit || BigInt(5e5),
+        gasPrice: config.defaultGasPrice || BigInt(2e10)
+      };
+    }
+  }
+  /**
+   * Aplica gas options a parámetros de transacción
+   */
+  async applyGasToTransaction(txParams, chainId, provider, operation = "default") {
+    if (!this.requiresGas(chainId)) {
+      console.log(`⛽ Chain ${chainId} is gas-free, returning transaction params unchanged`);
+      return txParams;
+    }
+    const gasOptions = await this.getGasOptions(chainId, provider, operation);
+    if (gasOptions) {
+      return { ...txParams, ...gasOptions };
+    }
+    return txParams;
+  }
+  /**
+   * Obtiene gas limit apropiado según la operación
+   */
+  getGasLimitForOperation(operation, config) {
+    const baseLimit = config.defaultGasLimit || BigInt(5e5);
+    switch (operation) {
+      case "deposit":
+        return baseLimit;
+      // Depósitos son relativamente simples
+      case "transfer":
+        return baseLimit + BigInt(1e5);
+      // Transferencias requieren más gas
+      case "split":
+        return baseLimit + BigInt(2e5);
+      // Split es más complejo
+      case "withdraw":
+        return baseLimit + BigInt(15e4);
+      // Withdraw requiere validaciones extra
+      default:
+        return baseLimit;
+    }
+  }
+  /**
+   * Aplica multiplicador a un valor de gas
+   */
+  applyMultiplier(gasValue, multiplier) {
+    if (!multiplier || multiplier === 1) return gasValue;
+    const multiplierBigInt = BigInt(Math.floor(multiplier * 100));
+    return gasValue * multiplierBigInt / 100n;
+  }
+  /**
+   * Estima costo de transacción (solo para redes con gas)
+   */
+  async estimateTransactionCost(chainId, gasLimit, provider) {
+    if (!this.requiresGas(chainId)) {
+      return null;
+    }
+    try {
+      const gasOptions = await this.getGasOptions(chainId, provider);
+      if (!gasOptions) return null;
+      const effectiveGasPrice = gasOptions.gasPrice || gasOptions.maxFeePerGas || BigInt(0);
+      const cost = gasLimit * effectiveGasPrice;
+      return {
+        cost,
+        costInEth: ethers.formatEther(cost),
+        gasPrice: effectiveGasPrice
+      };
+    } catch (error) {
+      console.warn(`⚠️ Failed to estimate transaction cost:`, error.message);
+      return null;
+    }
+  }
+  /**
+   * Debug: Muestra configuración actual
+   */
+  debugConfiguration() {
+    console.log("⛽ === GAS MANAGER CONFIGURATION ===");
+    for (const [chainId, config] of this.networkConfigs.entries()) {
+      console.log(`Chain ${chainId}:`, {
+        requiresGas: config.requiresGas,
+        defaultGasLimit: config.defaultGasLimit?.toString(),
+        defaultGasPrice: config.defaultGasPrice ? ethers.formatUnits(config.defaultGasPrice, "gwei") + " gwei" : "N/A",
+        gasMultiplier: config.gasMultiplier || 1
+      });
+    }
+  }
+}
+const gasManager = new GasManager();
 class PrivateUTXOManager extends UTXOLibrary {
   // Almacenamiento de UTXOs privados con BN254
   privateUTXOs = /* @__PURE__ */ new Map();
   bn254OperationCount = 0;
+  currentChainId = null;
+  // Para manejar gas inteligentemente
   constructor(config = {
     // ✅ CAMBIAR TIPO
     autoConsolidate: false,
@@ -2333,6 +3275,73 @@ class PrivateUTXOManager extends UTXOLibrary {
   }) {
     super(config);
     console.log("🔐 PrivateUTXOManager initialized with REAL BN254 cryptography only");
+  }
+  /**
+   * Initialize with chain ID detection for smart gas management
+   */
+  async initialize(contractAddressOrProvider) {
+    try {
+      const success = await super.initialize(contractAddressOrProvider);
+      if (success) {
+        try {
+          const provider = EthereumHelpers.getProvider();
+          if (provider) {
+            const network = await provider.getNetwork();
+            this.currentChainId = Number(network.chainId);
+            console.log(`⛽ Detected chain ID: ${this.currentChainId}`);
+            console.log(`⛽ Network requires gas: ${gasManager.requiresGas(this.currentChainId)}`);
+            gasManager.debugConfiguration();
+          }
+        } catch (networkError) {
+          console.warn("⚠️ Could not detect chain ID:", networkError.message);
+          this.currentChainId = null;
+        }
+      }
+      return success;
+    } catch (error) {
+      console.error("❌ Failed to initialize PrivateUTXOManager:", error);
+      return false;
+    }
+  }
+  /**
+   * Helper method to prepare transaction parameters with smart gas management
+   */
+  async prepareTransactionParams(operation = "default", customGasLimit) {
+    try {
+      const gasOptions = await gasManager.getGasOptions(
+        this.currentChainId || 1,
+        // Fallback to Ethereum mainnet
+        EthereumHelpers.getProvider(),
+        operation
+      );
+      let txParams = {};
+      if (customGasLimit) {
+        txParams.gasLimit = customGasLimit;
+      }
+      if (gasOptions) {
+        txParams = { ...txParams, ...gasOptions };
+        console.log(`⛽ Transaction parameters for ${operation}:`, {
+          gasLimit: customGasLimit?.toString() || "estimated",
+          gasPrice: gasOptions.gasPrice ? ethers.formatUnits(gasOptions.gasPrice, "gwei") + " gwei" : "N/A",
+          maxFeePerGas: gasOptions.maxFeePerGas ? ethers.formatUnits(gasOptions.maxFeePerGas, "gwei") + " gwei" : "N/A",
+          network: `Chain ${this.currentChainId} (gas required)`,
+          operation
+        });
+      } else {
+        console.log(`⛽ Gas-free network detected, skipping gas parameters for ${operation}`);
+      }
+      return txParams;
+    } catch (error) {
+      console.warn(`⚠️ Failed to prepare transaction params for ${operation}:`, error.message);
+      if (gasManager.requiresGas(this.currentChainId || 1)) {
+        return {
+          gasLimit: customGasLimit || BigInt(5e5),
+          gasPrice: BigInt(2e10)
+          // 20 Gwei fallback
+        };
+      }
+      return customGasLimit ? { gasLimit: customGasLimit } : {};
+    }
   }
   // ========================
   // OPERACIONES PRIVADAS CON CRIPTOGRAFÍA BN254 REAL
@@ -2382,15 +3391,12 @@ class PrivateUTXOManager extends UTXOLibrary {
       if (currentAllowance < amount) {
         console.log("🔓 Insufficient allowance, approving token spending...");
         const approvalAmount = amount + amount / 100n;
-        let gasPrice;
-        try {
-          const feeData = await signer.provider?.getFeeData();
-          gasPrice = feeData?.gasPrice || ethers.parseUnits("25", "gwei");
-          gasPrice = gasPrice + gasPrice * 20n / 100n;
-        } catch (error) {
-          console.warn("Could not get gas price, using BN254-optimized default:", error);
-          gasPrice = ethers.parseUnits("30", "gwei");
-        }
+        const gasOptions = await gasManager.getGasOptions(
+          this.currentChainId || 1,
+          // Fallback a Ethereum mainnet
+          EthereumHelpers.getProvider(),
+          "default"
+        );
         let gasLimit;
         try {
           const estimatedGas = await tokenContract.approve.estimateGas(
@@ -2402,18 +3408,25 @@ class PrivateUTXOManager extends UTXOLibrary {
           console.warn("Gas estimation failed, using conservative limit:", gasError);
           gasLimit = BigInt(1e5);
         }
-        console.log("⛽ Approval transaction parameters:", {
-          approvalAmount: ethers.formatUnits(approvalAmount, tokenDecimals),
-          gasLimit: gasLimit.toString(),
-          gasPrice: ethers.formatUnits(gasPrice, "gwei") + " gwei"
-        });
+        let txParams = {
+          gasLimit
+        };
+        if (gasOptions) {
+          txParams = { ...txParams, ...gasOptions };
+          console.log("⛽ Approval transaction parameters:", {
+            approvalAmount: ethers.formatUnits(approvalAmount, tokenDecimals),
+            gasLimit: gasLimit.toString(),
+            gasPrice: gasOptions.gasPrice ? ethers.formatUnits(gasOptions.gasPrice, "gwei") + " gwei" : "N/A",
+            maxFeePerGas: gasOptions.maxFeePerGas ? ethers.formatUnits(gasOptions.maxFeePerGas, "gwei") + " gwei" : "N/A",
+            network: `Chain ${this.currentChainId} (${gasManager.requiresGas(this.currentChainId || 1) ? "gas required" : "gas-free"})`
+          });
+        } else {
+          console.log("⛽ Gas-free network detected, skipping gas parameters for approval");
+        }
         const approveTx = await tokenContract.approve(
           this.contract?.target,
           approvalAmount,
-          {
-            gasLimit,
-            gasPrice
-          }
+          txParams
         );
         console.log("⏳ Approval transaction sent:", approveTx.hash);
         const approveReceipt = await approveTx.wait();
@@ -2442,376 +3455,43 @@ class PrivateUTXOManager extends UTXOLibrary {
     }
   }
   /**
-   * Crear UTXO privado usando REAL BN254 cryptography
+   * Crear UTXO privado usando nueva arquitectura de attestations
    */
   async createPrivateUTXO(params) {
-    console.log("🔍 Verificando inicialización del contrato...");
-    try {
-      this.ensureInitialized();
-      console.log("✅ Contrato UTXO inicializado correctamente");
-    } catch (initError) {
-      console.error("❌ Error en la inicialización del contrato:", initError);
-      return {
-        success: false,
-        error: `Error de inicialización: ${initError instanceof Error ? initError.message : "Error desconocido"}`,
-        errorDetails: initError
-      };
-    }
-    console.log("🔐 Creating private UTXO with REAL BN254 cryptography...");
+    console.log("🏦 Creating private UTXO with attestation architecture...");
+    console.log("📋 Using: Backend autorizado firma attestations que Solidity confía");
     this.bn254OperationCount++;
     try {
       const { amount, tokenAddress, owner } = params;
       if (amount <= 0n) {
         throw new Error("Amount must be greater than zero");
       }
-      console.log("🔓 Approving token spending for BN254 operations...");
-      await this.approveTokenSpending(tokenAddress, amount);
-      console.log("🎲 Generating BN254-compatible blinding factor...");
-      const blindingFactor = await ZenroomHelpers.generateSecureBlindingFactor();
-      console.log("✅ BN254 blinding factor generated:", blindingFactor.slice(0, 10) + "...");
-      console.log("🔐 Creating REAL BN254 Pedersen commitment...");
-      const commitmentResult = await ZenroomHelpers.createPedersenCommitment(
-        amount.toString(),
-        blindingFactor
-      );
-      console.log("✅ REAL BN254 Pedersen commitment created:", commitmentResult.pedersen_commitment.slice(0, 20) + "...");
-      console.log("🔐 Generating BN254 nullifier hash...");
-      const nullifierHash = await ZenroomHelpers.generateNullifierHash(
-        this.currentAccount.address,
-        commitmentResult.pedersen_commitment,
-        Date.now().toString()
-      );
-      console.log("✅ BN254 nullifier hash generated:", nullifierHash.slice(0, 20) + "...");
-      console.log("🔍 Generating BN254 range proof...");
-      const rangeProof = await ZenroomHelpers.generateRangeProof(
-        BigInt(amount),
-        ZenroomHelpers.toBigInt("0x" + blindingFactor),
-        0n,
-        // min value (0)
-        2n ** 64n - 1n
-        // max value (64-bit range)
-      );
-      console.log("✅ BN254 range proof generated:", rangeProof.slice(0, 20) + "...");
-      const generatorParams = this.getBN254StandardGenerators();
-      console.log("🔍 Preparing BN254-validated contract parameters...");
-      if (!commitmentResult.pedersen_commitment.startsWith("0x")) {
-        console.error("Commitment missing 0x prefix:", commitmentResult.pedersen_commitment);
-        throw new Error("Invalid BN254 commitment format: missing 0x prefix");
+      if (!this.currentAccount?.address) {
+        throw new Error("Account not connected");
       }
-      const commitmentHex = commitmentResult.pedersen_commitment.substring(2);
-      if (commitmentHex.length !== 128) {
-        console.error("Commitment format error:", {
-          original: commitmentResult.pedersen_commitment,
-          cleaned: commitmentHex,
-          length: commitmentHex.length,
-          expectedLength: 128
-        });
-        throw new Error(`Invalid BN254 commitment format: expected 128 hex chars, got ${commitmentHex.length}`);
-      }
-      const contractCommitmentHex = commitmentHex.substring(0, 64);
-      if (!ZenroomHelpers.isValidHex(contractCommitmentHex, 32)) {
-        console.error("Contract commitment format error:", {
-          original: commitmentHex.slice(0, 10) + "...",
-          contractFormat: contractCommitmentHex,
-          length: contractCommitmentHex.length
-        });
-        throw new Error("Invalid BN254 contract commitment format");
-      }
-      console.log("✅ Validated commitment format:", {
-        fullCommitment: commitmentResult.pedersen_commitment.slice(0, 10) + "...",
-        contractCommitment: "0x" + contractCommitmentHex.slice(0, 10) + "...",
-        fullLength: commitmentHex.length,
-        contractLength: contractCommitmentHex.length
+      console.log("� Nueva arquitectura:", {
+        backend: "Autoriza y firma attestations",
+        zenroom: "Maneja toda la criptografía",
+        solidity: "Solo verifica firmas ECDSA"
       });
-      console.log("🔍 Validating BN254 commitment point...");
-      const fullCommitmentX = BigInt("0x" + commitmentHex.substring(0, 64));
-      const fullCommitmentY = BigInt("0x" + commitmentHex.substring(64, 128));
-      console.log("🧮 BN254 Point Coordinates:", {
-        x: fullCommitmentX.toString(16),
-        y: fullCommitmentY.toString(16),
-        xLength: fullCommitmentX.toString(16).length,
-        yLength: fullCommitmentY.toString(16).length
-      });
-      const FIELD_MODULUS = BigInt("0x30644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd47");
-      console.log("🔍 Field validation:", {
-        xInField: fullCommitmentX < FIELD_MODULUS,
-        yInField: fullCommitmentY < FIELD_MODULUS,
-        fieldModulus: FIELD_MODULUS.toString(16)
-      });
-      const ySquared = fullCommitmentY * fullCommitmentY % FIELD_MODULUS;
-      const xCubed = fullCommitmentX * fullCommitmentX * fullCommitmentX % FIELD_MODULUS;
-      const rightSide = (xCubed + 3n) % FIELD_MODULUS;
-      console.log("🧮 Curve equation validation:", {
-        ySquared: ySquared.toString(16),
-        xCubedPlus3: rightSide.toString(16),
-        isValid: ySquared === rightSide
-      });
-      const isValidPoint = fullCommitmentX < FIELD_MODULUS && fullCommitmentY < FIELD_MODULUS && ySquared === rightSide;
-      console.log("🎯 Point validation result:", isValidPoint);
-      if (!isValidPoint) {
-        console.error("❌ BN254 point validation failed:", {
-          reason: ySquared !== rightSide ? "Point not on curve" : "Coordinates out of field",
-          fullCommitment: commitmentResult.pedersen_commitment,
-          parsedX: fullCommitmentX.toString(16),
-          parsedY: fullCommitmentY.toString(16)
-        });
-        console.log("🔄 Attempting to regenerate commitment with corrected parameters...");
-        try {
-          const correctedCommitment = await ZenroomHelpers.createPedersenCommitment(
-            amount.toString(),
-            blindingFactor
-          );
-          console.log("🔄 Regenerated commitment:", correctedCommitment.pedersen_commitment);
-          const newCommitmentHex = correctedCommitment.pedersen_commitment.substring(2);
-          const newX = BigInt("0x" + newCommitmentHex.substring(0, 64));
-          const newY = BigInt("0x" + newCommitmentHex.substring(64, 128));
-          const newYSquared = newY * newY % FIELD_MODULUS;
-          const newXCubed = newX * newX * newX % FIELD_MODULUS;
-          const newRightSide = (newXCubed + 3n) % FIELD_MODULUS;
-          const newIsValid = newX < FIELD_MODULUS && newY < FIELD_MODULUS && newYSquared === newRightSide;
-          if (newIsValid) {
-            console.log("✅ Regenerated commitment is valid, using corrected values");
-            const correctedCommitmentHex = correctedCommitment.pedersen_commitment.substring(2);
-            const correctedContractCommitmentHex = correctedCommitmentHex.substring(0, 64);
-            console.log("🔄 Using regenerated commitment values");
-          } else {
-            console.error("❌ Even regenerated commitment is invalid");
-            throw new Error("BN254 commitment generation is fundamentally broken");
-          }
-        } catch (regenerationError) {
-          console.error("❌ Failed to regenerate commitment:", regenerationError);
-          throw new Error("BN254 commitment point validation failed. Please try again.");
-        }
-      } else {
-        console.log("✅ BN254 commitment point validation passed");
-      }
-      if (!nullifierHash.startsWith("0x")) {
-        console.error("Nullifier missing 0x prefix:", nullifierHash);
-        throw new Error("Invalid BN254 nullifier hash format: missing 0x prefix");
-      }
-      const nullifierHex = nullifierHash.substring(2);
-      if (!ZenroomHelpers.isValidHex(nullifierHex, 32)) {
-        console.error("Nullifier format error:", {
-          original: nullifierHash,
-          cleaned: nullifierHex,
-          length: nullifierHex.length,
-          expectedLength: 64
-        });
-        throw new Error(`Invalid BN254 nullifier hash format: expected 64 hex chars, got ${nullifierHex.length}`);
-      }
-      console.log("✅ Validated nullifier hash format:", {
-        withPrefix: nullifierHash.slice(0, 10) + "...",
-        withoutPrefix: nullifierHex.slice(0, 8) + "...",
-        length: nullifierHex.length
-      });
-      console.log("🧮 Using already extracted coordinates for parity encoding:", {
-        x: fullCommitmentX.toString(16),
-        y: fullCommitmentY.toString(16)
-      });
-      const x3 = fullCommitmentX * fullCommitmentX * fullCommitmentX % FIELD_MODULUS;
-      const y2 = (x3 + 3n) % FIELD_MODULUS;
-      const exp = (FIELD_MODULUS + 1n) / 4n;
-      const y_principal = this.modularExponentiation(y2, exp, FIELD_MODULUS);
-      const y_alternativa = FIELD_MODULUS - y_principal;
-      const useAlternativeY = fullCommitmentY === y_alternativa;
-      console.log("🔍 Y parity calculation:", {
-        y_principal: y_principal.toString(16),
-        y_alternativa: y_alternativa.toString(16),
-        our_y: fullCommitmentY.toString(16),
-        useAlternativeY
-      });
-      let modifiedBlindingFactor = ZenroomHelpers.toBigInt("0x" + blindingFactor);
-      modifiedBlindingFactor = modifiedBlindingFactor & ~1n;
-      if (useAlternativeY) {
-        modifiedBlindingFactor = modifiedBlindingFactor | 1n;
-      }
-      console.log("🎯 Modified blinding factor with Y parity:", {
-        original: blindingFactor,
-        modified: modifiedBlindingFactor.toString(16),
-        parityBit: useAlternativeY ? 1 : 0
-      });
-      const contractCommitment = "0x" + contractCommitmentHex;
-      console.log("📊 Preparing contract parameters:", {
-        fullCommitment: commitmentResult.pedersen_commitment.slice(0, 15) + "...",
-        contractCommitment: contractCommitment.slice(0, 15) + "...",
-        blindingFactorWithParity: modifiedBlindingFactor.toString(16).slice(0, 10) + "..."
-      });
-      const depositParams = {
-        tokenAddress,
-        commitment: contractCommitment,
-        // Usamos solo la coordenada X como bytes32
-        nullifierHash,
-        blindingFactor: modifiedBlindingFactor
-        // Blinding factor con información de paridad Y
-      };
-      if (!rangeProof.startsWith("0x")) {
-        console.error("Range proof is not in hexadecimal format with 0x prefix:", rangeProof.slice(0, 20) + "...");
-        throw new Error("Invalid range proof format: missing 0x prefix");
-      }
-      const rangeProofHex = rangeProof.substring(2);
-      if (!/^[0-9a-f]+$/i.test(rangeProofHex)) {
-        console.error("Range proof contains invalid hexadecimal characters");
-        throw new Error("Invalid range proof format: contains non-hexadecimal characters");
-      }
-      const proofParams = {
-        rangeProof
-      };
-      console.log("📋 Final BN254 contract parameters:", {
-        tokenAddress: depositParams.tokenAddress,
-        commitment: depositParams.commitment.slice(0, 20) + "...",
-        nullifierHash: depositParams.nullifierHash.slice(0, 20) + "...",
-        blindingFactor: depositParams.blindingFactor.toString().slice(0, 10) + "...",
-        amount: amount.toString(),
-        rangeProofLength: proofParams.rangeProof.length,
-        rangeProofFormat: `0x${rangeProofHex.slice(0, 20)}...`,
-        generatorType: "BN254-standard"
-      });
-      const signer = EthereumHelpers.getSigner();
-      if (!signer) {
-        throw new Error("Signer not available for BN254 deposit transaction");
-      }
-      let gasPrice;
-      try {
-        const feeData = await signer.provider?.getFeeData();
-        gasPrice = feeData?.gasPrice || ethers.parseUnits("50", "gwei");
-        gasPrice = gasPrice + gasPrice * 100n / 100n;
-      } catch (error) {
-        console.warn("Using BN254-optimized fallback gas price for Polygon:", error);
-        gasPrice = ethers.parseUnits("60", "gwei");
-      }
-      let gasLimit;
-      try {
-        console.log("⛽ Estimating gas for REAL BN254 cryptography operations...");
-        const estimatedGas = await this.contract.depositAsPrivateUTXO.estimateGas(
-          depositParams,
-          proofParams,
-          generatorParams,
-          amount
-        );
-        gasLimit = estimatedGas + estimatedGas * 300n / 100n;
-        console.log("✅ BN254 gas estimation successful:", gasLimit.toString());
-      } catch (gasError) {
-        console.warn("❌ BN254 gas estimation failed, using MAXIMUM gas for Polygon:", gasError);
-        if (gasError.reason === "Invalid commitment point") {
-          throw new Error("BN254 commitment point validation failed. Please try again.");
-        }
-        gasLimit = BigInt(1e7);
-      }
-      const maxGasLimit = BigInt(1e7);
-      const minGasLimit = BigInt(5e6);
-      if (gasLimit > maxGasLimit) gasLimit = maxGasLimit;
-      if (gasLimit < minGasLimit) gasLimit = minGasLimit;
-      console.log("⛽ Final POLYGON gas parameters for REAL BN254 cryptography:", {
-        gasLimit: gasLimit.toString(),
-        gasPrice: ethers.formatUnits(gasPrice, "gwei") + " gwei",
-        estimatedCost: ethers.formatEther(gasLimit * gasPrice) + " MATIC",
-        note: "High gas needed for real Pedersen + Bulletproofs verification"
-      });
-      console.log("🔍 VERIFICACIÓN DETALLADA DE PARÁMETROS ANTES DEL ENVÍO:");
-      console.log("📊 depositParams:", {
-        tokenAddress: depositParams.tokenAddress,
-        commitment: depositParams.commitment,
-        commitmentLength: depositParams.commitment.length,
-        commitmentIsHex: /^0x[0-9a-fA-F]+$/.test(depositParams.commitment),
-        nullifierHash: depositParams.nullifierHash,
-        nullifierLength: depositParams.nullifierHash.length,
-        nullifierIsHex: /^0x[0-9a-fA-F]+$/.test(depositParams.nullifierHash),
-        blindingFactor: depositParams.blindingFactor.toString(),
-        blindingFactorType: typeof depositParams.blindingFactor
-      });
-      console.log("🔍 proofParams:", {
-        rangeProof: proofParams.rangeProof.slice(0, 50) + "...",
-        rangeProofLength: proofParams.rangeProof.length,
-        rangeProofIsHex: /^0x[0-9a-fA-F]+$/.test(proofParams.rangeProof),
-        rangeProofType: typeof proofParams.rangeProof
-      });
-      console.log("🔍 generatorParams:", {
-        gX: generatorParams.gX.toString(),
-        gY: generatorParams.gY.toString(),
-        hX: generatorParams.hX.toString(),
-        hY: generatorParams.hY.toString(),
-        allBigInt: typeof generatorParams.gX === "bigint" && typeof generatorParams.gY === "bigint" && typeof generatorParams.hX === "bigint" && typeof generatorParams.hY === "bigint"
-      });
-      console.log("🔍 amount:", {
-        value: amount.toString(),
-        type: typeof amount,
-        isBigInt: typeof amount === "bigint"
-      });
-      console.log("🔧 VERIFICANDO ABI ENCODING PASO A PASO...");
-      console.log("📋 Contract interface check:", {
-        hasFunction: typeof this.contract.depositAsPrivateUTXO === "function",
-        hasInterface: !!this.contract.interface,
-        contractAddress: this.contract.target
-      });
-      console.log("🔍 Parameter type verification:");
-      console.log("  depositParams:", {
-        tokenAddress: typeof depositParams.tokenAddress,
-        commitment: typeof depositParams.commitment,
-        nullifierHash: typeof depositParams.nullifierHash,
-        blindingFactor: typeof depositParams.blindingFactor,
-        isValidAddress: /^0x[0-9a-fA-F]{40}$/i.test(depositParams.tokenAddress),
-        isValidCommitment: /^0x[0-9a-fA-F]{64}$/i.test(depositParams.commitment),
-        isValidNullifier: /^0x[0-9a-fA-F]{64}$/i.test(depositParams.nullifierHash)
-      });
-      console.log("  proofParams:", {
-        rangeProofType: typeof proofParams.rangeProof,
-        rangeProofLength: proofParams.rangeProof.length,
-        isValidHex: /^0x[0-9a-fA-F]+$/i.test(proofParams.rangeProof)
-      });
-      console.log("  generatorParams:", {
-        gX: typeof generatorParams.gX,
-        gY: typeof generatorParams.gY,
-        hX: typeof generatorParams.hX,
-        hY: typeof generatorParams.hY,
-        allAreBigInt: [generatorParams.gX, generatorParams.gY, generatorParams.hX, generatorParams.hY].every((x) => typeof x === "bigint")
-      });
-      console.log("  amount:", {
-        type: typeof amount,
-        isBigInt: typeof amount === "bigint",
-        value: amount.toString()
-      });
-      try {
-        console.log("🔧 Attempting manual ABI encoding...");
-        const functionData = this.contract.interface.encodeFunctionData(
-          "depositAsPrivateUTXO",
-          [depositParams, proofParams, generatorParams, amount]
-        );
-        console.log("✅ ABI encoding successful:", {
-          dataLength: functionData.length,
-          selector: functionData.slice(0, 10),
-          hasData: functionData.length > 10,
-          sampleData: functionData.slice(0, 50) + "..."
-        });
-        if (functionData.length <= 10) {
-          throw new Error("Function data is too short - only contains selector");
-        }
-      } catch (abiError) {
-        console.error("❌ ABI encoding failed:", abiError);
-        console.error("Error details:", {
-          message: abiError.message,
-          code: abiError.code,
-          reason: abiError.reason
-        });
-        throw new Error(`ABI encoding error: ${abiError.reason || abiError.message}`);
-      }
-      console.log("🚀 Executing BN254 depositAsPrivateUTXO transaction...");
-      const tx = await this.contract.depositAsPrivateUTXO(
-        depositParams,
-        proofParams,
-        generatorParams,
+      console.log("🔐 Creating deposit with attestation using Zenroom + Backend...");
+      const { commitment, attestation } = await ZenroomHelpers.createDepositWithAttestation(
         amount,
-        {
-          gasLimit,
-          gasPrice,
-          value: BigInt(0)
-        }
+        owner,
+        tokenAddress
       );
-      console.log("✅ BN254 transaction sent:", tx.hash);
-      console.log("⏳ Waiting for BN254 transaction confirmation...");
-      const receipt = await tx.wait();
-      console.log("✅ BN254 deposit confirmed:", receipt?.hash, "Block:", receipt?.blockNumber);
+      console.log("✅ Deposit attestation created:", {
+        commitmentX: commitment.x.toString(16).slice(0, 10) + "...",
+        commitmentY: commitment.y.toString(16).slice(0, 10) + "...",
+        attestationNonce: attestation.nonce,
+        attestationTimestamp: attestation.timestamp,
+        signatureLength: attestation.signature.length
+      });
+      if (!commitment || !attestation) {
+        throw new Error("Failed to create commitment or attestation");
+      }
       const utxoId = await this.generateBN254UTXOId(
-        commitmentResult.pedersen_commitment,
+        commitment.x.toString(16) + commitment.y.toString(16),
         owner,
         Date.now()
       );
@@ -2823,17 +3503,16 @@ class PrivateUTXOManager extends UTXOLibrary {
         owner,
         timestamp: toBigInt(Date.now()),
         isSpent: false,
-        commitment: commitmentResult.pedersen_commitment,
+        commitment: "0x" + commitment.x.toString(16).padStart(64, "0") + commitment.y.toString(16).padStart(64, "0"),
         parentUTXO: "",
         utxoType: UTXOType.DEPOSIT,
-        blindingFactor,
-        nullifierHash,
+        blindingFactor: commitment.blindingFactor,
+        nullifierHash: attestation.dataHash,
+        // Hash de los datos en la attestation
         localCreatedAt: Date.now(),
         confirmed: true,
-        creationTxHash: receipt?.hash,
-        blockNumber: receipt?.blockNumber,
+        // Backend ya autorizó
         isPrivate: true,
-        rangeProof,
         cryptographyType: "BN254"
       };
       this.utxos.set(utxoId, privateUTXO);
@@ -2842,27 +3521,25 @@ class PrivateUTXOManager extends UTXOLibrary {
         const { PrivateUTXOStorage } = await import("../../chunks/PrivateUTXOStorage.js");
         PrivateUTXOStorage.savePrivateUTXO(owner, privateUTXO);
       } catch (storageError) {
-        console.warn("⚠️ Could not save BN254 UTXO to localStorage:", storageError);
+        console.warn("⚠️ Could not save UTXO to localStorage:", storageError);
       }
       const result = {
         success: true,
-        transactionHash: receipt?.hash,
-        gasUsed: receipt?.gasUsed,
+        transactionHash: `attestation_${attestation.nonce}`,
+        // Usar nonce como referencia
         createdUTXOIds: [utxoId]
       };
-      console.log("✅ Private UTXO created successfully with REAL BN254 cryptography:", utxoId);
+      console.log("✅ Private UTXO created with attestation architecture:", utxoId);
       this.emit("private:utxo:created", privateUTXO);
       return result;
     } catch (error) {
-      console.error("❌ BN254 Private UTXO creation failed:", error);
-      let errorMessage = "BN254 private UTXO creation failed";
+      console.error("❌ Private UTXO creation with attestation failed:", error);
+      let errorMessage = "Private UTXO creation failed";
       if (error instanceof Error) {
-        if (error.message.includes("Invalid commitment point")) {
-          errorMessage = "BN254 commitment validation failed. Please try again.";
-        } else if (error.message.includes("user rejected")) {
+        if (error.message.includes("user rejected")) {
           errorMessage = "Transaction was rejected by user";
         } else if (error.message.includes("insufficient funds")) {
-          errorMessage = "Insufficient funds for BN254 transaction fees";
+          errorMessage = "Insufficient funds for transaction";
         } else {
           errorMessage = error.message;
         }
@@ -2875,11 +3552,71 @@ class PrivateUTXOManager extends UTXOLibrary {
     }
   }
   /**
-   * Transferir UTXO privado usando REAL BN254 cryptography
+   * Debug function to test contract interaction before actual deposit
+   */
+  async debugContractInteraction(params) {
+    console.log("🔍 === DEBUG CONTRACT INTERACTION ===");
+    if (!this.contract) {
+      throw new Error("Contract not initialized");
+    }
+    try {
+      console.log("🌐 Testing network connectivity...");
+      try {
+        const provider = EthereumHelpers.getProvider();
+        const blockNumber = await provider.getBlockNumber();
+        const network = await provider.getNetwork();
+        console.log("✅ Network info:", {
+          chainId: network.chainId.toString(),
+          blockNumber: blockNumber.toString(),
+          name: network.name
+        });
+      } catch (networkError) {
+        console.error("❌ Network connectivity issue:", networkError);
+        throw new Error(`Network connectivity failed: ${networkError instanceof Error ? networkError.message : networkError}`);
+      }
+      console.log("📞 Testing basic contract calls with retry logic...");
+      let retryCount = 0;
+      const maxRetries = 3;
+      while (retryCount < maxRetries) {
+        try {
+          const registeredTokensCount = await this.contract.getRegisteredTokenCount();
+          console.log("✅ Contract accessible, registered tokens:", registeredTokensCount.toString());
+          const isTokenRegistered = await this.contract.isTokenRegistered(params.tokenAddress);
+          console.log("🔍 Token registration status:", isTokenRegistered);
+          const nullifierHash = await ZenroomHelpers.generateNullifierHash(
+            "test_commitment",
+            params.owner,
+            Date.now().toString()
+          );
+          const isNullifierUsed = await this.contract.isNullifierUsed(nullifierHash);
+          console.log("🔍 Nullifier status (should be false):", isNullifierUsed);
+          break;
+        } catch (contractError) {
+          retryCount++;
+          console.warn(`⚠️ Contract call attempt ${retryCount}/${maxRetries} failed:`, contractError?.message || contractError);
+          if (retryCount >= maxRetries) {
+            if (contractError?.message?.includes("missing trie node") || contractError?.code === -32603) {
+              throw new Error(`Network node synchronization issue. Please try again in a few moments or switch to a different RPC endpoint. Error: ${contractError.message}`);
+            }
+            if (contractError?.code === "CALL_EXCEPTION" && contractError?.message?.includes("missing revert data")) {
+              throw new Error(`Contract call failed - contract may not be properly deployed at ${this.contract?.target}. Error: ${contractError.message}`);
+            }
+            throw new Error(`Contract interaction failed after ${maxRetries} attempts: ${contractError?.message || contractError}`);
+          }
+          await new Promise((resolve) => setTimeout(resolve, 1e3 * retryCount));
+        }
+      }
+      console.log("✅ Basic contract interaction tests passed");
+    } catch (error) {
+      console.error("❌ Contract interaction test failed:", error);
+      throw new Error(`Contract interaction test failed: ${error instanceof Error ? error.message : error}`);
+    }
+  }
+  /**
+   * Transferir UTXO privado usando arquitectura de attestations
    */
   async transferPrivateUTXO(params) {
-    this.ensureInitialized();
-    console.log("🔄 Transferring private UTXO with REAL BN254 cryptography...");
+    console.log("� Transferring private UTXO with attestation architecture...");
     this.bn254OperationCount++;
     try {
       const { utxoId, newOwner } = params;
@@ -2890,84 +3627,37 @@ class PrivateUTXOManager extends UTXOLibrary {
       if (utxo.isSpent) {
         throw new Error("UTXO is already spent");
       }
-      console.log("🔍 Verifying existing BN254 commitment...");
-      const isValidCommitment = await ZenroomHelpers.verifyPedersenCommitment(
-        utxo.commitment,
-        BigInt(utxo.value),
-        ZenroomHelpers.toBigInt("0x" + utxo.blindingFactor)
-      );
-      if (!isValidCommitment) {
-        throw new Error("BN254 commitment verification failed - UTXO data may be corrupted");
-      }
-      console.log("🎲 Generating new BN254 blinding factor for output...");
-      const newBlindingFactor = await ZenroomHelpers.generateSecureBlindingFactor();
-      console.log("🔐 Creating new REAL BN254 Pedersen commitment for recipient...");
-      const newCommitmentResult = await ZenroomHelpers.createPedersenCommitment(
-        utxo.value.toString(),
-        newBlindingFactor
-      );
-      console.log("✅ New BN254 commitment created:", newCommitmentResult.pedersen_commitment.slice(0, 20) + "...");
-      const nullifierHash = await ZenroomHelpers.generateNullifierHash(
-        utxo.commitment,
-        utxo.owner,
-        Date.now().toString()
-      );
-      const generatorParams = this.getBN254StandardGenerators();
-      const signer = EthereumHelpers.getSigner();
-      if (!signer) {
-        throw new Error("Signer not available for BN254 transfer transaction");
-      }
-      let gasPrice;
-      try {
-        const feeData = await signer.provider?.getFeeData();
-        gasPrice = feeData?.gasPrice || ethers.parseUnits("25", "gwei");
-        gasPrice = gasPrice + gasPrice * 20n / 100n;
-      } catch (error) {
-        console.warn("Using BN254 transfer fallback gas price:", error);
-        gasPrice = ethers.parseUnits("30", "gwei");
-      }
-      const estimatedGas = BigInt(8e5);
-      const gasLimit = estimatedGas + estimatedGas * 25n / 100n;
-      console.log("⛽ BN254 transfer gas parameters:", {
-        gasLimit: gasLimit.toString(),
-        gasPrice: ethers.formatUnits(gasPrice, "gwei") + " gwei"
-      });
-      console.log("🚀 Calling transferPrivateUTXO with REAL BN254 cryptography...");
-      const tx = await this.contract.transferPrivateUTXO(
-        utxo.commitment,
-        newCommitmentResult.pedersen_commitment,
-        newOwner,
+      const inputCommitment = {
+        x: BigInt("0x" + utxo.commitment.substring(2, 66)),
+        // primeros 64 chars
+        y: BigInt("0x" + utxo.commitment.substring(66, 130)),
+        // siguientes 64 chars
+        blindingFactor: utxo.blindingFactor,
+        value: utxo.value
+      };
+      console.log("🔐 Creating transfer with attestation using Zenroom + Backend...");
+      const { outputCommitment, attestation } = await ZenroomHelpers.createTransferWithAttestation(
+        inputCommitment,
         utxo.value,
-        ZenroomHelpers.toBigInt("0x" + newBlindingFactor),
-        nullifierHash,
-        generatorParams,
-        {
-          gasLimit,
-          gasPrice
-        }
+        // outputValue
+        newOwner,
+        // outputRecipient  
+        utxo.owner
+        // sender
       );
-      console.log("✅ BN254 transfer transaction sent:", tx.hash);
-      const receipt = await tx.wait();
-      console.log("✅ BN254 transfer confirmed:", receipt?.hash);
+      console.log("✅ Transfer attestation created:", {
+        outputCommitmentX: outputCommitment.x.toString(16).slice(0, 10) + "...",
+        outputCommitmentY: outputCommitment.y.toString(16).slice(0, 10) + "...",
+        attestationNonce: attestation.nonce,
+        newOwner: newOwner.slice(0, 10) + "..."
+      });
       utxo.isSpent = true;
-      try {
-        const { PrivateUTXOStorage } = await import("../../chunks/PrivateUTXOStorage.js");
-        PrivateUTXOStorage.savePrivateUTXO(utxo.owner, utxo);
-      } catch (storageError) {
-        console.warn("⚠️ Could not update original BN254 UTXO in localStorage:", storageError);
-      }
-      this.emit("private:utxo:spent", utxoId);
       let createdUTXOIds = [];
       if (newOwner === this.currentAccount?.address) {
         const newUtxoId = await this.generateBN254UTXOId(
-          newCommitmentResult.pedersen_commitment,
+          outputCommitment.x.toString(16) + outputCommitment.y.toString(16),
           newOwner,
           Date.now()
-        );
-        const newNullifierHash = await ZenroomHelpers.generateNullifierHash(
-          newCommitmentResult.pedersen_commitment,
-          newOwner,
-          Date.now().toString()
         );
         const newPrivateUTXO = {
           id: newUtxoId,
@@ -2977,15 +3667,13 @@ class PrivateUTXOManager extends UTXOLibrary {
           owner: newOwner,
           timestamp: toBigInt(Date.now()),
           isSpent: false,
-          commitment: newCommitmentResult.pedersen_commitment,
+          commitment: "0x" + outputCommitment.x.toString(16).padStart(64, "0") + outputCommitment.y.toString(16).padStart(64, "0"),
           parentUTXO: utxoId,
           utxoType: UTXOType.TRANSFER,
-          blindingFactor: newBlindingFactor,
-          nullifierHash: newNullifierHash,
+          blindingFactor: outputCommitment.blindingFactor,
+          nullifierHash: attestation.dataHash,
           localCreatedAt: Date.now(),
           confirmed: true,
-          creationTxHash: receipt?.hash,
-          blockNumber: receipt?.blockNumber,
           isPrivate: true,
           cryptographyType: "BN254"
         };
@@ -2996,34 +3684,39 @@ class PrivateUTXOManager extends UTXOLibrary {
           const { PrivateUTXOStorage } = await import("../../chunks/PrivateUTXOStorage.js");
           PrivateUTXOStorage.savePrivateUTXO(newOwner, newPrivateUTXO);
         } catch (storageError) {
-          console.warn("⚠️ Could not save new BN254 UTXO to localStorage:", storageError);
+          console.warn("⚠️ Could not save new UTXO to localStorage:", storageError);
         }
         this.emit("private:utxo:created", newPrivateUTXO);
       }
+      try {
+        const { PrivateUTXOStorage } = await import("../../chunks/PrivateUTXOStorage.js");
+        PrivateUTXOStorage.savePrivateUTXO(utxo.owner, utxo);
+      } catch (storageError) {
+        console.warn("⚠️ Could not update original UTXO in localStorage:", storageError);
+      }
+      this.emit("private:utxo:spent", utxoId);
       const result = {
         success: true,
-        transactionHash: receipt?.hash,
-        gasUsed: receipt?.gasUsed,
+        transactionHash: `attestation_${attestation.nonce}`,
         createdUTXOIds
       };
-      console.log("✅ BN254 private UTXO transferred successfully");
+      console.log("✅ Private UTXO transferred with attestation architecture");
       this.emit("private:utxo:transferred", { from: utxoId, to: createdUTXOIds[0], newOwner });
       return result;
     } catch (error) {
-      console.error("❌ BN254 private UTXO transfer failed:", error);
+      console.error("❌ Private UTXO transfer with attestation failed:", error);
       return {
         success: false,
-        error: error instanceof Error ? error.message : "BN254 private transfer failed",
+        error: error instanceof Error ? error.message : "Private transfer failed",
         errorDetails: error
       };
     }
   }
   /**
-   * Dividir UTXO privado usando REAL BN254 cryptography
+   * Dividir UTXO privado usando arquitectura de attestations
    */
   async splitPrivateUTXO(params) {
-    this.ensureInitialized();
-    console.log("✂️ Splitting private UTXO with REAL BN254 cryptography...");
+    console.log("✂️ Splitting private UTXO with attestation architecture...");
     this.bn254OperationCount++;
     try {
       const { inputUTXOId, outputValues, outputOwners } = params;
@@ -3036,178 +3729,102 @@ class PrivateUTXOManager extends UTXOLibrary {
       }
       const totalOutput = outputValues.reduce((sum, val) => sum + val, BigInt(0));
       if (totalOutput !== inputUTXO.value) {
-        throw new Error(`BN254 value conservation failed: input=${inputUTXO.value}, outputs=${totalOutput}`);
+        throw new Error(`Value conservation failed: input=${inputUTXO.value}, outputs=${totalOutput}`);
       }
-      console.log("✅ BN254 value conservation validated:", {
+      console.log("✅ Value conservation validated:", {
         inputValue: inputUTXO.value.toString(),
         outputSum: totalOutput.toString(),
         outputCount: outputValues.length
       });
-      console.log("🔍 Verifying input BN254 commitment...");
-      const isValidInputCommitment = await ZenroomHelpers.verifyPedersenCommitment(
-        inputUTXO.commitment,
-        BigInt(inputUTXO.value),
-        ZenroomHelpers.toBigInt("0x" + inputUTXO.blindingFactor)
-      );
-      if (!isValidInputCommitment) {
-        throw new Error("Input BN254 commitment verification failed");
-      }
-      const outputCommitments = [];
-      const outputBlindingFactors = [];
-      const outputNullifierHashes = [];
-      console.log("🔐 Generating REAL BN254 Pedersen commitments for outputs...");
-      for (let i = 0; i < outputValues.length; i++) {
-        const blindingFactor = await ZenroomHelpers.generateSecureBlindingFactor();
-        const commitment = await ZenroomHelpers.createPedersenCommitment(
-          outputValues[i].toString(),
-          blindingFactor
-        );
-        const nullifierHash = await ZenroomHelpers.generateNullifierHash(
-          commitment.pedersen_commitment,
-          outputOwners[i],
-          (Date.now() + i).toString()
-        );
-        outputCommitments.push(commitment.pedersen_commitment);
-        outputBlindingFactors.push(blindingFactor);
-        outputNullifierHashes.push(nullifierHash);
-        console.log(`✅ Output ${i + 1} BN254 commitment created:`, commitment.pedersen_commitment.slice(0, 20) + "...");
-      }
-      const inputNullifierHash = await ZenroomHelpers.generateNullifierHash(
-        inputUTXO.commitment,
-        inputUTXO.owner,
-        Date.now().toString()
-      );
-      console.log("🔍 Generating BN254 split proof...");
-      const splitProof = await ZenroomHelpers.generateSplitProof(
-        BigInt(inputUTXO.value),
-        outputValues.map((v) => BigInt(v)),
-        ZenroomHelpers.toBigInt("0x" + inputUTXO.blindingFactor),
-        outputBlindingFactors.map((bf) => ZenroomHelpers.toBigInt("0x" + bf))
-      );
-      console.log("✅ BN254 split proof generated");
-      const generatorParams = this.getBN254StandardGenerators();
-      const signer = EthereumHelpers.getSigner();
-      if (!signer) {
-        throw new Error("Signer not available for BN254 split transaction");
-      }
-      let gasPrice;
-      try {
-        const feeData = await signer.provider?.getFeeData();
-        gasPrice = feeData?.gasPrice || ethers.parseUnits("30", "gwei");
-        gasPrice = gasPrice + gasPrice * 30n / 100n;
-      } catch (error) {
-        console.warn("Using BN254 split fallback gas price:", error);
-        gasPrice = ethers.parseUnits("40", "gwei");
-      }
-      const baseGas = BigInt(1e6);
-      const extraGasPerOutput = BigInt(2e5);
-      const estimatedGas = baseGas + extraGasPerOutput * BigInt(outputValues.length);
-      const gasLimit = estimatedGas + estimatedGas * 25n / 100n;
-      console.log("⛽ BN254 split gas parameters:", {
-        baseGas: baseGas.toString(),
-        extraPerOutput: extraGasPerOutput.toString(),
-        estimatedGas: estimatedGas.toString(),
-        gasLimit: gasLimit.toString(),
-        gasPrice: ethers.formatUnits(gasPrice, "gwei") + " gwei",
-        outputCount: outputValues.length
-      });
-      console.log("🚀 Calling splitPrivateUTXO with REAL BN254 cryptography...");
-      const tx = await this.contract.splitPrivateUTXO(
-        inputUTXO.commitment,
-        outputCommitments,
+      const inputCommitment = {
+        x: BigInt("0x" + inputUTXO.commitment.substring(2, 66)),
+        // primeros 64 chars
+        y: BigInt("0x" + inputUTXO.commitment.substring(66, 130)),
+        // siguientes 64 chars
+        blindingFactor: inputUTXO.blindingFactor,
+        value: inputUTXO.value
+      };
+      console.log("� Creating split with attestation using Zenroom + Backend...");
+      const { outputCommitments, attestation } = await ZenroomHelpers.createSplitWithAttestation(
+        inputCommitment,
         outputValues,
-        outputBlindingFactors.map((bf) => ZenroomHelpers.toBigInt("0x" + bf)),
-        splitProof,
-        inputNullifierHash,
-        generatorParams,
-        {
-          gasLimit,
-          gasPrice
-        }
+        outputOwners,
+        inputUTXO.owner
       );
-      console.log("✅ BN254 split transaction sent:", tx.hash);
-      const receipt = await tx.wait();
-      console.log("✅ BN254 split confirmed:", receipt?.hash);
+      console.log("✅ Split attestation created:", {
+        outputCount: outputCommitments.length,
+        attestationNonce: attestation.nonce,
+        totalOutputValue: totalOutput.toString()
+      });
       inputUTXO.isSpent = true;
       try {
         const { PrivateUTXOStorage } = await import("../../chunks/PrivateUTXOStorage.js");
         PrivateUTXOStorage.savePrivateUTXO(inputUTXO.owner, inputUTXO);
       } catch (storageError) {
-        console.warn("⚠️ Could not update input BN254 UTXO in localStorage:", storageError);
+        console.warn("⚠️ Could not update input UTXO in localStorage:", storageError);
       }
       this.emit("private:utxo:spent", inputUTXOId);
       const createdUTXOIds = [];
       for (let i = 0; i < outputValues.length; i++) {
-        const outputId = await this.generateBN254UTXOId(
-          outputCommitments[i],
-          outputOwners[i],
-          Date.now() + i
-        );
-        const outputUTXO = {
-          id: outputId,
-          exists: true,
-          value: outputValues[i],
-          tokenAddress: inputUTXO.tokenAddress,
-          owner: outputOwners[i],
-          timestamp: toBigInt(Date.now()),
-          isSpent: false,
-          commitment: outputCommitments[i],
-          parentUTXO: inputUTXOId,
-          utxoType: UTXOType.SPLIT,
-          blindingFactor: outputBlindingFactors[i],
-          nullifierHash: outputNullifierHashes[i],
-          localCreatedAt: Date.now(),
-          confirmed: true,
-          creationTxHash: receipt?.hash,
-          blockNumber: receipt?.blockNumber,
-          isPrivate: true,
-          cryptographyType: "BN254"
-        };
-        this.utxos.set(outputId, outputUTXO);
-        this.privateUTXOs.set(outputId, outputUTXO);
-        createdUTXOIds.push(outputId);
-        try {
-          const { PrivateUTXOStorage } = await import("../../chunks/PrivateUTXOStorage.js");
-          PrivateUTXOStorage.savePrivateUTXO(outputOwners[i], outputUTXO);
-        } catch (storageError) {
-          console.warn(`⚠️ Could not save output BN254 UTXO ${i} to localStorage:`, storageError);
+        if (outputOwners[i] === this.currentAccount?.address) {
+          const outputUtxoId = await this.generateBN254UTXOId(
+            outputCommitments[i].x.toString(16) + outputCommitments[i].y.toString(16),
+            outputOwners[i],
+            Date.now() + i
+          );
+          const outputPrivateUTXO = {
+            id: outputUtxoId,
+            exists: true,
+            value: outputValues[i],
+            tokenAddress: inputUTXO.tokenAddress,
+            owner: outputOwners[i],
+            timestamp: toBigInt(Date.now()),
+            isSpent: false,
+            commitment: "0x" + outputCommitments[i].x.toString(16).padStart(64, "0") + outputCommitments[i].y.toString(16).padStart(64, "0"),
+            parentUTXO: inputUTXOId,
+            utxoType: UTXOType.SPLIT,
+            blindingFactor: outputCommitments[i].blindingFactor,
+            nullifierHash: attestation.dataHash + i.toString(),
+            // Unique nullifier per output
+            localCreatedAt: Date.now(),
+            confirmed: true,
+            isPrivate: true,
+            cryptographyType: "BN254"
+          };
+          this.utxos.set(outputUtxoId, outputPrivateUTXO);
+          this.privateUTXOs.set(outputUtxoId, outputPrivateUTXO);
+          createdUTXOIds.push(outputUtxoId);
+          try {
+            const { PrivateUTXOStorage } = await import("../../chunks/PrivateUTXOStorage.js");
+            PrivateUTXOStorage.savePrivateUTXO(outputOwners[i], outputPrivateUTXO);
+          } catch (storageError) {
+            console.warn(`⚠️ Could not save output UTXO ${i} to localStorage:`, storageError);
+          }
+          this.emit("private:utxo:created", outputPrivateUTXO);
         }
-        this.emit("private:utxo:created", outputUTXO);
       }
       const result = {
         success: true,
-        transactionHash: receipt?.hash,
-        gasUsed: receipt?.gasUsed,
+        transactionHash: `attestation_${attestation.nonce}`,
         createdUTXOIds
       };
-      console.log("✅ BN254 private UTXO split successfully:", {
-        inputUTXOId,
-        createdOutputs: createdUTXOIds.length,
-        outputIds: createdUTXOIds
-      });
-      this.emit("private:utxo:split", {
-        inputUTXOId,
-        outputUTXOIds: createdUTXOIds,
-        outputValues,
-        outputOwners,
-        cryptographyType: "BN254"
-      });
+      console.log("✅ Private UTXO split with attestation architecture completed");
+      this.emit("private:utxo:split", { input: inputUTXOId, outputs: createdUTXOIds });
       return result;
     } catch (error) {
-      console.error("❌ BN254 private UTXO split failed:", error);
+      console.error("❌ Private UTXO split with attestation failed:", error);
       return {
         success: false,
-        error: error instanceof Error ? error.message : "BN254 private split failed",
+        error: error instanceof Error ? error.message : "Private split failed",
         errorDetails: error
       };
     }
   }
   /**
-   * Retirar UTXO privado usando REAL BN254 cryptography
+   * Retirar UTXO privado usando arquitectura de attestations
    */
   async withdrawPrivateUTXO(params) {
-    this.ensureInitialized();
-    console.log("💸 Withdrawing private UTXO with REAL BN254 cryptography...");
+    console.log("💸 Withdrawing private UTXO with attestation architecture...");
     this.bn254OperationCount++;
     try {
       const { utxoId, recipient } = params;
@@ -3219,85 +3836,46 @@ class PrivateUTXOManager extends UTXOLibrary {
         throw new Error("UTXO is already spent");
       }
       if (utxo.owner.toLowerCase() !== this.currentAccount.address.toLowerCase()) {
-        throw new Error("Not authorized to withdraw this BN254 UTXO");
+        throw new Error("Not authorized to withdraw this UTXO");
       }
-      console.log("🔍 Verifying BN254 commitment before withdrawal...");
-      const isValidCommitment = await ZenroomHelpers.verifyPedersenCommitment(
-        utxo.commitment,
-        BigInt(utxo.value),
-        ZenroomHelpers.toBigInt("0x" + utxo.blindingFactor)
+      const commitment = {
+        x: BigInt("0x" + utxo.commitment.substring(2, 66)),
+        // primeros 64 chars
+        y: BigInt("0x" + utxo.commitment.substring(66, 130)),
+        // siguientes 64 chars
+        blindingFactor: utxo.blindingFactor,
+        value: utxo.value
+      };
+      console.log("🔐 Creating withdrawal with attestation using Zenroom + Backend...");
+      const { attestation } = await ZenroomHelpers.createWithdrawWithAttestation(
+        commitment,
+        recipient || utxo.owner,
+        utxo.owner
       );
-      if (!isValidCommitment) {
-        throw new Error("BN254 commitment verification failed - UTXO data may be corrupted");
-      }
-      const nullifierHash = await ZenroomHelpers.generateNullifierHash(
-        utxo.commitment,
-        utxo.owner,
-        Date.now().toString()
-      );
-      console.log("✅ BN254 nullifier hash generated for withdrawal:", nullifierHash.slice(0, 20) + "...");
-      const generatorParams = this.getBN254StandardGenerators();
-      const signer = EthereumHelpers.getSigner();
-      if (!signer) {
-        throw new Error("Signer not available for BN254 withdrawal transaction");
-      }
-      let gasPrice;
-      try {
-        const feeData = await signer.provider?.getFeeData();
-        gasPrice = feeData?.gasPrice || ethers.parseUnits("25", "gwei");
-        gasPrice = gasPrice + gasPrice * 20n / 100n;
-      } catch (error) {
-        console.warn("Using BN254 withdrawal fallback gas price:", error);
-        gasPrice = ethers.parseUnits("30", "gwei");
-      }
-      const estimatedGas = BigInt(6e5);
-      const gasLimit = estimatedGas + estimatedGas * 25n / 100n;
-      console.log("⛽ BN254 withdrawal gas parameters:", {
-        gasLimit: gasLimit.toString(),
-        gasPrice: ethers.formatUnits(gasPrice, "gwei") + " gwei",
-        recipient: recipient || "same as owner"
+      console.log("✅ Withdrawal attestation created:", {
+        attestationNonce: attestation.nonce,
+        value: utxo.value.toString(),
+        recipient: recipient || utxo.owner
       });
-      console.log("🚀 Calling withdrawFromPrivateUTXO with REAL BN254 cryptography...");
-      const tx = await this.contract.withdrawFromPrivateUTXO(
-        utxo.commitment,
-        utxo.value,
-        ZenroomHelpers.toBigInt("0x" + utxo.blindingFactor),
-        nullifierHash,
-        generatorParams,
-        {
-          gasLimit,
-          gasPrice
-        }
-      );
-      console.log("✅ BN254 withdrawal transaction sent:", tx.hash);
-      const receipt = await tx.wait();
-      console.log("✅ BN254 withdrawal confirmed:", receipt?.hash);
       utxo.isSpent = true;
       try {
         const { PrivateUTXOStorage } = await import("../../chunks/PrivateUTXOStorage.js");
         PrivateUTXOStorage.savePrivateUTXO(utxo.owner, utxo);
       } catch (storageError) {
-        console.warn("⚠️ Could not update BN254 UTXO in localStorage:", storageError);
+        console.warn("⚠️ Could not update UTXO in localStorage:", storageError);
       }
       this.emit("private:utxo:withdrawn", utxoId);
       const result = {
         success: true,
-        transactionHash: receipt?.hash,
-        gasUsed: receipt?.gasUsed
+        transactionHash: `attestation_${attestation.nonce}`
       };
-      console.log("✅ BN254 private UTXO withdrawn successfully:", {
-        utxoId,
-        recipient: recipient || utxo.owner,
-        value: utxo.value.toString(),
-        tokenAddress: utxo.tokenAddress,
-        cryptographyType: "BN254"
-      });
+      console.log("✅ Private UTXO withdrawal with attestation architecture completed");
       return result;
     } catch (error) {
-      console.error("❌ BN254 private UTXO withdrawal failed:", error);
+      console.error("❌ Private UTXO withdrawal with attestation failed:", error);
       return {
         success: false,
-        error: error instanceof Error ? error.message : "BN254 private withdrawal failed",
+        error: error instanceof Error ? error.message : "Private withdrawal failed",
         errorDetails: error
       };
     }
@@ -3521,8 +4099,7 @@ class PrivateUTXOManager extends UTXOLibrary {
     return {
       operationsCount: this.bn254OperationCount,
       utxosCount: bn254UTXOs.length,
-      verifiedCommitments: bn254UTXOs.filter((utxo) => !utxo.isSpent).length,
-      isZenroomAvailable: ZenroomHelpers.isZenroomAvailable()
+      verifiedCommitments: bn254UTXOs.filter((utxo) => !utxo.isSpent).length
     };
   }
   /**
@@ -3577,7 +4154,7 @@ function WalletConnection($$payload, $$props) {
       $$payload.out += "<!--[!-->";
       $$payload.out += `<span>${escape_html(provider.icon)}</span> <span>Connect MetaMask</span>`;
     }
-    $$payload.out += `<!--]--></button> <div class="text-xs text-gray-400 text-right"><div>Polygon Amoy Network</div> <div>Testnet Required</div> <div class="text-yellow-400 mt-1">`;
+    $$payload.out += `<!--]--></button> <div class="text-xs text-gray-400 text-right"><div>Polygon Amoy Network</div> <div>Alastria Network</div> <div class="text-yellow-400 mt-1">`;
     if (typeof window !== "undefined" && !window.ethereum) {
       $$payload.out += "<!--[-->";
       $$payload.out += `⚠️ MetaMask not installed`;
@@ -3627,6 +4204,7 @@ function _page($$payload, $$props) {
   let isInitialized = false;
   let currentAccount = null;
   let notifications = [];
+  let isWalletConnected = false;
   WalletProviderType.METAMASK;
   if (typeof window !== "undefined") {
     window.debugUTXOStorage = () => {
@@ -3670,7 +4248,25 @@ function _page($$payload, $$props) {
   $$payload.out += `<!----></div></div></div></header> <main class="container mx-auto px-4 py-8 svelte-18s9rmc">`;
   {
     $$payload.out += "<!--[-->";
-    $$payload.out += `<div class="text-center py-20 svelte-18s9rmc"><div class="max-w-2xl mx-auto svelte-18s9rmc"><h2 class="text-4xl font-bold text-white mb-6 svelte-18s9rmc">Welcome to UTXO Manager</h2> <p class="text-xl text-gray-300 mb-8 svelte-18s9rmc">Transform your ERC20 tokens into privacy-preserving UTXOs using Zenroom cryptography</p> <div class="grid md:grid-cols-3 gap-6 mb-8 svelte-18s9rmc"><div class="bg-white/10 backdrop-blur-sm rounded-lg p-6 border border-white/20 svelte-18s9rmc"><div class="text-purple-400 text-2xl mb-3 svelte-18s9rmc">🔒</div> <h3 class="text-white font-semibold mb-2 svelte-18s9rmc">Privacy First</h3> <p class="text-gray-300 text-sm svelte-18s9rmc">Your transactions are private using Zenroom zero-knowledge proofs</p></div> <div class="bg-white/10 backdrop-blur-sm rounded-lg p-6 border border-white/20 svelte-18s9rmc"><div class="text-blue-400 text-2xl mb-3 svelte-18s9rmc">⚡</div> <h3 class="text-white font-semibold mb-2 svelte-18s9rmc">UTXO Model</h3> <p class="text-gray-300 text-sm svelte-18s9rmc">Efficient transaction model with better privacy and scalability</p></div> <div class="bg-white/10 backdrop-blur-sm rounded-lg p-6 border border-white/20 svelte-18s9rmc"><div class="text-green-400 text-2xl mb-3 svelte-18s9rmc">🔗</div> <h3 class="text-white font-semibold mb-2 svelte-18s9rmc">ERC20 Compatible</h3> <p class="text-gray-300 text-sm svelte-18s9rmc">Use any ERC20 token with seamless conversion to UTXOs</p></div></div> <button class="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white px-8 py-3 rounded-lg font-semibold transition-all duration-200 shadow-lg hover:shadow-xl svelte-18s9rmc">Get Started</button></div></div>`;
+    $$payload.out += `<div class="text-center py-12 svelte-18s9rmc"><div class="max-w-4xl mx-auto svelte-18s9rmc"><h2 class="text-4xl font-bold text-white mb-6 svelte-18s9rmc">Setup Your UTXO Wallet</h2> <p class="text-xl text-gray-300 mb-12 svelte-18s9rmc">Follow these 3 simple steps to start using privacy-preserving UTXOs</p> <div class="flex justify-center items-center mb-12 space-x-4 svelte-18s9rmc"><div class="flex flex-col items-center space-y-2 svelte-18s9rmc"><div${attr_class(
+      `w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-lg ${stringify("bg-blue-500")}`,
+      "svelte-18s9rmc"
+    )}>${escape_html("1")}</div> <span${attr_class(`text-sm ${stringify("text-white")}`, "svelte-18s9rmc")}>Connect Wallet</span></div> <div${attr_class(`w-8 h-0.5 ${stringify("bg-gray-600")}`, "svelte-18s9rmc")}></div> <div class="flex flex-col items-center space-y-2 svelte-18s9rmc"><div${attr_class(
+      `w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-lg ${stringify("bg-gray-600")}`,
+      "svelte-18s9rmc"
+    )}>${escape_html("2")}</div> <span${attr_class(`text-sm ${stringify("text-gray-400")}`, "svelte-18s9rmc")}>Select Network</span></div> <div${attr_class(`w-8 h-0.5 ${stringify("bg-gray-600")}`, "svelte-18s9rmc")}></div> <div class="flex flex-col items-center space-y-2 svelte-18s9rmc"><div${attr_class(
+      `w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-lg ${stringify("bg-gray-600")}`,
+      "svelte-18s9rmc"
+    )}>${escape_html("3")}</div> <span${attr_class(`text-sm ${stringify("text-gray-400")}`, "svelte-18s9rmc")}>Initialize Library</span></div></div> <div class="bg-white/10 backdrop-blur-sm rounded-xl p-8 border border-white/20 max-w-2xl mx-auto svelte-18s9rmc">`;
+    {
+      $$payload.out += "<!--[-->";
+      $$payload.out += `<div class="text-center svelte-18s9rmc"><div class="text-6xl mb-6 svelte-18s9rmc">🔌</div> <h3 class="text-2xl font-bold text-white mb-4 svelte-18s9rmc">Step 1: Connect Your Wallet</h3> <p class="text-gray-300 mb-8 svelte-18s9rmc">Connect MetaMask or another compatible wallet to get started</p> <button class="bg-gradient-to-r from-purple-600 to-blue-600 text-white px-8 py-4 rounded-lg font-semibold text-lg hover:from-purple-700 hover:to-blue-700 transition-all duration-200 shadow-lg hover:shadow-xl svelte-18s9rmc"${attr("disabled", isWalletConnected, true)}>${escape_html("🔌 Connect Wallet")}</button> `;
+      {
+        $$payload.out += "<!--[!-->";
+      }
+      $$payload.out += `<!--]--></div>`;
+    }
+    $$payload.out += `<!--]--> <div class="mt-8 pt-6 border-t border-white/10 svelte-18s9rmc"><button class="text-gray-400 hover:text-white text-sm transition-colors duration-200 svelte-18s9rmc">🔄 Reset Flow</button></div></div></div></div>`;
   }
   $$payload.out += `<!--]--></main></div>`;
   pop();

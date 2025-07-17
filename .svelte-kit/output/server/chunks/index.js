@@ -92,7 +92,10 @@ function attr(name, value, is_boolean = false) {
 }
 const whitespace = [..." 	\n\r\f \v\uFEFF"];
 function to_class(value, hash, directives) {
-  var classname = "" + value;
+  var classname = value == null ? "" : "" + value;
+  if (hash) {
+    classname = classname ? classname + " " + hash : hash;
+  }
   if (directives) {
     for (var key in directives) {
       if (directives[key]) {
@@ -239,6 +242,9 @@ function head(payload, fn) {
   fn(head_payload);
   head_payload.out += BLOCK_CLOSE;
 }
+function stringify(value) {
+  return typeof value === "string" ? value : value == null ? "" : value + "";
+}
 function attr_class(value, hash, directives) {
   var result = to_class(value, hash, directives);
   return result ? ` class="${escape_html(result, true)}"` : "";
@@ -259,6 +265,7 @@ function ensure_array_like(array_like_or_iterator) {
   return [];
 }
 export {
+  stringify as $,
   HYDRATION_START as A,
   BROWSER as B,
   CLEAN as C,

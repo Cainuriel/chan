@@ -1,884 +1,375 @@
-/**
- * @fileoverview Zenroom helpers for REAL BN254 cryptography
- * @description Pure elliptic curve operations for UTXO privacy
- */
+// src/utils/zenroom.helpers.ts
+import { AttestationService } from '../lib/AttestationService.js';
+import type { 
+  PedersenCommitment, 
+  BulletproofRangeProof, 
+  CoconutCredential, 
+  EqualityProof,
+  Attestation
+} from '../types/zenroom.d.ts';
 
-
-// BN254 curve parameters (alt_bn128) - VALORES REALES
-const BN254_FIELD_SIZE = BigInt("0x30644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd47");
-const BN254_CURVE_ORDER = BigInt("0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001");
-
-// Standard BN254 generators - VALORES REALES
-const G1_GENERATOR = {
-  x: BigInt("0x01"),
-  y: BigInt("0x02")
-};
-
-// Independent H point for Pedersen commitments - COORDENADAS REALES VERIFICADAS
-// SOLUCIÓN MATEMÁTICA: Usando las coordenadas exactas de 3*G en BN254
-// 3*G es un punto conocido y verificado en la curva BN254, linealmente independiente de G
-// COORDENADAS CORREGIDAS - CALCULADAS MATEMÁTICAMENTE
-const H1_GENERATOR = {
-  x: BigInt("0x769bf9ac56bea3ff40232bcb1b6bd159315d84715b8e679f2d355961915abf0"),
-  y: BigInt("0x2ab799bee0489429554fdb7c8d086475319e63b40b9c5b57cdf1ff3dd9fe2261")
-};
-
-
-
-// ===========================
-// VALIDACIÓN DIRECTA BN254 (SIN DEPENDENCIAS CIRCULARES)
-// ===========================
+declare const zenroom: any;
 
 /**
- * Validación directa de punto en curva BN254 - SOLUCIÓN AL PROBLEMA DE INICIALIZACIÓN
- * Esta función NO depende de BN254Ops para evitar dependencias circulares
- */
-function isValidBN254Point(x: bigint, y: bigint): boolean {
-  try {
-    const p = BN254_FIELD_SIZE;
-    
-    // Verificar que x, y están en el campo
-    if (x >= p || y >= p || x < 0n || y < 0n) {
-      console.error('Point coordinates out of field range:', { 
-        x: x.toString(16), 
-        y: y.toString(16) 
-      });
-      return false;
-    }
-    
-    // Verificar ecuación de curva: y² = x³ + 3 (mod p)
-    const y_squared = (y * y) % p;
-    const x_cubed = (x * x * x) % p;
-    const right_side = (x_cubed + 3n) % p;
-    
-    const isValid = y_squared === right_side;
-    
-    if (!isValid) {
-      console.error('Point not on BN254 curve:', {
-        x: x.toString(16),
-        y: y.toString(16),
-        y_squared: y_squared.toString(16),
-        x_cubed_plus_3: right_side.toString(16)
-      });
-    }
-    
-    return isValid;
-  } catch (error) {
-    console.error('Error validating BN254 point:', error);
-    return false;
-  }
-}
-
-// ===========================
-// BN254 ELLIPTIC CURVE OPERATIONS
-// ===========================
-
-/**
- * Low-level BN254 elliptic curve operations
- */
-/**
- * BN254 Elliptic Curve Operations - VALORES REALES
- */
-class BN254Ops {
-  // BN254 curve parameters (REALES y verificados)
-  static readonly FIELD_MODULUS = BigInt('0x30644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd47');
-  static readonly CURVE_ORDER = BigInt('0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001');
-  
-  // Generator points (REALES y verificados)
-  static readonly G1_GENERATOR = {
-    x: BigInt('0x0000000000000000000000000000000000000000000000000000000000000001'),
-    y: BigInt('0x0000000000000000000000000000000000000000000000000000000000000002')
-  };
-  
-  // H1 generator - PUNTO REAL de la curva BN254 linealmente independiente de G1
-  // SOLUCIÓN VERIFICADA: Coordenadas exactas de 3*G en BN254 (matemáticamente calculadas)
-  // COORDENADAS CORREGIDAS - VERIFICADAS MATEMÁTICAMENTE
-  static readonly H1_GENERATOR = {
-    x: BigInt('0x769bf9ac56bea3ff40232bcb1b6bd159315d84715b8e679f2d355961915abf0'),
-    y: BigInt('0x2ab799bee0489429554fdb7c8d086475319e63b40b9c5b57cdf1ff3dd9fe2261')
-  };
-
-  /**
-   * Modular inverse using Extended Euclidean Algorithm - MEJORADO
-   */
-  static modInverse(a: bigint, m: bigint): bigint {
-    // Normalizar entrada y manejar casos especiales
-    if (m <= 0n) {
-      throw new Error('Modulus must be positive');
-    }
-    
-    // Asegurar que a es positivo y menor que m
-    a = ((a % m) + m) % m;
-    
-    if (a === 0n) {
-      throw new Error('Modular inverse of 0 does not exist');
-    }
-    
-    if (a === 1n) {
-      return 1n;
-    }
-
-    // Algoritmo Extendido de Euclides mejorado
-    let old_r = a;
-    let r = m;
-    let old_s = 1n;
-    let s = 0n;
-    let old_t = 0n;
-    let t = 1n;
-
-    while (r !== 0n) {
-      const quotient = old_r / r;
-      
-      // r_i-2 = q_i * r_i-1 + r_i
-      const temp_r = old_r;
-      old_r = r;
-      r = temp_r - quotient * r;
-      
-      // s_i-2 = q_i * s_i-1 + s_i
-      const temp_s = old_s;
-      old_s = s;
-      s = temp_s - quotient * s;
-      
-      // t_i-2 = q_i * t_i-1 + t_i
-      const temp_t = old_t;
-      old_t = t;
-      t = temp_t - quotient * t;
-    }
-    
-    // Verificar si existe un inverso (old_r debe ser 1)
-    if (old_r !== 1n) {
-      console.error('GCD is not 1, no modular inverse exists');
-      throw new Error(`Modular inverse does not exist. GCD(${a}, ${m}) = ${old_r}`);
-    }
-    
-    // Asegurar resultado positivo
-    if (old_s < 0n) {
-      old_s = old_s + m;
-    }
-    
-    // Verificar el resultado 
-    if ((a * old_s) % m !== 1n) {
-      console.error(`Verification failed: ${a} * ${old_s} % ${m} = ${(a * old_s) % m}`);
-      throw new Error('Modular inverse verification failed');
-    }
-    
-    return old_s;
-  }
-
-  /**
-   * Field arithmetic - operaciones en el campo finito
-   */
-  static fieldAdd(a: bigint, b: bigint): bigint {
-    return (a + b) % this.FIELD_MODULUS;
-  }
-
-  static fieldSub(a: bigint, b: bigint): bigint {
-    return ((a - b) % this.FIELD_MODULUS + this.FIELD_MODULUS) % this.FIELD_MODULUS;
-  }
-
-  static fieldMul(a: bigint, b: bigint): bigint {
-    return (a * b) % this.FIELD_MODULUS;
-  }
-
-  static fieldInv(a: bigint): bigint {
-    return this.modInverse(a, this.FIELD_MODULUS);
-  }
-
-  /**
-   * Point validation - MEJORADO
-   */
-  static isValidPoint(point: { x: bigint; y: bigint }): boolean {
-    try {
-      // Verificar que las coordenadas están en el campo
-      if (point.x >= this.FIELD_MODULUS || point.y >= this.FIELD_MODULUS) {
-        return false;
-      }
-      
-      // Verificar ecuación de la curva: y² = x³ + 3
-      const y2 = this.fieldMul(point.y, point.y);
-      const x3 = this.fieldMul(this.fieldMul(point.x, point.x), point.x);
-      const right = this.fieldAdd(x3, 3n);
-      
-      return y2 === right;
-    } catch {
-      return false;
-    }
-  }
-
-  /**
-   * Point addition - CORREGIDO
-   */
-  static addPoints(p1: { x: bigint; y: bigint }, p2: { x: bigint; y: bigint }): { x: bigint; y: bigint } {
-    // Punto en el infinito
-    if (p1.x === 0n && p1.y === 0n) return p2;
-    if (p2.x === 0n && p2.y === 0n) return p1;
-
-    // Puntos iguales - duplicación
-    if (p1.x === p2.x) {
-      if (p1.y === p2.y) {
-        return this.doublePoint(p1);
-      } else {
-        // Puntos opuestos - resultado es infinito
-        return { x: 0n, y: 0n };
-      }
-    }
-
-    // Adición normal
-    const dx = this.fieldSub(p2.x, p1.x);
-    const dy = this.fieldSub(p2.y, p1.y);
-    
-    try {
-      const slope = this.fieldMul(dy, this.fieldInv(dx));
-      const x3 = this.fieldSub(this.fieldSub(this.fieldMul(slope, slope), p1.x), p2.x);
-      const y3 = this.fieldSub(this.fieldMul(slope, this.fieldSub(p1.x, x3)), p1.y);
-      
-      return { x: x3, y: y3 };
-    } catch (error) {
-      console.error('Point addition failed:', error);
-      if (error instanceof Error) {
-        throw new Error(`Point addition failed: ${error.message}`);
-      } else {
-        throw new Error('Point addition failed: Unknown error');
-      }
-    }
-  }
-
-  /**
-   * Point doubling - NUEVO
-   */
-  static doublePoint(point: { x: bigint; y: bigint }): { x: bigint; y: bigint } {
-    if (point.x === 0n && point.y === 0n) return point; // Infinito
-    if (point.y === 0n) return { x: 0n, y: 0n }; // Infinito
-
-    try {
-      // slope = (3 * x² + a) / (2 * y), donde a = 0 para BN254
-      const numerator = this.fieldMul(3n, this.fieldMul(point.x, point.x));
-      const denominator = this.fieldMul(2n, point.y);
-      const slope = this.fieldMul(numerator, this.fieldInv(denominator));
-      
-      const x3 = this.fieldSub(this.fieldMul(slope, slope), this.fieldMul(2n, point.x));
-      const y3 = this.fieldSub(this.fieldMul(slope, this.fieldSub(point.x, x3)), point.y);
-      
-      return { x: x3, y: y3 };
-    } catch (error) {
-      console.error('Point doubling failed:', error);
-      if (error instanceof Error) {
-        throw new Error(`Point doubling failed: ${error.message}`);
-      } else {
-        throw new Error('Point doubling failed: Unknown error');
-      }
-    }
-  }
-
-  /**
-   * Scalar multiplication usando double-and-add - CORREGIDO
-   */
-  static scalarMultiply(point: { x: bigint; y: bigint }, scalar: bigint): { x: bigint; y: bigint } {
-    if (!this.isValidPoint(point)) {
-      throw new Error('Invalid point for scalar multiplication');
-    }
-
-    // Normalizar scalar
-    scalar = ((scalar % this.CURVE_ORDER) + this.CURVE_ORDER) % this.CURVE_ORDER;
-    
-    if (scalar === 0n) {
-      return { x: 0n, y: 0n }; // Punto en el infinito
-    }
-    
-    if (scalar === 1n) {
-      return point;
-    }
-
-    // Double-and-add algorithm
-    let result = { x: 0n, y: 0n }; // Punto en el infinito
-    let addend = { ...point };
-
-    while (scalar > 0n) {
-      if (scalar & 1n) {
-        result = this.addPoints(result, addend);
-      }
-      addend = this.doublePoint(addend);
-      scalar = scalar >> 1n;
-    }
-
-    return result;
-  }
-}
-
-/**
- * Zenroom Helpers - BN254 REAL Implementation
+ * ZenroomHelpers - Pure Zenroom cryptography with attestation integration
+ * Backend autorizado firma attestations que Solidity confía
  */
 export class ZenroomHelpers {
-  private static bn254: BN254Ops = new BN254Ops();
-  
-  /**
-   * Check if Zenroom/BN254 is available
-   */
-  static isZenroomAvailable(): boolean {
-    try {
-      // Check if we can perform BN254 operations
-      return !!BN254Ops;
-    } catch (error) {
-      console.warn('Zenroom/BN254 not available:', error);
-      return false;
-    }
-  }
+  private static attestationService = new AttestationService();
+
+  // ========================
+  // BN254 CURVE OPERATIONS
+  // ========================
 
   /**
-   * Convert a value to BigInt safely
+   * Convertir string a BigInt con validación BN254
    */
   static toBigInt(value: string | number | bigint): bigint {
-    if (typeof value === 'bigint') return value;
-    if (typeof value === 'number') return BigInt(value);
-    if (typeof value === 'string') {
-      // Handle hex strings
-      if (value.startsWith('0x')) {
-        return BigInt(value);
-      }
-      return BigInt(value);
-    }
-    throw new Error(`Cannot convert ${typeof value} to BigInt`);
+    const result = BigInt(value);
+    const BN254_MODULUS = BigInt('0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001');
+    return result % BN254_MODULUS;
   }
 
   /**
-   * Generate a range proof for a value
+   * Generar factor de cegado seguro para BN254
    */
-  static async generateRangeProof(
-    value: bigint,
-    blindingFactor: bigint,
-    min: bigint = 0n,
-    max: bigint = 2n ** 64n - 1n
-  ): Promise<string> {
-    try {
-      // Validate range
-      if (value < min || value > max) {
-        throw new Error(`Value ${value} out of range [${min}, ${max}]`);
-      }
+  static async generateSecureBlindingFactor(): Promise<string> {
+    const script = `
+      rule input
+      rule output
+      Given nothing
+      When I create the random object of '256' bits
+      Then print the random object as 'hex'
+    `;
 
-      // Validate inputs are in the correct range
-      if (blindingFactor >= BN254Ops.CURVE_ORDER || blindingFactor < 0n) {
-        throw new Error('Blinding factor out of range');
-      }
-
-      // Generate commitment for value
-      const vG = BN254Ops.scalarMultiply(BN254Ops.G1_GENERATOR, value);
-      const rH = BN254Ops.scalarMultiply(BN254Ops.H1_GENERATOR, blindingFactor);
-      const commitment = BN254Ops.addPoints(vG, rH);
-      
-      // Generate proof of knowledge of value and blinding factor
-      // In a real implementation, this would create a zero-knowledge range proof
-      // Here we're implementing a simplified proof structure
-      
-      // Create a commitment to each bit in the value's binary representation
-      const bitCommitments = [];
-      let tempValue = value;
-      for (let i = 0; i < 64; i++) {
-        const bit = tempValue & 1n;
-        // Generate random blinding for this bit
-        const randomBytes = new Uint8Array(16);
-        crypto.getRandomValues(randomBytes);
-        const bitBlinding = BigInt('0x' + Array.from(randomBytes, b => b.toString(16).padStart(2, '0')).join('')) % BN254Ops.CURVE_ORDER;
-        
-        // Create a commitment to this bit
-        const bitG = BN254Ops.scalarMultiply(BN254Ops.G1_GENERATOR, bit);
-        const bitH = BN254Ops.scalarMultiply(BN254Ops.H1_GENERATOR, bitBlinding);
-        const bitCommitment = BN254Ops.addPoints(bitG, bitH);
-        
-        bitCommitments.push({
-          x: bitCommitment.x.toString(16),
-          y: bitCommitment.y.toString(16),
-          blinding: bitBlinding.toString(16)
-        });
-        
-        tempValue = tempValue >> 1n;
-      }
-      
-      // Crear formato de prueba compatible con el verificador Bulletproof
-      // El verificador espera las coordenadas X e Y del punto A como los primeros 64 bytes
-      // Usaremos el punto del commitment como punto A para una prueba simple
-      
-      // Almacenar los detalles de la prueba para referencia y depuración
-      const rangeProofObj = {
-        commitment: {
-          x: commitment.x.toString(16),
-          y: commitment.y.toString(16)
-        },
-        bitCommitments: bitCommitments,
-        min: min.toString(),
-        max: max.toString(),
-        timestamp: Date.now()
-      };
-      
-      // También guardamos como JSON para debugging local
-      const rangeProofJson = JSON.stringify(rangeProofObj);
-      
-      // Crear bytes32 para X e Y (formato específico para el verificador)
-      const xBytes = commitment.x.toString(16).padStart(64, '0');
-      const yBytes = commitment.y.toString(16).padStart(64, '0');
-      
-      // Añadir información adicional para cumplir con el mínimo de 64 bytes
-      // La estructura es: [32 bytes X, 32 bytes Y, resto de información]
-      // El verificador espera al menos 64 bytes (coordenadas XY)
-      const randomBytes = new Uint8Array(32);  // 32 bytes adicionales para hacer 96 bytes total
-      crypto.getRandomValues(randomBytes);
-      const extraDataHex = Array.from(randomBytes, b => b.toString(16).padStart(2, '0')).join('');
-      
-      // Formar el rangeProof en formato hex con prefijo 0x
-      const rangeProofHex = '0x' + xBytes + yBytes + extraDataHex;
-      
-      console.log('🔢 Range proof created for Bulletproof verifier:', {
-        jsonProofLength: rangeProofJson.length,
-        hexProofLength: rangeProofHex.length - 2, // sin contar '0x'
-        xCoord: '0x' + xBytes.slice(0, 10) + '...',
-        yCoord: '0x' + yBytes.slice(0, 10) + '...'
-      });
-      
-      return rangeProofHex;
-    } catch (error) {
-      console.error('Range proof generation failed:', error);
-      throw new Error(`Range proof failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
+    const result = await zenroom.exec(script);
+    const randomHex = JSON.parse(result.result).random_object;
+    return this.toBigInt('0x' + randomHex).toString(16).padStart(64, '0');
   }
 
   /**
-   * Generate split proof (value conservation)
+   * Crear Pedersen commitment usando BN254
    */
-  static async generateSplitProof(
-    inputValue: bigint,
-    outputValues: bigint[],
-    inputBlinding: bigint,
-    outputBlindings: bigint[]
-  ): Promise<string> {
-    try {
-      // Verify conservation of value
-      const totalOutput = outputValues.reduce((sum, val) => sum + val, 0n);
-      if (inputValue !== totalOutput) {
-        throw new Error(`Value not conserved: input ${inputValue} != output ${totalOutput}`);
-      }
+  static async createPedersenCommitment(value: string, blindingFactor: string): Promise<PedersenCommitment> {
+    const script = `
+      Scenario 'ecdh': Create commitment
+      Given I have a 'string' named 'value'
+      Given I have a 'string' named 'blinding_factor'
+      When I create the pedersen commitment of 'value' with blinding factor 'blinding_factor'
+      Then print the 'pedersen commitment'
+    `;
 
-      // Verify blinding factors conservation
-      if (outputBlindings.length !== outputValues.length) {
-        throw new Error('Mismatched blinding factors and output values');
-      }
+    const data = {
+      value: value,
+      blinding_factor: blindingFactor
+    };
 
-      // Generate commitments for all values
-      // Input commitment: vG + rH
-      const inputVG = BN254Ops.scalarMultiply(BN254Ops.G1_GENERATOR, inputValue);
-      const inputRH = BN254Ops.scalarMultiply(BN254Ops.H1_GENERATOR, inputBlinding);
-      const inputCommitment = BN254Ops.addPoints(inputVG, inputRH);
-      
-      // Output commitments
-      const outputCommitments = outputValues.map((value, i) => {
-        const vG = BN254Ops.scalarMultiply(BN254Ops.G1_GENERATOR, value);
-        const rH = BN254Ops.scalarMultiply(BN254Ops.H1_GENERATOR, outputBlindings[i]);
-        return BN254Ops.addPoints(vG, rH);
-      });
-      
-      // Calculate the sum of output commitments to prove conservation
-      let sumOutputCommitment = outputCommitments[0];
-      for (let i = 1; i < outputCommitments.length; i++) {
-        sumOutputCommitment = BN254Ops.addPoints(sumOutputCommitment, outputCommitments[i]);
-      }
-      
-      // Create split proof structure
-      const splitProof = {
-        inputCommitment: {
-          x: inputCommitment.x.toString(16),
-          y: inputCommitment.y.toString(16)
-        },
-        outputCommitments: outputCommitments.map(c => ({
-          x: c.x.toString(16),
-          y: c.y.toString(16)
-        })),
-        sumOutputCommitment: {
-          x: sumOutputCommitment.x.toString(16),
-          y: sumOutputCommitment.y.toString(16)
-        },
-        timestamp: Date.now()
-      };
+    const result = await zenroom.exec(script, { data: JSON.stringify(data) });
+    const commitment = JSON.parse(result.result);
+    
+    // Convertir a coordenadas x,y de BN254
+    const commitmentHex = commitment.pedersen_commitment;
+    const x = BigInt('0x' + commitmentHex.substring(2, 66));
+    const y = BigInt('0x' + commitmentHex.substring(66, 130));
 
-      return JSON.stringify(splitProof);
-    } catch (error) {
-      console.error('Split proof generation failed:', error);
-      throw new Error(`Split proof failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
+    return {
+      x,
+      y,
+      blindingFactor,
+      value: BigInt(value)
+    };
   }
 
   /**
-   * Verify Pedersen commitment
+   * Verificar Pedersen commitment
    */
   static async verifyPedersenCommitment(
-    commitment: string,
-    value: bigint,
+    commitmentHex: string, 
+    value: bigint, 
     blindingFactor: bigint
   ): Promise<boolean> {
     try {
-      // Parse commitment string (assuming format is "0xXXX...XXX")
-      commitment = commitment.startsWith('0x') ? commitment.substring(2) : commitment;
-      
-      // In a real system, the commitment would be an encoded point
-      // Here we're assuming the commitment is encoded as x||y (64 bytes each)
-      if (commitment.length !== 128) {
-        throw new Error(`Invalid commitment length: ${commitment.length} (expected 128)`);
-      }
-      
-      const pointX = BigInt('0x' + commitment.substring(0, 64));
-      const pointY = BigInt('0x' + commitment.substring(64, 128));
-      const commitmentPoint = { x: pointX, y: pointY };
-      
-      // Validate that the point is on the curve
-      if (!BN254Ops.isValidPoint(commitmentPoint)) {
-        console.error('Invalid commitment point');
-        return false;
-      }
-      
-      // Calculate expected commitment
-      const vG = BN254Ops.scalarMultiply(BN254Ops.G1_GENERATOR, value);
-      const rH = BN254Ops.scalarMultiply(BN254Ops.H1_GENERATOR, blindingFactor);
-      const expectedCommitment = BN254Ops.addPoints(vG, rH);
-      
-      // Compare commitments
-      return (
-        expectedCommitment.x === commitmentPoint.x && 
-        expectedCommitment.y === commitmentPoint.y
-      );
-    } catch (error) {
-      console.error('Pedersen commitment verification failed:', error);
-      return false;
-    }
-  }
-  
-  /**
-   * Check if the value is a valid hexadecimal string of specified length
-   * @param value The string to validate
-   * @param byteLength The expected length in bytes (1 byte = 2 hex chars)
-   * @returns boolean indicating if the value is valid hex of correct length
-   */
-  static isValidHex(value: string, byteLength: number): boolean {
-    try {
-      if (!value) {
-        console.warn('isValidHex: Empty value provided');
-        return false;
-      }
-      
-      // Remove 0x prefix if present
-      const hex = value.startsWith('0x') ? value.substring(2) : value;
-      
-      // Log detailed info for debugging
-      console.log(`🔍 Validating hex [${byteLength} bytes]`, {
-        original: value,
-        withoutPrefix: hex,
-        actualLength: hex.length,
-        expectedLength: byteLength * 2
-      });
-      
-      // Check if it's a valid hex string
-      if (!/^[0-9a-fA-F]+$/.test(hex)) {
-        console.warn('isValidHex: Invalid characters in hex string');
-        return false;
-      }
-      
-      // Check length (each byte is 2 hex chars)
-      const isValidLength = hex.length === byteLength * 2;
-      if (!isValidLength) {
-        console.warn(`isValidHex: Length mismatch - got ${hex.length}, expected ${byteLength * 2}`);
-      }
-      
-      return isValidLength;
-    } catch (error) {
-      console.error('Hex validation error:', error);
-      return false;
-    }
-  }
+      const script = `
+        Scenario 'ecdh': Verify commitment
+        Given I have a 'string' named 'commitment'
+        Given I have a 'string' named 'value'
+        Given I have a 'string' named 'blinding_factor'
+        When I verify the pedersen commitment 'commitment' with value 'value' and blinding factor 'blinding_factor'
+        Then print the string 'verified'
+      `;
 
-  /**
-   * Generate secure blinding factor for BN254
-   */
-  static async generateSecureBlindingFactor(): Promise<string> {
-    try {
-      // Generar número aleatorio en el rango de la curva
-      const randomBytes = new Uint8Array(32);
-      crypto.getRandomValues(randomBytes);
-      
-      // Convertir a BigInt y asegurar que está en el rango correcto
-      let blindingFactor = BigInt('0x' + Array.from(randomBytes, b => b.toString(16).padStart(2, '0')).join(''));
-      blindingFactor = blindingFactor % BN254Ops.CURVE_ORDER;
-      
-      // Asegurar que no es 0
-      if (blindingFactor === 0n) {
-        blindingFactor = 1n;
-      }
-      
-      return blindingFactor.toString(16).padStart(64, '0');
-    } catch (error) {
-        console.error('Failed generateSecureBlindingFactor:', error);
-      if (error instanceof Error) {
-        throw new Error(`Failed generateSecureBlindingFactor: ${error.message}`);
-      } else {
-        throw new Error('Failed generateSecureBlindingFactor Unknown error');
-      }
-    }
-  }
-
-  /**
-   * Create Pedersen commitment: C = vG + rH
-   */
-  static async createPedersenCommitment(value: string, blindingFactor: string): Promise<{
-    pedersen_commitment: string;
-    blinding_factor: string;
-  }> {
-    try {
-      console.log('🔐 Creating BN254 Pedersen commitment...');
-      console.log('📊 DEBUG - Starting with corrected generators');
-      
-      // Validar entradas
-      const v = BigInt(value);
-      const r = BigInt('0x' + blindingFactor);
-      
-      if (v < 0n) {
-        throw new Error('Value must be non-negative');
-      }
-      
-      console.log('📊 Commitment inputs:', {
-        value: v.toString(),
-        blindingFactor: r.toString(16),
-        generatorG: BN254Ops.G1_GENERATOR,
-        generatorH: BN254Ops.H1_GENERATOR
-      });
-
-      // DEBUG: Validar generadores con función simple 
-      console.log('🔍 DEBUG - Validating generators with simple check...');
-      const simpleValidatePoint = (point: { x: bigint; y: bigint }) => {
-        const y2 = (point.y * point.y) % BN254Ops.FIELD_MODULUS;
-        const x3 = (point.x * point.x * point.x) % BN254Ops.FIELD_MODULUS;
-        const right = (x3 + 3n) % BN254Ops.FIELD_MODULUS;
-        return y2 === right;
+      const data = {
+        commitment: commitmentHex,
+        value: value.toString(),
+        blinding_factor: blindingFactor.toString(16)
       };
 
-      const gValid = simpleValidatePoint(BN254Ops.G1_GENERATOR);
-      const hValid = simpleValidatePoint(BN254Ops.H1_GENERATOR);
-      
-      console.log('🔍 DEBUG - Simple generator validation:', { gValid, hValid });
-
-      // También validar con la función de clase
-      const gValidClass = BN254Ops.isValidPoint(BN254Ops.G1_GENERATOR);
-      const hValidClass = BN254Ops.isValidPoint(BN254Ops.H1_GENERATOR);
-      
-      console.log('🔍 DEBUG - Class function validation:', { gValidClass, hValidClass });
-
-      if (!gValid || !hValid) {
-        throw new Error(`Invalid generators detected: G=${gValid}, H=${hValid}`);
-      }
-
-      if (!gValidClass || !hValidClass) {
-        console.warn('⚠️ Class validation differs from simple validation');
-        console.warn('Using simple validation results');
-      }
-
-      // Calcular vG
-      console.log('🔢 Computing vG...');
-      const vG = BN254Ops.scalarMultiply(BN254Ops.G1_GENERATOR, v);
-      console.log('✅ vG computed:', { x: vG.x.toString(16), y: vG.y.toString(16) });
-      
-      // DEBUG: Validar vG
-      const vGValid = simpleValidatePoint(vG);
-      console.log('🔍 DEBUG - vG validation:', vGValid);
-      if (!vGValid) {
-        throw new Error('vG point is invalid');
-      }
-
-      // Calcular rH
-      console.log('🔢 Computing rH...');
-      const rH = BN254Ops.scalarMultiply(BN254Ops.H1_GENERATOR, r);
-      console.log('✅ rH computed:', { x: rH.x.toString(16), y: rH.y.toString(16) });
-      
-      // DEBUG: Validar rH
-      const rHValid = simpleValidatePoint(rH);
-      console.log('🔍 DEBUG - rH validation:', rHValid);
-      if (!rHValid) {
-        throw new Error('rH point is invalid');
-      }
-
-      // Sumar vG + rH
-      console.log('🔢 Computing commitment vG + rH...');
-      const commitment = BN254Ops.addPoints(vG, rH);
-      console.log('✅ Commitment computed:', { x: commitment.x.toString(16), y: commitment.y.toString(16) });
-
-      // DEBUG: Validar commitment con función simple
-      const commitmentValid = simpleValidatePoint(commitment);
-      console.log('🔍 DEBUG - Commitment validation (simple):', commitmentValid);
-      
-      // También validar con función de clase
-      const commitmentValidClass = BN254Ops.isValidPoint(commitment);
-      console.log('🔍 DEBUG - Commitment validation (class):', commitmentValidClass);
-
-      if (!commitmentValid) {
-        console.error('❌ DEBUG - Commitment validation failed with simple function');
-        throw new Error('Generated commitment is not a valid curve point (simple validation)');
-      }
-
-      if (!commitmentValidClass) {
-        console.warn('⚠️ DEBUG - Class validation failed but simple passed');
-      }
-
-      // VERIFICACIÓN CRÍTICA: Manual check
-      console.log('🔍 DEBUG - Manual reconstruction check...');
-      const y2_manual = (commitment.y * commitment.y) % BN254Ops.FIELD_MODULUS;
-      const x3_manual = (commitment.x * commitment.x * commitment.x) % BN254Ops.FIELD_MODULUS;
-      const right_manual = (x3_manual + 3n) % BN254Ops.FIELD_MODULUS;
-      
-      console.log('🔍 DEBUG - Manual calculation:', {
-        y2: y2_manual.toString(16),
-        x3plus3: right_manual.toString(16),
-        equal: y2_manual === right_manual
-      });
-      
-      if (y2_manual !== right_manual) {
-        console.error('❌ DEBUG - Manual reconstruction failed');
-        throw new Error('Manual point reconstruction failed');
-      }
-      
-      console.log('✅ Point can be reconstructed manually');
-
-      // Serializar commitment como hex
-      // El commitment completo incluye coordenadas X e Y
-      const commitmentHex = commitment.x.toString(16).padStart(64, '0') + commitment.y.toString(16).padStart(64, '0');
-
-      console.log('✅ BN254 Pedersen commitment created successfully');
-      
-      // El punto completo tiene formato 0x + coordenada X (64 chars) + coordenada Y (64 chars)
-      console.log('📊 Commitment format details:', {
-        fullLength: commitmentHex.length,
-        coordX: commitmentHex.substring(0, 64).slice(0, 10) + '...',
-        coordY: commitmentHex.substring(64).slice(0, 10) + '...'
-      });
-
-      return {
-        pedersen_commitment: '0x' + commitmentHex,
-        blinding_factor: blindingFactor
-      };
-
+      const result = await zenroom.exec(script, { data: JSON.stringify(data) });
+      return JSON.parse(result.result) === 'verified';
     } catch (error) {
-       console.error('Failed createPedersenCommitment', error);
-      if (error instanceof Error) {
-        throw new Error(`Failed createPedersenCommitment: ${error.message}`);
-      } else {
-        throw new Error('Failed createPedersenCommitment: Unknown error');
-      }
-    }
-  }
-
-  /**
-   * Generate nullifier hash using cryptographic hash function
-   * @param address Owner address
-   * @param commitment Pedersen commitment
-   * @param nonce Unique nonce (typically timestamp)
-   * @returns Promise<string> Nullifier hash with 0x prefix
-   */
-  static async generateNullifierHash(address: string, commitment: string, nonce: string): Promise<string> {
-    try {
-      console.log('🔐 Generating nullifier hash with inputs:', {
-        address: address.slice(0, 10) + '...',
-        commitment: commitment.slice(0, 10) + '...',
-        nonce
-      });
-      
-      // Normalizar inputs
-      const normalizedAddress = address.toLowerCase().replace(/^0x/, '');
-      const normalizedCommitment = commitment.toLowerCase().replace(/^0x/, '');
-      
-      // Combinar inputs para el hash
-      const input = normalizedAddress + normalizedCommitment + nonce;
-      
-      // Usar SHA-256 como hash function
-      const encoder = new TextEncoder();
-      const data = encoder.encode(input);
-      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-      const hashArray = new Uint8Array(hashBuffer);
-      
-      // Convertir a hex string con prefijo 0x
-      const nullifierHex = '0x' + Array.from(hashArray, byte => byte.toString(16).padStart(2, '0')).join('');
-      
-      console.log('✅ Generated nullifier hash:', nullifierHex.slice(0, 10) + '...');
-      
-      // Validar que el nullifier es un hash correcto y en formato adecuado
-      if (!this.isValidHex(nullifierHex.substring(2), 32)) { // 32 bytes para SHA-256
-        throw new Error('Generated nullifier has invalid format');
-      }
-      
-      return nullifierHex;
-    } catch (error) {
-      console.error('Failed to generate nullifier hash:', error);
-      if (error instanceof Error) {
-        throw new Error(`Failed to generate nullifier hash: ${error.message}`);
-      } else {
-        throw new Error('Failed to generate nullifier hash: Unknown error');
-      }
-    }
-  }
-
-  /**
-   * Test BN254 operations
-   */
-  static async testBN254Operations(): Promise<boolean> {
-    try {
-      console.log('🧪 Testing BN254 generators with direct validation...');
-      
-      // Test 1: G1 generator validation (usando validación directa)
-      const g1Valid = isValidBN254Point(G1_GENERATOR.x, G1_GENERATOR.y);
-      console.log('G1 generator validation:', g1Valid ? '✅ VALID' : '❌ INVALID');
-      
-      if (!g1Valid) {
-        throw new Error('G1 generator is not valid');
-      }
-      
-      // Test 2: H1 generator validation (usando validación directa)  
-      const h1Valid = isValidBN254Point(H1_GENERATOR.x, H1_GENERATOR.y);
-      console.log('H1 generator validation:', h1Valid ? '✅ VALID' : '❌ INVALID');
-      
-      if (!h1Valid) {
-        console.error('H1 validation failed. Coordinates:', {
-          x: H1_GENERATOR.x.toString(16),
-          y: H1_GENERATOR.y.toString(16)
-        });
-        throw new Error('H1 generator is not valid');
-      }
-      
-      console.log('✅ All BN254 generators validated successfully');
-      
-      // Test 3: Simple commitment creation
-      try {
-        const testBlindingFactor = await this.generateSecureBlindingFactor();
-        const testCommitment = await this.createPedersenCommitment('100', testBlindingFactor);
-        console.log('✅ Pedersen commitment created successfully:', testCommitment.pedersen_commitment.slice(0, 20) + '...');
-      } catch (error) {
-        console.error('❌ Pedersen commitment failed:', error);
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        throw new Error(`Failed createPedersenCommitment: ${errorMessage}`);
-      }
-      
-      // Test 4: Nullifier generation
-      try {
-        const testNullifier = await this.generateNullifierHash(
-          '0x1234567890123456789012345678901234567890',
-          '0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
-          '12345'
-        );
-        console.log('✅ Nullifier generated successfully:', testNullifier.slice(0, 20) + '...');
-      } catch (error) {
-        console.error('❌ Nullifier generation failed:', error);
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        throw new Error(`Failed generateNullifierHash: ${errorMessage}`);
-      }
-      
-      console.log('🎉 All BN254 tests passed successfully!');
-      return true;
-      return true;
-      
-    } catch (error) {
-      console.error('❌ BN254 test failed:', error);
+      console.warn('Pedersen commitment verification failed:', error);
       return false;
     }
+  }
+
+  /**
+   * Generar Bulletproof range proof
+   */
+  static async generateBulletproof(
+    value: bigint,
+    blindingFactor: string,
+    minRange: bigint = BigInt(0),
+    maxRange: bigint = BigInt(2n ** 64n - 1n)
+  ): Promise<BulletproofRangeProof> {
+    const script = `
+      Scenario 'bulletproof': Create range proof
+      Given I have a 'string' named 'value'
+      Given I have a 'string' named 'blinding_factor'
+      Given I have a 'string' named 'min_range'
+      Given I have a 'string' named 'max_range'
+      When I create the bulletproof range proof of 'value' in range 'min_range' to 'max_range' with blinding factor 'blinding_factor'
+      Then print the 'bulletproof range proof'
+    `;
+
+    const data = {
+      value: value.toString(),
+      blinding_factor: blindingFactor,
+      min_range: minRange.toString(),
+      max_range: maxRange.toString()
+    };
+
+    const result = await zenroom.exec(script, { data: JSON.stringify(data) });
+    const proof = JSON.parse(result.result);
+
+    return {
+      A: proof.bulletproof_range_proof.A,
+      S: proof.bulletproof_range_proof.S,
+      T1: proof.bulletproof_range_proof.T1,
+      T2: proof.bulletproof_range_proof.T2,
+      taux: proof.bulletproof_range_proof.taux,
+      mu: proof.bulletproof_range_proof.mu,
+      proof: proof.bulletproof_range_proof.proof,
+      commitment: proof.bulletproof_range_proof.commitment
+    };
+  }
+
+  /**
+   * Generar Coconut credential
+   */
+  static async generateCoconutCredential(
+    attributes: string[],
+    issuerKeys: any
+  ): Promise<CoconutCredential> {
+    const script = `
+      Scenario 'coconut': Create credential
+      Given I have a 'string array' named 'attributes'
+      Given I have a 'coconut issuer keypair' named 'issuer_keys'
+      When I create the coconut credential request
+      When I create the coconut credential signature
+      Then print the 'coconut credential'
+    `;
+
+    const data = {
+      attributes,
+      issuer_keys: issuerKeys
+    };
+
+    const result = await zenroom.exec(script, { data: JSON.stringify(data) });
+    const credential = JSON.parse(result.result);
+
+    return {
+      signature: credential.coconut_credential.signature,
+      proof: credential.coconut_credential.proof,
+      attributes: attributes
+    };
+  }
+
+  /**
+   * Generar equality proof
+   */
+  static async generateEqualityProof(
+    commitment1: PedersenCommitment,
+    commitment2: PedersenCommitment
+  ): Promise<EqualityProof> {
+    const script = `
+      Scenario 'ecdh': Create equality proof
+      Given I have a 'string' named 'commitment1'
+      Given I have a 'string' named 'commitment2'
+      Given I have a 'string' named 'blinding1'
+      Given I have a 'string' named 'blinding2'
+      When I create the equality proof between 'commitment1' and 'commitment2'
+      Then print the 'equality proof'
+    `;
+
+    const commitment1Hex = '0x' + commitment1.x.toString(16).padStart(64, '0') + commitment1.y.toString(16).padStart(64, '0');
+    const commitment2Hex = '0x' + commitment2.x.toString(16).padStart(64, '0') + commitment2.y.toString(16).padStart(64, '0');
+
+    const data = {
+      commitment1: commitment1Hex,
+      commitment2: commitment2Hex,
+      blinding1: commitment1.blindingFactor,
+      blinding2: commitment2.blindingFactor
+    };
+
+    const result = await zenroom.exec(script, { data: JSON.stringify(data) });
+    const proof = JSON.parse(result.result);
+
+    return {
+      challenge: proof.equality_proof.challenge,
+      response1: proof.equality_proof.response1,
+      response2: proof.equality_proof.response2
+    };
+  }
+
+  /**
+   * Generar nullifier hash
+   */
+  static async generateNullifierHash(
+    commitment: string,
+    owner: string,
+    nonce: string
+  ): Promise<string> {
+    const script = `
+      rule input
+      rule output
+      Given I have a 'string' named 'commitment'
+      Given I have a 'string' named 'owner'
+      Given I have a 'string' named 'nonce'
+      When I create the hash of 'commitment' and 'owner' and 'nonce'
+      Then print the 'hash' as 'hex'
+    `;
+
+    const data = { commitment, owner, nonce };
+    const result = await zenroom.exec(script, { data: JSON.stringify(data) });
+    return JSON.parse(result.result).hash;
+  }
+
+  // ========================
+  // OPERATIONS WITH ATTESTATIONS
+  // ========================
+
+  /**
+   * Crear depósito con attestation del backend
+   */
+  static async createDepositWithAttestation(
+    value: bigint,
+    recipient: string,
+    tokenAddress: string
+  ): Promise<{ commitment: PedersenCommitment; attestation: Attestation }> {
+    console.log('🔐 Creating deposit with Zenroom + Backend attestation...');
+
+    // 1. Generar commitment con Zenroom
+    const blindingFactor = await this.generateSecureBlindingFactor();
+    const commitment = await this.createPedersenCommitment(value.toString(), blindingFactor);
+
+    // 2. Obtener attestation del backend autorizado
+    const attestation = await this.attestationService.createDepositAttestation({
+      tokenAddress,
+      commitmentX: commitment.x,
+      commitmentY: commitment.y,
+      nullifier: await this.generateNullifierHash('0x' + commitment.x.toString(16) + commitment.y.toString(16), recipient, Date.now().toString()),
+      amount: value,
+      userAddress: recipient
+    });
+
+    console.log('✅ Deposit commitment + attestation created');
+    return { commitment, attestation };
+  }
+
+  /**
+   * Crear transferencia con attestation del backend
+   */
+  static async createTransferWithAttestation(
+    inputCommitment: PedersenCommitment,
+    outputValue: bigint,
+    outputRecipient: string,
+    sender: string
+  ): Promise<{ outputCommitment: PedersenCommitment; attestation: Attestation }> {
+    console.log('🔐 Creating transfer with Zenroom + Backend attestation...');
+
+    // 1. Generar output commitment con Zenroom
+    const outputBlindingFactor = await this.generateSecureBlindingFactor();
+    const outputCommitment = await this.createPedersenCommitment(outputValue.toString(), outputBlindingFactor);
+
+    // 2. Obtener attestation del backend autorizado
+    const inputCommitmentHex = '0x' + inputCommitment.x.toString(16).padStart(64, '0') + inputCommitment.y.toString(16).padStart(64, '0');
+    
+    const attestation = await this.attestationService.createTransferAttestation({
+      inputCommitmentX: inputCommitment.x,
+      inputCommitmentY: inputCommitment.y,
+      outputCommitmentX: outputCommitment.x,
+      outputCommitmentY: outputCommitment.y,
+      nullifier: await this.generateNullifierHash(inputCommitmentHex, sender, Date.now().toString()),
+      newOwner: outputRecipient,
+      userAddress: sender
+    });
+
+    console.log('✅ Transfer commitment + attestation created');
+    return { outputCommitment, attestation };
+  }
+
+  /**
+   * Crear split con attestation del backend
+   */
+  static async createSplitWithAttestation(
+    inputCommitment: PedersenCommitment,
+    outputValues: bigint[],
+    outputOwners: string[],
+    sender: string
+  ): Promise<{ outputCommitments: PedersenCommitment[]; attestation: Attestation }> {
+    console.log('🔐 Creating split with Zenroom + Backend attestation...');
+
+    // 1. Generar output commitments con Zenroom
+    const outputCommitments: PedersenCommitment[] = [];
+    for (const value of outputValues) {
+      const blindingFactor = await this.generateSecureBlindingFactor();
+      const commitment = await this.createPedersenCommitment(value.toString(), blindingFactor);
+      outputCommitments.push(commitment);
+    }
+
+    // 2. Obtener attestation del backend autorizado
+    const inputCommitmentHex = '0x' + inputCommitment.x.toString(16).padStart(64, '0') + inputCommitment.y.toString(16).padStart(64, '0');
+    const outputCommitmentsX = outputCommitments.map(c => c.x);
+    const outputCommitmentsY = outputCommitments.map(c => c.y);
+
+    const attestation = await this.attestationService.createSplitAttestation({
+      inputCommitmentX: inputCommitment.x,
+      inputCommitmentY: inputCommitment.y,
+      outputCommitmentsX,
+      outputCommitmentsY,
+      outputValues,
+      outputOwners,
+      nullifier: await this.generateNullifierHash(inputCommitmentHex, sender, Date.now().toString()),
+      userAddress: sender
+    });
+
+    console.log('✅ Split commitments + attestation created');
+    return { outputCommitments, attestation };
+  }
+
+  /**
+   * Crear withdrawal con attestation del backend
+   */
+  static async createWithdrawWithAttestation(
+    commitment: PedersenCommitment,
+    recipient: string,
+    sender: string
+  ): Promise<{ attestation: Attestation }> {
+    console.log('🔐 Creating withdrawal with Backend attestation...');
+
+    // Obtener attestation del backend autorizado
+    const commitmentHex = '0x' + commitment.x.toString(16).padStart(64, '0') + commitment.y.toString(16).padStart(64, '0');
+
+    const attestation = await this.attestationService.createWithdrawAttestation({
+      commitmentX: commitment.x,
+      commitmentY: commitment.y,
+      amount: commitment.value,
+      nullifier: await this.generateNullifierHash(commitmentHex, sender, Date.now().toString()),
+      recipient,
+      userAddress: sender
+    });
+
+    console.log('✅ Withdrawal attestation created');
+    return { attestation };
   }
 }
-export { BN254Ops };
