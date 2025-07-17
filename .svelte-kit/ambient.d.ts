@@ -28,7 +28,6 @@
 declare module '$env/static/private' {
 	export const VITE_ADDRESS_CONTRACT_AMOY: string;
 	export const VITE_ADDRESS_CONTRACT_ALASTRIA: string;
-	export const PRIVATE_KEY_ADMIN: string;
 	export const VITE_PRIVATE_KEY_ADMIN: string;
 	export const ALLUSERSPROFILE: string;
 	export const ANDROID_SDK_ROOT: string;
@@ -148,7 +147,6 @@ declare module '$env/dynamic/private' {
 	export const env: {
 		VITE_ADDRESS_CONTRACT_AMOY: string;
 		VITE_ADDRESS_CONTRACT_ALASTRIA: string;
-		PRIVATE_KEY_ADMIN: string;
 		VITE_PRIVATE_KEY_ADMIN: string;
 		ALLUSERSPROFILE: string;
 		ANDROID_SDK_ROOT: string;

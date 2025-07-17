@@ -538,7 +538,7 @@ export async function warmupZenroom(): Promise<boolean> {
 // Auto-configure for cryptographic operations when loaded
 if (browser) {
   configureZenroom({
-    debug: process?.env?.NODE_ENV === 'development',
+    debug: import.meta.env.DEV || false,
     timeout: 30000,
     retryAttempts: 3
   });
