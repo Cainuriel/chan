@@ -241,40 +241,55 @@ export class UTXOLibrary extends EventEmitter {
       throw new Error(`No se pudo conectar con el contrato UTXO en la dirección ${contractAddressOrProvider}. Verifica que la dirección sea correcta y que el contrato esté desplegado.`);
     }
     
-    // Test BN254 cryptography ANTES de hacer otras operaciones
-    console.log('🔬 Initializing and testing BN254 cryptography...');
+    // Enhanced cryptography initialization with fallback modes
+    console.log('🔬 Initializing cryptography with enhanced error handling...');
     
-    // First initialize Zenroom
+    let cryptoMode: 'full' | 'limited' | 'unavailable' = 'unavailable';
+    
     try {
+      // Attempt to initialize Zenroom with enhanced error handling
       const zenroomInitialized = await ZenroomHelpers.initialize();
-      if (!zenroomInitialized) {
-        throw new Error('Failed to initialize Zenroom library');
+      
+      if (zenroomInitialized) {
+        console.log('✅ Zenroom library initialized successfully - full cryptography available');
+        cryptoMode = 'full';
+        
+        // Test cryptographic functionality if full mode
+        try {
+          const testBlinding = await ZenroomHelpers.generateSecureBlindingFactor();
+          const testCommitment = await ZenroomHelpers.createPedersenCommitment("100", testBlinding);
+          console.log('✅ BN254 cryptography test passed - commitment created successfully');
+        } catch (cryptoTestError) {
+          console.warn('⚠️ Cryptographic test failed, but continuing:', cryptoTestError);
+          cryptoMode = 'limited';
+        }
+      } else {
+        console.warn('⚠️ Zenroom initialization failed - using limited crypto mode');
+        cryptoMode = 'limited';
       }
-      console.log('✅ Zenroom library initialized successfully');
+      
     } catch (initError) {
-      console.error('❌ Zenroom initialization failed:', initError);
-      throw new Error('Zenroom initialization failed');
-    }
-
-    // Simple test - create a commitment to verify Zenroom is working
-    try {
-      const testBlinding = await ZenroomHelpers.generateSecureBlindingFactor();
-      const testCommitment = await ZenroomHelpers.createPedersenCommitment("100", testBlinding);
-      console.log('✅ BN254 cryptography test passed - commitment created successfully');
-    } catch (cryptoError) {
-      console.error('❌ BN254 cryptography test failed:', cryptoError);
-      throw new Error('BN254 cryptography initialization failed');
+      console.warn('⚠️ Zenroom initialization error, continuing with limited functionality:', initError);
+      cryptoMode = 'limited';
     }
     
-    // Solo marcar como inicializado después del test
+    // Always mark as initialized regardless of crypto mode
     this.isInitialized = true;
     this.emit('library:initialized', { 
-      cryptography: 'BN254',
+      cryptography: cryptoMode === 'full' ? 'BN254' : 'limited',
       status: 'ready',
-      contractAddress: contractAddressOrProvider
+      contractAddress: contractAddressOrProvider,
+      cryptoMode
     });
     
-    console.log('🎉 UTXOLibrary initialized successfully with BN254 cryptography');
+    if (cryptoMode === 'full') {
+      console.log('🎉 UTXOLibrary initialized successfully with full BN254 cryptography');
+    } else if (cryptoMode === 'limited') {
+      console.log('⚠️ UTXOLibrary initialized with limited cryptography - some features may be unavailable');
+    } else {
+      console.log('🚨 UTXOLibrary initialized without cryptography - only basic operations available');
+    }
+    
     return true;
     
   } catch (error) {
@@ -356,6 +371,9 @@ export class UTXOLibrary extends EventEmitter {
     console.log(`💰 Creating private UTXO deposit with REAL BN254 cryptography for ${params.amount} tokens...`);
 
     try {
+      // Ensure Zenroom cryptography is available
+      await ZenroomHelpers.ensureInitialized();
+      
       const { tokenAddress, amount } = params;
 
       // 1. Generate cryptographically secure blinding factor (BN254 compatible)
@@ -580,6 +598,9 @@ export class UTXOLibrary extends EventEmitter {
     console.log(`✂️ Splitting private UTXO with REAL BN254 cryptography: ${params.inputUTXOId}...`);
 
     try {
+      // Ensure Zenroom cryptography is available
+      await ZenroomHelpers.ensureInitialized();
+      
       const { inputUTXOId, outputValues, outputOwners } = params;
 
       // 1. Get and validate input UTXO
@@ -777,6 +798,9 @@ export class UTXOLibrary extends EventEmitter {
     console.log(`💸 Withdrawing private UTXO with REAL BN254 cryptography: ${params.utxoId}...`);
 
     try {
+      // Ensure Zenroom cryptography is available
+      await ZenroomHelpers.ensureInitialized();
+      
       const { utxoId, recipient } = params;
 
       // 1. Get and validate UTXO
@@ -888,6 +912,9 @@ export class UTXOLibrary extends EventEmitter {
     console.log(`🔄 Transferring private UTXO with REAL BN254 cryptography: ${params.utxoId} to ${params.newOwner}...`);
 
     try {
+      // Ensure Zenroom cryptography is available
+      await ZenroomHelpers.ensureInitialized();
+      
       const { utxoId, newOwner } = params;
 
       // 1. Get and validate UTXO

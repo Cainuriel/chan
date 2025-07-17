@@ -29,6 +29,7 @@ import {
   type GeneratorParams,
   type CommitmentPoint
 } from '../contracts/UTXOVault.types';
+import { PrivateUTXOStorage } from './PrivateUTXOStorage';
 
 // ========================
 // INTERFACES FALTANTES
@@ -898,7 +899,6 @@ export class PrivateUTXOManager extends UTXOLibrary {
    */
   private loadUTXOsFromStorage(owner: string): void {
     try {
-      const { PrivateUTXOStorage } = require('./PrivateUTXOStorage');
       const storedUTXOs = PrivateUTXOStorage.getPrivateUTXOs(owner);
       
       // Cargar UTXOs en la caché
@@ -945,7 +945,6 @@ export class PrivateUTXOManager extends UTXOLibrary {
       // 3. Si aún no hay UTXOs, cargar directamente desde localStorage
       if (utxos.length === 0) {
         console.log('📂 Loading UTXOs directly from localStorage...');
-        const { PrivateUTXOStorage } = require('./PrivateUTXOStorage');
         const storedUTXOs = PrivateUTXOStorage.getPrivateUTXOs(owner);
         
         return storedUTXOs.filter((utxo: PrivateUTXO) => 
@@ -993,7 +992,6 @@ export class PrivateUTXOManager extends UTXOLibrary {
 
       // 3. Si no encontramos balance en caché, consultar directamente localStorage
       if (balance === BigInt(0)) {
-        const { PrivateUTXOStorage } = require('./PrivateUTXOStorage');
         return PrivateUTXOStorage.getBalance(targetOwner, tokenAddress);
       }
       
@@ -1200,8 +1198,6 @@ export class PrivateUTXOManager extends UTXOLibrary {
 
       console.log(`🔍 === DEBUG STORAGE FOR USER ${targetUser} ===`);
       
-      const { PrivateUTXOStorage } = require('./PrivateUTXOStorage');
-      
       // Debug completo del storage
       PrivateUTXOStorage.debugStorage(targetUser);
       
@@ -1248,7 +1244,6 @@ export class PrivateUTXOManager extends UTXOLibrary {
       const targetUser = userAddress || this.currentAccount?.address;
       if (!targetUser) return false;
 
-      const { PrivateUTXOStorage } = require('./PrivateUTXOStorage');
       return PrivateUTXOStorage.hasUserData(targetUser);
     } catch (error) {
       console.error('❌ Failed to check stored UTXOs:', error);
@@ -1264,7 +1259,6 @@ export class PrivateUTXOManager extends UTXOLibrary {
       const targetUser = userAddress || this.currentAccount?.address;
       if (!targetUser) return null;
 
-      const { PrivateUTXOStorage } = require('./PrivateUTXOStorage');
       return PrivateUTXOStorage.getEnhancedUserStats(targetUser);
     } catch (error) {
       console.error('❌ Failed to get complete user stats:', error);
