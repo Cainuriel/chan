@@ -581,14 +581,11 @@ contract UTXOVault is ReentrancyGuard, Ownable {
         uint256 y = _modularSqrt(y2, p);
         
         // Use LSB of blinding factor to determine Y parity
-        // If LSB is 1, use the larger Y value; if 0, use the smaller Y value
-        bool useLargerY = (blindingFactor & 1) == 1;
-        uint256 y_alt = p - y;
+        // If LSB is 1, use the alternative Y value; if 0, use the principal Y value
+        bool useAlternativeY = (blindingFactor & 1) == 1;
         
-        if (useLargerY && y_alt > y) {
-            y = y_alt;
-        } else if (!useLargerY && y > y_alt) {
-            y = y_alt;
+        if (useAlternativeY) {
+            y = p - y;
         }
         
         // Verify the point is on the curve

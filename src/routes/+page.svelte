@@ -26,7 +26,7 @@
   const privacyMode = true;
 
   // Configuration
-  const CONTRACT_ADDRESS = '0x38d882e9b26286EB3952e715a8Cb2f9fFFa070A8'; // Amoy
+  const CONTRACT_ADDRESS = '0xE4e35290Dda72e6fA426E23e8E805219246f415e'; // Amoy
   const PREFERRED_PROVIDER = WalletProviderType.METAMASK;
 
   onMount(async () => {
