@@ -7,6 +7,7 @@ import { ethers, toBigInt, type BigNumberish } from 'ethers';
 import { UTXOLibrary } from './UTXOLibrary';
 import { ZenroomHelpers } from './../utils/zenroom.helpers';
 import { EthereumHelpers } from './../utils/ethereum.helpers';
+import { gasManager } from './GasManager';
 import {
   type UTXOOperationResult,
   type ExtendedUTXOData,
@@ -107,6 +108,7 @@ export class PrivateUTXOManager extends UTXOLibrary {
   // Almacenamiento de UTXOs privados con BN254
   private privateUTXOs: Map<string, PrivateUTXO> = new Map();
   private bn254OperationCount: number = 0;
+  private currentChainId: number | null = null; // Para manejar gas inteligentemente
 
  constructor(config: UTXOManagerConfig = {  // ✅ CAMBIAR TIPO
   autoConsolidate: false,
@@ -120,6 +122,97 @@ export class PrivateUTXOManager extends UTXOLibrary {
   super(config);
   console.log('🔐 PrivateUTXOManager initialized with REAL BN254 cryptography only');
 }
+
+  /**
+   * Initialize with chain ID detection for smart gas management
+   */
+  async initialize(contractAddressOrProvider: string): Promise<boolean> {
+    try {
+      // Call parent initialize method
+      const success = await super.initialize(contractAddressOrProvider);
+      
+      if (success) {
+        try {
+          // Get chain ID for gas management
+          const provider = EthereumHelpers.getProvider();
+          if (provider) {
+            const network = await provider.getNetwork();
+            this.currentChainId = Number(network.chainId);
+            
+            console.log(`⛽ Detected chain ID: ${this.currentChainId}`);
+            console.log(`⛽ Network requires gas: ${gasManager.requiresGas(this.currentChainId)}`);
+            
+            // Debug gas configuration
+            gasManager.debugConfiguration();
+          }
+        } catch (networkError: any) {
+          console.warn('⚠️ Could not detect chain ID:', networkError.message);
+          this.currentChainId = null;
+        }
+      }
+      
+      return success;
+    } catch (error: any) {
+      console.error('❌ Failed to initialize PrivateUTXOManager:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Helper method to prepare transaction parameters with smart gas management
+   */
+  private async prepareTransactionParams(
+    operation: 'deposit' | 'transfer' | 'split' | 'withdraw' | 'default' = 'default',
+    customGasLimit?: bigint
+  ): Promise<any> {
+    try {
+      // Get gas options from GasManager
+      const gasOptions = await gasManager.getGasOptions(
+        this.currentChainId || 1, // Fallback to Ethereum mainnet
+        EthereumHelpers.getProvider(),
+        operation
+      );
+
+      // Prepare base transaction parameters
+      let txParams: any = {};
+
+      // Set gas limit if provided
+      if (customGasLimit) {
+        txParams.gasLimit = customGasLimit;
+      }
+
+      // Add gas options only if the network requires gas
+      if (gasOptions) {
+        txParams = { ...txParams, ...gasOptions };
+        
+        console.log(`⛽ Transaction parameters for ${operation}:`, {
+          gasLimit: customGasLimit?.toString() || 'estimated',
+          gasPrice: gasOptions.gasPrice ? ethers.formatUnits(gasOptions.gasPrice, 'gwei') + ' gwei' : 'N/A',
+          maxFeePerGas: gasOptions.maxFeePerGas ? ethers.formatUnits(gasOptions.maxFeePerGas, 'gwei') + ' gwei' : 'N/A',
+          network: `Chain ${this.currentChainId} (gas required)`,
+          operation
+        });
+      } else {
+        console.log(`⛽ Gas-free network detected, skipping gas parameters for ${operation}`);
+      }
+
+      return txParams;
+
+    } catch (error: any) {
+      console.warn(`⚠️ Failed to prepare transaction params for ${operation}:`, error.message);
+      
+      // Return safe fallback for gas-required networks
+      if (gasManager.requiresGas(this.currentChainId || 1)) {
+        return {
+          gasLimit: customGasLimit || BigInt(500000),
+          gasPrice: BigInt(20000000000) // 20 Gwei fallback
+        };
+      }
+      
+      // For gas-free networks, return minimal params
+      return customGasLimit ? { gasLimit: customGasLimit } : {};
+    }
+  }
 
   // ========================
   // OPERACIONES PRIVADAS CON CRIPTOGRAFÍA BN254 REAL
@@ -183,16 +276,12 @@ export class PrivateUTXOManager extends UTXOLibrary {
         // Aprobar una cantidad ligeramente mayor para BN254 operations
         const approvalAmount = amount + (amount / 100n); // +1% extra para BN254
         
-        // Obtener gasPrice con fallback
-        let gasPrice: bigint;
-        try {
-          const feeData = await signer.provider?.getFeeData();
-          gasPrice = feeData?.gasPrice || ethers.parseUnits('25', 'gwei');
-          gasPrice = gasPrice + (gasPrice * 20n / 100n); // +20% para BN254
-        } catch (error) {
-          console.warn('Could not get gas price, using BN254-optimized default:', error);
-          gasPrice = ethers.parseUnits('30', 'gwei'); // Higher default for BN254
-        }
+        // Usar GasManager para obtener opciones de gas inteligentes
+        const gasOptions = await gasManager.getGasOptions(
+          this.currentChainId || 1, // Fallback a Ethereum mainnet
+          EthereumHelpers.getProvider(),
+          'default'
+        );
         
         // Estimar gas para approval
         let gasLimit: bigint;
@@ -207,20 +296,31 @@ export class PrivateUTXOManager extends UTXOLibrary {
           gasLimit = BigInt(100000); // 100k gas conservative
         }
 
-        console.log('⛽ Approval transaction parameters:', {
-          approvalAmount: ethers.formatUnits(approvalAmount, tokenDecimals),
-          gasLimit: gasLimit.toString(),
-          gasPrice: ethers.formatUnits(gasPrice, 'gwei') + ' gwei'
-        });
+        // Preparar parámetros de transacción base
+        let txParams: any = {
+          gasLimit: gasLimit
+        };
+
+        // Agregar opciones de gas solo si la red las requiere
+        if (gasOptions) {
+          txParams = { ...txParams, ...gasOptions };
+          
+          console.log('⛽ Approval transaction parameters:', {
+            approvalAmount: ethers.formatUnits(approvalAmount, tokenDecimals),
+            gasLimit: gasLimit.toString(),
+            gasPrice: gasOptions.gasPrice ? ethers.formatUnits(gasOptions.gasPrice, 'gwei') + ' gwei' : 'N/A',
+            maxFeePerGas: gasOptions.maxFeePerGas ? ethers.formatUnits(gasOptions.maxFeePerGas, 'gwei') + ' gwei' : 'N/A',
+            network: `Chain ${this.currentChainId} (${gasManager.requiresGas(this.currentChainId || 1) ? 'gas required' : 'gas-free'})`
+          });
+        } else {
+          console.log('⛽ Gas-free network detected, skipping gas parameters for approval');
+        }
 
         // Enviar transacción de aprobación
         const approveTx = await tokenContract.approve(
           this.contract?.target,
           approvalAmount,
-          {
-            gasLimit: gasLimit,
-            gasPrice: gasPrice
-          }
+          txParams
         );
         console.log('⏳ Approval transaction sent:', approveTx.hash);
         
@@ -574,16 +674,12 @@ export class PrivateUTXOManager extends UTXOLibrary {
         throw new Error('Signer not available for BN254 deposit transaction');
       }
 
-      // Gas optimizado para operaciones BN254 REALES en Polygon
-      let gasPrice: bigint;
-      try {
-        const feeData = await signer.provider?.getFeeData();
-        gasPrice = feeData?.gasPrice || ethers.parseUnits('50', 'gwei');
-        gasPrice = gasPrice + (gasPrice * 100n / 100n); // +100% para asegurar procesamiento rápido
-      } catch (error) {
-        console.warn('Using BN254-optimized fallback gas price for Polygon:', error);
-        gasPrice = ethers.parseUnits('60', 'gwei'); // Gas price alto para Polygon con criptografía real
-      }
+      // Usar GasManager para obtener opciones de gas inteligentes
+      const gasOptions = await gasManager.getGasOptions(
+        this.currentChainId || 1, // Fallback a Ethereum mainnet
+        EthereumHelpers.getProvider(),
+        'deposit'
+      );
 
       // Estimación de gas para BN254 operations - MÁXIMO PARA CRIPTOGRAFÍA REAL
       let gasLimit: bigint;
@@ -599,27 +695,33 @@ export class PrivateUTXOManager extends UTXOLibrary {
         gasLimit = estimatedGas + (estimatedGas * 300n / 100n);
         console.log('✅ BN254 gas estimation successful:', gasLimit.toString());
       } catch (gasError: any) {
-        console.warn('❌ BN254 gas estimation failed, using MAXIMUM gas for Polygon:', gasError);
+        console.warn('❌ BN254 gas estimation failed, using MAXIMUM gas:', gasError);
         if (gasError.reason === 'Invalid commitment point') {
           throw new Error('BN254 commitment point validation failed. Please try again.');
         }
-        // USAR MÁXIMO GAS PERMITIDO EN POLYGON para operaciones criptográficas reales
-        gasLimit = BigInt(10000000); // 10M gas - máximo para Polygon
+        // USAR MÁXIMO GAS para operaciones criptográficas reales
+        gasLimit = BigInt(10000000); // 10M gas - máximo para operaciones complejas
       }
 
-      // Límites de gas para CRIPTOGRAFÍA REAL en Polygon
-      const maxGasLimit = BigInt(10000000); // 10M máximo para Polygon (operaciones criptográficas)
-      const minGasLimit = BigInt(5000000);  // 5M mínimo para BN254 + Bulletproofs + ERC20
-      
-      if (gasLimit > maxGasLimit) gasLimit = maxGasLimit;
-      if (gasLimit < minGasLimit) gasLimit = minGasLimit;
+      // Límites de gas para CRIPTOGRAFÍA REAL (solo si la red requiere gas)
+      if (gasManager.requiresGas(this.currentChainId || 1)) {
+        const maxGasLimit = BigInt(10000000); // 10M máximo para operaciones criptográficas
+        const minGasLimit = BigInt(5000000);  // 5M mínimo para BN254 + Bulletproofs + ERC20
+        
+        if (gasLimit > maxGasLimit) gasLimit = maxGasLimit;
+        if (gasLimit < minGasLimit) gasLimit = minGasLimit;
 
-      console.log('⛽ Final POLYGON gas parameters for REAL BN254 cryptography:', {
-        gasLimit: gasLimit.toString(),
-        gasPrice: ethers.formatUnits(gasPrice, 'gwei') + ' gwei',
-        estimatedCost: ethers.formatEther(gasLimit * gasPrice) + ' MATIC',
-        note: 'High gas needed for real Pedersen + Bulletproofs verification'
-      });
+        console.log('⛽ Final gas parameters for REAL BN254 cryptography:', {
+          gasLimit: gasLimit.toString(),
+          gasPrice: gasOptions?.gasPrice ? ethers.formatUnits(gasOptions.gasPrice, 'gwei') + ' gwei' : 'N/A',
+          maxFeePerGas: gasOptions?.maxFeePerGas ? ethers.formatUnits(gasOptions.maxFeePerGas, 'gwei') + ' gwei' : 'N/A',
+          estimatedCost: gasOptions?.gasPrice ? ethers.formatEther(gasLimit * gasOptions.gasPrice) + ' ETH' : 'Gas-free',
+          network: `Chain ${this.currentChainId} (${gasManager.requiresGas(this.currentChainId || 1) ? 'gas required' : 'gas-free'})`,
+          note: 'High gas needed for real Pedersen + Bulletproofs verification'
+        });
+      } else {
+        console.log('⛽ Gas-free network detected, skipping gas parameters for deposit');
+      }
 
       // 🔍 DEPURACIÓN DETALLADA: Verificar todos los parámetros antes del envío
       console.log('🔍 VERIFICACIÓN DETALLADA DE PARÁMETROS ANTES DEL ENVÍO:');
@@ -845,16 +947,15 @@ export class PrivateUTXOManager extends UTXOLibrary {
       // 10. Ejecutar transacción BN254
       console.log('🚀 Executing BN254 depositAsPrivateUTXO transaction...');
       
+      // Usar helper method para preparar parámetros de transacción
+      const txParams = await this.prepareTransactionParams('deposit', gasLimit);
+      
       const tx = await this.contract!.depositAsPrivateUTXO(
         depositParams,
         proofParams,
         generatorParams,
         amount,
-        {
-          gasLimit: gasLimit,
-          gasPrice: gasPrice,
-          value: BigInt(0)
-        }
+        txParams
       );
       
       console.log('✅ BN254 transaction sent:', tx.hash);
@@ -1080,32 +1181,17 @@ export class PrivateUTXOManager extends UTXOLibrary {
       // 6. Obtener generadores BN254 estándar
       const generatorParams = this.getBN254StandardGenerators();
 
-      // 7. Preparar transacción con gas optimizado para BN254
+      // 7. Preparar transacción con gestión inteligente de gas
       const signer = EthereumHelpers.getSigner();
       if (!signer) {
         throw new Error('Signer not available for BN254 transfer transaction');
       }
 
-      // Gas optimizado para transferencias BN254
-      let gasPrice: bigint;
-      try {
-        const feeData = await signer.provider?.getFeeData();
-        gasPrice = feeData?.gasPrice || ethers.parseUnits('25', 'gwei');
-        gasPrice = gasPrice + (gasPrice * 20n / 100n); // +20% para BN254
-      } catch (error) {
-        console.warn('Using BN254 transfer fallback gas price:', error);
-        gasPrice = ethers.parseUnits('30', 'gwei');
-      }
-
-      const estimatedGas = BigInt(800000); // 800k gas para BN254 transfer
-      const gasLimit = estimatedGas + (estimatedGas * 25n / 100n); // +25% buffer
-
-      console.log('⛽ BN254 transfer gas parameters:', {
-        gasLimit: gasLimit.toString(),
-        gasPrice: ethers.formatUnits(gasPrice, 'gwei') + ' gwei'
-      });
-
-      // 8. Ejecutar transacción BN254 transfer
+      // 8. Preparar parámetros de transacción con gas inteligente
+      const gasLimit = BigInt(800000); // 800k gas para BN254 transfer
+      const transactionParams = await this.prepareTransactionParams('transfer', gasLimit);
+      
+      // 9. Ejecutar transacción BN254 transfer
       console.log('🚀 Calling transferPrivateUTXO with REAL BN254 cryptography...');
       const tx = await this.contract!.transferPrivateUTXO(
         utxo.commitment,
@@ -1115,10 +1201,7 @@ export class PrivateUTXOManager extends UTXOLibrary {
         ZenroomHelpers.toBigInt('0x' + newBlindingFactor),
         nullifierHash,
         generatorParams,
-        {
-          gasLimit: gasLimit,
-          gasPrice: gasPrice
-        }
+        transactionParams
       );
 
       console.log('✅ BN254 transfer transaction sent:', tx.hash);
@@ -1303,36 +1386,25 @@ export class PrivateUTXOManager extends UTXOLibrary {
       // 7. Obtener generadores BN254 estándar
       const generatorParams = this.getBN254StandardGenerators();
 
-      // 8. Preparar transacción con gas optimizado para BN254 split
+      // 8. Preparar transacción con gestión inteligente de gas
       const signer = EthereumHelpers.getSigner();
       if (!signer) {
         throw new Error('Signer not available for BN254 split transaction');
-      }
-
-      // Gas optimizado para splits BN254 (más complejo)
-      let gasPrice: bigint;
-      try {
-        const feeData = await signer.provider?.getFeeData();
-        gasPrice = feeData?.gasPrice || ethers.parseUnits('30', 'gwei');
-        gasPrice = gasPrice + (gasPrice * 30n / 100n); // +30% para BN254 split
-      } catch (error) {
-        console.warn('Using BN254 split fallback gas price:', error);
-        gasPrice = ethers.parseUnits('40', 'gwei'); // Higher for splits
       }
 
       // Gas más alto para operaciones de split BN254
       const baseGas = BigInt(1000000); // 1M base para BN254 split
       const extraGasPerOutput = BigInt(200000); // 200k extra por output
       const estimatedGas = baseGas + (extraGasPerOutput * BigInt(outputValues.length));
-      const gasLimit = estimatedGas + (estimatedGas * 25n / 100n); // +25% buffer
+      
+      const transactionParams = await this.prepareTransactionParams('split', estimatedGas);
 
-      console.log('⛽ BN254 split gas parameters:', {
+      console.log('⛽ BN254 split gas estimation:', {
         baseGas: baseGas.toString(),
         extraPerOutput: extraGasPerOutput.toString(),
         estimatedGas: estimatedGas.toString(),
-        gasLimit: gasLimit.toString(),
-        gasPrice: ethers.formatUnits(gasPrice, 'gwei') + ' gwei',
-        outputCount: outputValues.length
+        outputCount: outputValues.length,
+        networkRequiresGas: this.currentChainId !== 2020 // Alastria chainId
       });
 
       // 9. Ejecutar transacción BN254 split
@@ -1346,10 +1418,7 @@ export class PrivateUTXOManager extends UTXOLibrary {
         splitProof,
         inputNullifierHash,
         generatorParams,
-        {
-          gasLimit: gasLimit,
-          gasPrice: gasPrice
-        }
+        transactionParams
       );
 
       console.log('✅ BN254 split transaction sent:', tx.hash);
@@ -1498,30 +1567,19 @@ export class PrivateUTXOManager extends UTXOLibrary {
       // 5. Obtener generadores BN254 estándar
       const generatorParams = this.getBN254StandardGenerators();
 
-      // 6. Preparar transacción con gas optimizado para BN254 withdrawal
+      // 6. Preparar transacción con gestión inteligente de gas
       const signer = EthereumHelpers.getSigner();
       if (!signer) {
         throw new Error('Signer not available for BN254 withdrawal transaction');
       }
 
-      // Gas optimizado para withdrawals BN254
-      let gasPrice: bigint;
-      try {
-        const feeData = await signer.provider?.getFeeData();
-        gasPrice = feeData?.gasPrice || ethers.parseUnits('25', 'gwei');
-        gasPrice = gasPrice + (gasPrice * 20n / 100n); // +20% para BN254
-      } catch (error) {
-        console.warn('Using BN254 withdrawal fallback gas price:', error);
-        gasPrice = ethers.parseUnits('30', 'gwei');
-      }
-
       const estimatedGas = BigInt(600000); // 600k gas para BN254 withdrawal
-      const gasLimit = estimatedGas + (estimatedGas * 25n / 100n); // +25% buffer
+      const transactionParams = await this.prepareTransactionParams('withdraw', estimatedGas);
 
-      console.log('⛽ BN254 withdrawal gas parameters:', {
-        gasLimit: gasLimit.toString(),
-        gasPrice: ethers.formatUnits(gasPrice, 'gwei') + ' gwei',
-        recipient: recipient || 'same as owner'
+      console.log('⛽ BN254 withdrawal gas estimation:', {
+        estimatedGas: estimatedGas.toString(),
+        recipient: recipient || 'same as owner',
+        networkRequiresGas: this.currentChainId !== 2020 // Alastria chainId
       });
 
       // 7. Ejecutar transacción BN254 withdrawal
@@ -1532,10 +1590,7 @@ export class PrivateUTXOManager extends UTXOLibrary {
         ZenroomHelpers.toBigInt('0x' + utxo.blindingFactor),
         nullifierHash,
         generatorParams,
-        {
-          gasLimit: gasLimit,
-          gasPrice: gasPrice
-        }
+        transactionParams
       );
 
       console.log('✅ BN254 withdrawal transaction sent:', tx.hash);

@@ -4,6 +4,7 @@
   import { privateUTXOManager } from '$lib/PrivateUTXOManager';
   import type { PrivateUTXO } from '$lib/PrivateUTXOManager'; 
   import { PrivateUTXOStorage } from '$lib/PrivateUTXOStorage';
+  import { EthereumHelpers } from '../utils/ethereum.helpers';
   import { WalletProviderType } from '../types/ethereum.types';
   import type { UTXOManagerStats, UTXOManagerConfig } from '../types/utxo.types';
   import type { EOAData } from '../types/ethereum.types';
@@ -16,6 +17,7 @@
     blockExplorer: string;
     nativeCurrency: { name: string; symbol: string; decimals: number };
     contractAddress: string;
+    requiresGas: boolean; // Whether this network requires gas fees
   };
   
   type NetworkKey = 'amoy' | 'alastria';
@@ -53,7 +55,8 @@
       rpcUrl: 'https://rpc-amoy.polygon.technology/',
       blockExplorer: 'https://amoy.polygonscan.com',
       nativeCurrency: { name: 'MATIC', symbol: 'MATIC', decimals: 18 },
-      contractAddress: import.meta.env.VITE_ADDRESS_CONTRACT_AMOY || ''
+      contractAddress: import.meta.env.VITE_ADDRESS_CONTRACT_AMOY || '',
+      requiresGas: true // Polygon requires gas fees
     },
     alastria: {
       name: 'Alastria',
@@ -61,7 +64,8 @@
       rpcUrl: 'http://108.142.237.13:8545',
       blockExplorer: 'http://108.142.237.13', // Placeholder, adjust as needed
       nativeCurrency: { name: 'ALA', symbol: 'ALA', decimals: 18 },
-      contractAddress: import.meta.env.VITE_ADDRESS_CONTRACT_ALASTRIA || ''
+      contractAddress: import.meta.env.VITE_ADDRESS_CONTRACT_ALASTRIA || '',
+      requiresGas: false // Alastria is gas-free
     }
   };
 
@@ -243,6 +247,77 @@
     NETWORKS[selectedNetwork].contractAddress = address;
     CONTRACT_ADDRESS = address;
     addNotification('success', `Contract address updated for ${NETWORKS[selectedNetwork].name}: ${address}`);
+  }
+
+  // ========================
+  // GAS MANAGEMENT HELPERS
+  // ========================
+  
+  // Check if current network requires gas
+  function currentNetworkRequiresGas(): boolean {
+    return NETWORKS[selectedNetwork]?.requiresGas ?? true; // Default to true for safety
+  }
+  
+  // Get gas options for transaction based on network
+  async function getGasOptions(): Promise<{ gasLimit?: bigint; gasPrice?: bigint; maxFeePerGas?: bigint; maxPriorityFeePerGas?: bigint } | null> {
+    if (!currentNetworkRequiresGas()) {
+      console.log('⛽ Gas-free network detected, skipping gas calculations');
+      return null; // No gas options needed for Alastria
+    }
+    
+    try {
+      // For networks that require gas, calculate appropriate gas settings
+      const provider = EthereumHelpers.getProvider();
+      if (!provider) {
+        console.warn('⚠️ No provider available for gas calculation');
+        return null;
+      }
+      
+      // Try to get current gas price
+      const feeData = await provider.getFeeData();
+      console.log('⛽ Fee data:', feeData);
+      
+      const gasOptions: any = {};
+      
+      // Set gas limit (reasonable default for UTXO operations)
+      gasOptions.gasLimit = BigInt(500000); // 500k gas limit
+      
+      // Handle different gas pricing models
+      if (feeData.maxFeePerGas && feeData.maxPriorityFeePerGas) {
+        // EIP-1559 (Type 2) transactions
+        gasOptions.maxFeePerGas = feeData.maxFeePerGas;
+        gasOptions.maxPriorityFeePerGas = feeData.maxPriorityFeePerGas;
+        console.log('⛽ Using EIP-1559 gas pricing');
+      } else if (feeData.gasPrice) {
+        // Legacy (Type 0) transactions
+        gasOptions.gasPrice = feeData.gasPrice;
+        console.log('⛽ Using legacy gas pricing');
+      }
+      
+      return gasOptions;
+      
+    } catch (error: any) {
+      console.warn('⚠️ Failed to get gas options:', error.message);
+      return {
+        gasLimit: BigInt(500000), // Fallback gas limit
+        gasPrice: BigInt(20000000000) // 20 Gwei fallback
+      };
+    }
+  }
+  
+  // Wrapper function to add gas options to transaction parameters
+  async function addGasOptionsToTx(txParams: any): Promise<any> {
+    if (!currentNetworkRequiresGas()) {
+      console.log('⛽ Skipping gas options for gas-free network');
+      return txParams; // Return unchanged for gas-free networks
+    }
+    
+    const gasOptions = await getGasOptions();
+    if (gasOptions) {
+      return { ...txParams, ...gasOptions };
+    }
+    
+    return txParams;
   }
 
   // ========================
