@@ -1119,7 +1119,7 @@ export class PrivateUTXOManager extends UTXOLibrary {
               const isValid = await ZenroomHelpers.verifyPedersenCommitment(
                 utxo.commitment,
                 BigInt(utxo.value),
-                ZenroomHelpers.toBigInt('0x' + utxo.blindingFactor)
+                utxo.blindingFactor
               );
               
               if (isValid) {
@@ -1271,6 +1271,36 @@ export class PrivateUTXOManager extends UTXOLibrary {
   // ========================
   // HELPER METHODS BN254
   // ========================
+
+  /**
+   * Obtener generadores BN254 REALES desde Zenroom
+   * @returns GeneratorParams con puntos reales de BN254 desde Zenroom
+   */
+  private async getBN254GeneratorsReal(): Promise<GeneratorParams> {
+    try {
+      const generators = await ZenroomHelpers.getRealPedersenGenerators();
+      
+      // Convert Zenroom generator format to contract format
+      const gPoint = generators.G;
+      const hPoint = generators.H;
+      
+      // Parse hex coordinates (assuming they're in x,y format)
+      const gX = BigInt('0x' + gPoint.substring(0, 64));
+      const gY = BigInt('0x' + gPoint.substring(64, 128));
+      const hX = BigInt('0x' + hPoint.substring(0, 64));
+      const hY = BigInt('0x' + hPoint.substring(64, 128));
+      
+      return {
+        gX,
+        gY,
+        hX,
+        hY
+      };
+    } catch (error) {
+      console.warn('Failed to get real generators from Zenroom, using fallback:', error);
+      return this.getBN254StandardGenerators();
+    }
+  }
 
   /**
    * Obtener generadores BN254 estándar

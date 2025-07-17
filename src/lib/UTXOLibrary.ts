@@ -387,8 +387,8 @@ export class UTXOLibrary extends EventEmitter {
         blindingFactor
       );
 
-      // 5. Get BN254 generators (standard points)
-      const generatorParams = this.getBN254Generators();
+      // 5. Get REAL BN254 generators from Zenroom
+      const generatorParams = await this.getBN254Generators();
 
       // 6. Prepare contract parameters with validation and formato normalizado
       // El commitment completo tiene formato 0x + 128 caracteres (coordenadas X e Y)
@@ -426,6 +426,14 @@ export class UTXOLibrary extends EventEmitter {
         longitud: normalizedCommitment.length - 2
       });
       
+      // 6. Create REAL attestation with cryptographic signature
+      console.log('🔐 Creating REAL cryptographic attestation...');
+      const attestationResult = await this.zenroom.createDepositWithAttestation(
+        amount,
+        this.currentEOA!.address,
+        tokenAddress
+      );
+
       const depositParams: DepositParams = {
         tokenAddress,
         commitment: { x: commitmentResult.x, y: commitmentResult.y }, // Use CommitmentPoint structure
@@ -433,10 +441,10 @@ export class UTXOLibrary extends EventEmitter {
         blindingFactor: ZenroomHelpers.toBigInt('0x' + blindingFactor),
         attestation: {
           operation: "DEPOSIT",
-          dataHash: normalizedNullifier,
-          nonce: BigInt(Date.now()),
+          dataHash: attestationResult.attestation.dataHash,
+          nonce: BigInt(attestationResult.attestation.nonce),
           timestamp: BigInt(Date.now()),
-          signature: "0x" // Placeholder - this method doesn't use real attestations
+          signature: attestationResult.attestation.signature
         }
       };
 
@@ -611,10 +619,39 @@ export class UTXOLibrary extends EventEmitter {
         })
       );
 
-      // 5. Generate equality proof (validates homomorphic property)
-      console.log('🔍 Generating equality proof...');
-      // TODO: Implement proper split proof validation
-      const splitProof = "0x"; // Placeholder for now
+      // 5. Generate REAL equality proof (validates homomorphic property) using BN254
+      console.log('🔍 Generating REAL BN254 equality proof for split validation...');
+      
+      // Convert hex commitments back to PedersenCommitment format
+      const inputCommitmentHex = inputUTXO.commitment;
+      const inputCommitmentX = BigInt('0x' + inputCommitmentHex.slice(2, 66)); // First 64 chars after 0x
+      const inputCommitmentY = BigInt('0x' + inputCommitmentHex.slice(66, 130)); // Next 64 chars
+      
+      const outputCommitmentHex = outputCommitments[0];
+      const outputCommitmentX = BigInt('0x' + outputCommitmentHex.slice(2, 66));
+      const outputCommitmentY = BigInt('0x' + outputCommitmentHex.slice(66, 130));
+      
+      const inputPedersenCommitment: import('../types/zenroom.d').PedersenCommitment = {
+        x: inputCommitmentX,
+        y: inputCommitmentY,
+        blindingFactor: inputUTXO.blindingFactor!,
+        value: inputUTXO.value
+      };
+      
+      const outputPedersenCommitment: import('../types/zenroom.d').PedersenCommitment = {
+        x: outputCommitmentX,
+        y: outputCommitmentY,
+        blindingFactor: outputBlindings[0],
+        value: outputValues[0]
+      };
+      
+      const splitProofResult = await this.zenroom.generateEqualityProof(
+        inputPedersenCommitment,
+        outputPedersenCommitment
+      );
+      
+      // Convert proof to string format for contract
+      const splitProof = JSON.stringify(splitProofResult);
 
       // 6. Generate nullifier hash for input
       const nullifierHash = await this.zenroom.generateNullifierHash(
@@ -623,8 +660,8 @@ export class UTXOLibrary extends EventEmitter {
         Date.now().toString()
       );
 
-      // 7. Get BN254 generators
-      const generatorParams = this.getBN254Generators();
+      // 7. Get REAL BN254 generators from Zenroom
+      const generatorParams = await this.getBN254Generators();
 
       // 8. Call smart contract
       console.log('🚀 Executing split contract call...');
@@ -632,7 +669,7 @@ export class UTXOLibrary extends EventEmitter {
         inputUTXO.commitment,
         outputCommitments,
         outputValues.map(v => v),
-        outputBlindings.map(b => ZenroomHelpers.toBigInt('0x' + b)),
+        outputBlindings.map((b: string) => ZenroomHelpers.toBigInt('0x' + b)),
         splitProof,
         nullifierHash,
         generatorParams,
@@ -737,7 +774,7 @@ export class UTXOLibrary extends EventEmitter {
       const isValidCommitment = await this.zenroom.verifyPedersenCommitment(
         utxo.commitment,
         BigInt(utxo.value),
-        ZenroomHelpers.toBigInt('0x' + utxo.blindingFactor!)
+        utxo.blindingFactor!
       );
       
       if (!isValidCommitment) {
@@ -752,8 +789,8 @@ export class UTXOLibrary extends EventEmitter {
         Date.now().toString()
       );
 
-      // 4. Get BN254 generators
-      const generatorParams = this.getBN254Generators();
+      // 4. Get REAL BN254 generators from Zenroom
+      const generatorParams = await this.getBN254Generators();
 
       // 5. Call smart contract
       console.log('🚀 Executing withdrawal contract call...');
@@ -843,8 +880,8 @@ export class UTXOLibrary extends EventEmitter {
         Date.now().toString()
       );
 
-      // 5. Get BN254 generators
-      const generatorParams = this.getBN254Generators();
+      // 5. Get REAL BN254 generators from Zenroom
+      const generatorParams = await this.getBN254Generators();
 
       // 6. Call smart contract
       console.log('🚀 Executing transfer contract call...');
@@ -1096,16 +1133,40 @@ export class UTXOLibrary extends EventEmitter {
   }
 
   /**
-   * Get standard BN254 generators for contract calls
-   * @returns GeneratorParams with BN254 standard points
+   * Get REAL BN254 generators from Zenroom for contract calls
+   * @returns GeneratorParams with actual BN254 points from Zenroom cryptography
    */
-  private getBN254Generators(): GeneratorParams {
-    return {
-      gX: BigInt("0x01"), // G1 generator X
-      gY: BigInt("0x02"), // G1 generator Y
-      hX: BigInt("0x2cf44499d5d27bb186308b7af7af02ac5bc9eeb6a3d147c186b21fb1b76e18da"), // H1 generator X
-      hY: BigInt("0x2c0f001f52110ccfe69108924926e45f0b0c868df0e7bde1fe16d3242dc715f6")  // H1 generator Y
-    };
+  private async getBN254Generators(): Promise<GeneratorParams> {
+    try {
+      const generators = await this.zenroom.getRealPedersenGenerators();
+      
+      // Convert Zenroom generator format to contract format
+      // The generators come as hex strings from Zenroom
+      const gPoint = generators.G;
+      const hPoint = generators.H;
+      
+      // Parse hex coordinates (assuming they're in x,y format)
+      const gX = BigInt('0x' + gPoint.substring(0, 64));
+      const gY = BigInt('0x' + gPoint.substring(64, 128));
+      const hX = BigInt('0x' + hPoint.substring(0, 64));
+      const hY = BigInt('0x' + hPoint.substring(64, 128));
+      
+      return {
+        gX,
+        gY,
+        hX,
+        hY
+      };
+    } catch (error) {
+      console.warn('Failed to get real generators from Zenroom, using fallback:', error);
+      // Fallback to known working BN254 points if Zenroom fails
+      return {
+        gX: BigInt("0x01"),
+        gY: BigInt("0x02"),
+        hX: BigInt("0x2cf44499d5d27bb186308b7af7af02ac5bc9eeb6a3d147c186b21fb1b76e18da"),
+        hY: BigInt("0x2c0f001f52110ccfe69108924926e45f0b0c868df0e7bde1fe16d3242dc715f6")
+      };
+    }
   }
 
   /**
