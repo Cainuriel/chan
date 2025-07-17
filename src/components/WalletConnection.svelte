@@ -35,10 +35,24 @@
         const result = await utxoManager.connectWallet(WalletProviderType.METAMASK);
         if (!result.success) {
           console.error('Connection failed:', result.error);
+          
+          // Mostrar mensajes específicos para diferentes errores
+          if (result.error?.includes('not detected')) {
+            alert('MetaMask no está instalado o hay problemas con la conexión.');
+          } else if (result.error?.includes('unlock')) {
+            alert('MetaMask está bloqueado. Por favor desbloquea MetaMask introduciendo tu contraseña e intenta de nuevo.');
+          } else if (result.error?.includes('rejected')) {
+            alert('Conexión rechazada por el usuario.');
+          } else if (result.error?.includes('pending')) {
+            alert('Hay una solicitud pendiente en MetaMask. Por favor abre MetaMask y completa la solicitud.');
+          } else {
+            alert(`Error de conexión: ${result.error}`);
+          }
         }
       }
     } catch (error) {
       console.error('Connection error:', error);
+      alert('Error inesperado al conectar con MetaMask. Por favor recarga la página e intenta de nuevo.');
     } finally {
       isConnecting = false;
     }
@@ -94,6 +108,13 @@
     <div class="text-xs text-gray-400 text-right">
       <div>Polygon Amoy Network</div>
       <div>Testnet Required</div>
+      <div class="text-yellow-400 mt-1">
+        {#if typeof window !== 'undefined' && !window.ethereum}
+          ⚠️ MetaMask not installed
+        {:else if typeof window !== 'undefined' && window.ethereum && !window.ethereum.isMetaMask}
+          ⚠️ Please unlock MetaMask
+        {/if}
+      </div>
     </div>
   </div>
 {:else}

@@ -118,33 +118,83 @@ export class EthereumHelpers {
   }
 
   /**
+   * Detect MetaMask with improved detection logic
+   * @returns MetaMaskProvider if found, null otherwise
+   */
+  private static async detectMetaMask(): Promise<MetaMaskProvider | null> {
+    // Verificar si estamos en un navegador
+    if (typeof window === 'undefined') {
+      return null;
+    }
+
+    // Caso 1: window.ethereum ya está disponible y es MetaMask
+    if (window.ethereum && this.isMetaMaskProvider(window.ethereum)) {
+      return window.ethereum as MetaMaskProvider;
+    }
+
+    // Caso 2: MetaMask puede estar instalado pero no inicializado
+    // Esperar a que se inicialice (hasta 3 segundos)
+    for (let i = 0; i < 30; i++) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      if (window.ethereum && this.isMetaMaskProvider(window.ethereum)) {
+        return window.ethereum as MetaMaskProvider;
+      }
+
+      // También verificar si hay múltiples proveedores
+      if (window.ethereum?.providers) {
+        const metamaskProvider = window.ethereum.providers.find((provider: any) => 
+          this.isMetaMaskProvider(provider)
+        );
+        if (metamaskProvider) {
+          return metamaskProvider as MetaMaskProvider;
+        }
+      }
+    }
+
+    // Caso 3: Verificar si MetaMask está disponible globalmente
+    // Algunas versiones de MetaMask se exponen directamente
+    if ((window as any).ethereum?.isMetaMask) {
+      return (window as any).ethereum as MetaMaskProvider;
+    }
+
+    // Caso 4: Buscar en window específicamente por MetaMask
+    if ((window as any).web3?.currentProvider?.isMetaMask) {
+      return (window as any).web3.currentProvider as MetaMaskProvider;
+    }
+
+    return null;
+  }
+
+  /**
    * Connect specifically to MetaMask
    * @returns Promise resolving to connection result
    */
   static async connectMetaMask(): Promise<WalletConnectionResult & { provider?: ethers.BrowserProvider }> {
-    if (!window.ethereum || !this.isMetaMaskProvider(window.ethereum)) {
+    // Primero verificar si MetaMask está disponible en el navegador
+    const metamaskProvider = await this.detectMetaMask();
+    
+    if (!metamaskProvider) {
       return {
         success: false,
-        error: 'MetaMask not detected'
+        error: 'MetaMask not detected. Please install MetaMask extension.'
       };
     }
 
     try {
-      const metamask = window.ethereum as MetaMaskProvider;
-      
-      // Request account access
-      const accounts = await metamask.request({
+      // Intentar solicitar acceso a las cuentas
+      const accounts = await metamaskProvider.request({
         method: 'eth_requestAccounts'
       });
 
       if (!accounts || accounts.length === 0) {
         return {
           success: false,
-          error: 'No accounts available'
+          error: 'No accounts available. Please unlock MetaMask and try again.'
         };
       }
 
-      const provider = new ethers.BrowserProvider(metamask);
+      const provider = new ethers.BrowserProvider(metamaskProvider);
       const signer = await provider.getSigner();
       
       return {
@@ -153,7 +203,22 @@ export class EthereumHelpers {
         signer
       };
 
-    } catch (error) {
+    } catch (error: any) {
+      // Manejar errores específicos de MetaMask
+      if (error.code === 4001) {
+        return {
+          success: false,
+          error: 'User rejected the request'
+        };
+      }
+      
+      if (error.code === -32002) {
+        return {
+          success: false,
+          error: 'Please open MetaMask and complete the pending request'
+        };
+      }
+
       return {
         success: false,
         error: error instanceof Error ? error.message : 'MetaMask connection failed'
@@ -671,7 +736,10 @@ Timestamp: ${Date.now()}`;
    * Helper to check if provider is MetaMask
    */
   private static isMetaMaskProvider(provider: any): provider is MetaMaskProvider {
-    return provider && provider.isMetaMask === true;
+    return provider && 
+           (provider.isMetaMask === true || 
+            provider._metamask?.isUnlocked !== undefined ||
+            provider.selectedAddress !== undefined);
   }
 
   /**

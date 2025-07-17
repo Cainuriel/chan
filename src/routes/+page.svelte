@@ -26,7 +26,7 @@
   const privacyMode = true;
 
   // Configuration
-  const CONTRACT_ADDRESS = '0x3c2A6aA03743A2D8220ade79e242A042fB9E576b'; // Actualizado a la dirección correcta del contrato UTXOVault
+  const CONTRACT_ADDRESS = '0xf687FA74C24c381eBF89805e92612ea441c6690c'; // Amoy
   const PREFERRED_PROVIDER = WalletProviderType.METAMASK;
 
   onMount(async () => {
