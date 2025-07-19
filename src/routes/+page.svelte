@@ -55,7 +55,7 @@
       rpcUrl: 'https://rpc-amoy.polygon.technology/',
       blockExplorer: 'https://amoy.polygonscan.com',
       nativeCurrency: { name: 'MATIC', symbol: 'MATIC', decimals: 18 },
-      contractAddress: import.meta.env.VITE_ADDRESS_CONTRACT_AMOY || '',
+      contractAddress: import.meta.env.VITE_ADDRESS_CONTRACT_AMOY || '0x6500599274c436fb8018160aFe557dCCcF2b4A46',
       requiresGas: true // Polygon requires gas fees
     },
     alastria: {
@@ -64,7 +64,7 @@
       rpcUrl: 'http://108.142.237.13:8545',
       blockExplorer: 'http://108.142.237.13', // Placeholder, adjust as needed
       nativeCurrency: { name: 'ALA', symbol: 'ALA', decimals: 18 },
-      contractAddress: import.meta.env.VITE_ADDRESS_CONTRACT_ALASTRIA || '',
+      contractAddress: import.meta.env.VITE_ADDRESS_CONTRACT_ALASTRIA || '0xFDe88D0120f59131Ab295F39c95618eF30c282E2',
       requiresGas: false // Alastria is gas-free
     }
   };

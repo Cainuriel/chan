@@ -1354,6 +1354,146 @@ export const UTXO_VAULT_ABI =
 		"outputs": [],
 		"stateMutability": "nonpayable",
 		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"components": [
+					{
+						"internalType": "address",
+						"name": "tokenAddress",
+						"type": "address"
+					},
+					{
+						"components": [
+							{
+								"internalType": "uint256",
+								"name": "x",
+								"type": "uint256"
+							},
+							{
+								"internalType": "uint256",
+								"name": "y",
+								"type": "uint256"
+							}
+						],
+						"internalType": "struct UTXOVault.CommitmentPoint",
+						"name": "commitment",
+						"type": "tuple"
+					},
+					{
+						"internalType": "bytes32",
+						"name": "nullifierHash",
+						"type": "bytes32"
+					},
+					{
+						"internalType": "uint256",
+						"name": "amount",
+						"type": "uint256"
+					},
+					{
+						"components": [
+							{
+								"internalType": "string",
+								"name": "operation",
+								"type": "string"
+							},
+							{
+								"internalType": "bytes32",
+								"name": "dataHash",
+								"type": "bytes32"
+							},
+							{
+								"internalType": "uint256",
+								"name": "nonce",
+								"type": "uint256"
+							},
+							{
+								"internalType": "uint256",
+								"name": "timestamp",
+								"type": "uint256"
+							},
+							{
+								"internalType": "bytes",
+								"name": "signature",
+								"type": "bytes"
+							}
+						],
+						"internalType": "struct UTXOVault.BackendAttestation",
+						"name": "attestation",
+						"type": "tuple"
+					}
+				],
+				"internalType": "struct UTXOVault.DepositParams",
+				"name": "params",
+				"type": "tuple"
+			},
+			{
+				"internalType": "address",
+				"name": "sender",
+				"type": "address"
+			}
+		],
+		"name": "validateDepositParams",
+		"outputs": [
+			{
+				"internalType": "bool",
+				"name": "success",
+				"type": "bool"
+			},
+			{
+				"internalType": "string",
+				"name": "errorMessage",
+				"type": "string"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "lastNonce",
+		"outputs": [
+			{
+				"internalType": "uint256",
+				"name": "",
+				"type": "uint256"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "authorizedBackend",
+		"outputs": [
+			{
+				"internalType": "address",
+				"name": "",
+				"type": "address"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "bytes32",
+				"name": "nullifier",
+				"type": "bytes32"
+			}
+		],
+		"name": "isNullifierUsed",
+		"outputs": [
+			{
+				"internalType": "bool",
+				"name": "",
+				"type": "bool"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
 	}
 ] as const;
 
@@ -1443,6 +1583,12 @@ export interface UTXOVaultContract {
   getUTXOByCommitment(commitment: CommitmentPoint): Promise<string>;
   doesCommitmentExist(commitment: CommitmentPoint): Promise<boolean>;
   isNullifierUsed(nullifier: string): Promise<boolean>;
+  
+  // Nueva función de validación
+  validateDepositParams(
+    params: DepositParams, 
+    sender: string
+  ): Promise<[boolean, string]>;
   
   // Private UTXO functions - CORREGIDO según ABI real
   depositAsPrivateUTXO: ((

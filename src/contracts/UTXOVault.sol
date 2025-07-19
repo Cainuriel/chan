@@ -265,40 +265,252 @@ contract UTXOVault is ReentrancyGuard, Ownable {
         return recoveredAddress == expectedSigner;
     }
     
+    // ...existing code...
+
     // ========================
-    // DEPÓSITO - BACKEND VERIFICÓ TODO
+    // VALIDACIÓN PRE-TRANSACCIÓN
     // ========================
     
     /**
-     * @dev Depositar - Backend ya verificó que commitment corresponde a amount
+     * @dev Validar parámetros de depósito ANTES de ejecutar la transacción
+     * @param params Parámetros del depósito
+     * @param sender Dirección que ejecutará el depósito (msg.sender)
+     * @return success True si la validación es exitosa
+     * @return errorMessage Mensaje de error específico si falla
      */
-    function depositAsPrivateUTXO(
-        DepositParams calldata params
-    ) external nonReentrant {
-        // Solo validaciones básicas de Solidity
-        if (params.tokenAddress == address(0)) revert InvalidToken();
-        if (params.amount == 0) revert InvalidAmount();
-        if (nullifiers[params.nullifierHash]) revert NullifierAlreadyUsed();
+    function validateDepositParams(
+        DepositParams calldata params,
+        address sender
+    ) external view returns (bool success, string memory errorMessage) {
         
-        // Verificar que backend autorizó esta operación
-        if (!_verifyAttestation(params.attestation)) revert InvalidAttestation();
+        // 1. Validaciones básicas de Solidity
+        if (params.tokenAddress == address(0)) {
+            return (false, "InvalidToken: Token address cannot be zero");
+        }
         
-        // Verificar que la operación es del tipo correcto
-        if (keccak256(bytes(params.attestation.operation)) != keccak256("DEPOSIT")) revert InvalidAttestation();
+        if (params.amount == 0) {
+            return (false, "InvalidAmount: Amount cannot be zero");
+        }
         
-        // Verificar que el dataHash incluye todos nuestros parámetros
+        if (nullifiers[params.nullifierHash]) {
+            return (false, "NullifierAlreadyUsed: This nullifier has been used before");
+        }
+        
+        // 2. Verificar que la operación es del tipo correcto
+        if (keccak256(bytes(params.attestation.operation)) != keccak256("DEPOSIT")) {
+            return (false, string(abi.encodePacked(
+                "InvalidOperation: Expected 'DEPOSIT', got '", 
+                params.attestation.operation, 
+                "'"
+            )));
+        }
+        
+        // 3. Verificar que el dataHash incluye todos nuestros parámetros
         bytes32 expectedDataHash = keccak256(abi.encodePacked(
             params.tokenAddress,
             params.commitment.x,
             params.commitment.y,
             params.nullifierHash,
             params.amount,
-            msg.sender
+            sender
         ));
         
-        if (params.attestation.dataHash != expectedDataHash) revert InvalidAttestation();
+        if (params.attestation.dataHash != expectedDataHash) {
+            return (false, string(abi.encodePacked(
+                "InvalidDataHash: Expected ", 
+                _bytes32ToString(expectedDataHash),
+                ", got ",
+                _bytes32ToString(params.attestation.dataHash)
+            )));
+        }
         
-        // Si backend dice OK, confiamos completamente
+        // 4. Verificar nonce secuencial
+        if (params.attestation.nonce != lastNonce + 1) {
+            return (false, string(abi.encodePacked(
+                "InvalidNonce: Expected ",
+                _uint256ToString(lastNonce + 1),
+                ", got ",
+                _uint256ToString(params.attestation.nonce)
+            )));
+        }
+        
+        // 5. Verificar timestamp no muy antiguo (máximo 10 minutos)
+        if (block.timestamp > params.attestation.timestamp + 600) {
+            return (false, string(abi.encodePacked(
+                "StaleAttestation: Attestation is ",
+                _uint256ToString(block.timestamp - params.attestation.timestamp),
+                " seconds old (max: 600)"
+            )));
+        }
+        
+        // 6. Verificar firma del backend
+        bytes32 messageHash = keccak256(abi.encodePacked(
+            params.attestation.operation,
+            params.attestation.dataHash,
+            params.attestation.nonce,
+            params.attestation.timestamp
+        ));
+        
+        if (!_verifyECDSASignatureView(messageHash, params.attestation.signature, authorizedBackend)) {
+            return (false, string(abi.encodePacked(
+                "UnauthorizedBackend: Signature verification failed. Expected signer: ",
+                _addressToString(authorizedBackend)
+            )));
+        }
+        
+        // 7. Verificar que el token tiene allowance suficiente
+        try IERC20(params.tokenAddress).allowance(sender, address(this)) returns (uint256 allowance) {
+            if (allowance < params.amount) {
+                return (false, string(abi.encodePacked(
+                    "InsufficientAllowance: Required ",
+                    _uint256ToString(params.amount),
+                    ", available ",
+                    _uint256ToString(allowance)
+                )));
+            }
+        } catch {
+            return (false, "InvalidToken: Unable to check token allowance");
+        }
+        
+        // 8. Verificar que el sender tiene balance suficiente
+        try IERC20(params.tokenAddress).balanceOf(sender) returns (uint256 balance) {
+            if (balance < params.amount) {
+                return (false, string(abi.encodePacked(
+                    "InsufficientBalance: Required ",
+                    _uint256ToString(params.amount),
+                    ", available ",
+                    _uint256ToString(balance)
+                )));
+            }
+        } catch {
+            return (false, "InvalidToken: Unable to check token balance");
+        }
+        
+        return (true, "All validations passed");
+    }
+    
+    /**
+     * @dev Verificar firma ECDSA (versión view para validación)
+     */
+    function _verifyECDSASignatureView(
+        bytes32 messageHash,
+        bytes memory signature,
+        address expectedSigner
+    ) internal pure returns (bool) {
+        if (signature.length != 65) return false;
+        
+        bytes32 r;
+        bytes32 s;
+        uint8 v;
+        
+        assembly {
+            r := mload(add(signature, 32))
+            s := mload(add(signature, 64))
+            v := byte(0, mload(add(signature, 96)))
+        }
+        
+        if (v < 27) v += 27;
+        
+        address recoveredAddress = ecrecover(
+            keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", messageHash)),
+            v,
+            r,
+            s
+        );
+        
+        return recoveredAddress == expectedSigner;
+    }
+    
+    // ========================
+    // FUNCIONES AUXILIARES PARA STRINGS
+    // ========================
+    
+    function _bytes32ToString(bytes32 value) internal pure returns (string memory) {
+        bytes memory alphabet = "0123456789abcdef";
+        bytes memory str = new bytes(66);
+        str[0] = '0';
+        str[1] = 'x';
+        for (uint256 i = 0; i < 32; i++) {
+            str[2 + i * 2] = alphabet[uint256(uint8(value[i] >> 4))];
+            str[3 + i * 2] = alphabet[uint256(uint8(value[i] & 0x0f))];
+        }
+        return string(str);
+    }
+    
+    function _uint256ToString(uint256 value) internal pure returns (string memory) {
+        if (value == 0) return "0";
+        
+        uint256 temp = value;
+        uint256 digits;
+        while (temp != 0) {
+            digits++;
+            temp /= 10;
+        }
+        
+        bytes memory buffer = new bytes(digits);
+        while (value != 0) {
+            digits -= 1;
+            buffer[digits] = bytes1(uint8(48 + uint256(value % 10)));
+            value /= 10;
+        }
+        
+        return string(buffer);
+    }
+    
+    function _addressToString(address addr) internal pure returns (string memory) {
+        bytes memory alphabet = "0123456789abcdef";
+        bytes memory str = new bytes(42);
+        str[0] = '0';
+        str[1] = 'x';
+        for (uint256 i = 0; i < 20; i++) {
+            str[2 + i * 2] = alphabet[uint256(uint8(bytes20(addr)[i] >> 4))];
+            str[3 + i * 2] = alphabet[uint256(uint8(bytes20(addr)[i] & 0x0f))];
+        }
+        return string(str);
+    }
+
+    // ========================
+    // DEPÓSITO ACTUALIZADO
+    // ========================
+    
+    /**
+     * @dev Depositar - Ahora usa validación interna
+     */
+    function depositAsPrivateUTXO(
+        DepositParams calldata params
+    ) external nonReentrant {
+        // Ejecutar EXACTAMENTE las mismas validaciones que el getter
+        (bool isValid, string memory errorMessage) = this.validateDepositParams(params, msg.sender);
+        
+        if (!isValid) {
+            // Convertir el mensaje de error en un revert específico
+            if (keccak256(bytes(errorMessage)) == keccak256("InvalidToken: Token address cannot be zero")) {
+                revert InvalidToken();
+            } else if (keccak256(bytes(errorMessage)) == keccak256("InvalidAmount: Amount cannot be zero")) {
+                revert InvalidAmount();
+            } else if (bytes(errorMessage).length > 20 && 
+                      keccak256(abi.encodePacked(substring(errorMessage, 0, 20))) == keccak256("NullifierAlreadyUsed")) {
+                revert NullifierAlreadyUsed();
+            } else if (bytes(errorMessage).length > 18 && 
+                      keccak256(abi.encodePacked(substring(errorMessage, 0, 18))) == keccak256("UnauthorizedBackend")) {
+                revert UnauthorizedBackend();
+            } else if (bytes(errorMessage).length > 16 && 
+                      keccak256(abi.encodePacked(substring(errorMessage, 0, 16))) == keccak256("InvalidAttestation") ||
+                      keccak256(abi.encodePacked(substring(errorMessage, 0, 15))) == keccak256("StaleAttestation") ||
+                      keccak256(abi.encodePacked(substring(errorMessage, 0, 12))) == keccak256("InvalidNonce") ||
+                      keccak256(abi.encodePacked(substring(errorMessage, 0, 15))) == keccak256("InvalidDataHash") ||
+                      keccak256(abi.encodePacked(substring(errorMessage, 0, 16))) == keccak256("InvalidOperation")) {
+                revert InvalidAttestation();
+            } else {
+                // Para cualquier otro error, usar InvalidAttestation como fallback
+                revert InvalidAttestation();
+            }
+        }
+        
+        // Actualizar nonce (CRÍTICO: Solo aquí, no en el getter)
+        lastNonce = params.attestation.nonce;
+        
+        // Si llegamos aquí, todas las validaciones pasaron
         _registerToken(params.tokenAddress);
         
         // Transferir tokens
@@ -314,9 +526,20 @@ contract UTXOVault is ReentrancyGuard, Ownable {
         );
     }
     
-    // ========================
-    // SPLIT - BACKEND VERIFICÓ TODO
-    // ========================
+    function substring(string memory str, uint256 startIndex, uint256 length) 
+        internal pure returns (string memory) {
+        bytes memory strBytes = bytes(str);
+        require(startIndex + length <= strBytes.length, "Index out of bounds");
+        
+        bytes memory result = new bytes(length);
+        for (uint256 i = 0; i < length; i++) {
+            result[i] = strBytes[startIndex + i];
+        }
+        
+        return string(result);
+    }
+
+
     
     /**
      * @dev Split - Backend ya verificó conservación de valor

@@ -548,8 +548,106 @@ export class UTXOLibrary extends EventEmitter {
       await approveTx.wait();
       console.log('✅ Token approval confirmed');
 
-      // 8. Call smart contract with BN254 parameters
-      console.log('🚀 Executing contract call...');
+      // 8. PRE-VALIDAR CON EL CONTRATO ANTES DE EJECUTAR
+      console.log('🔍 Pre-validating with contract...');
+      console.log('📋 Sending validation parameters:', {
+        tokenAddress: depositParams.tokenAddress,
+        commitment: {
+          x: depositParams.commitment.x.toString(),
+          y: depositParams.commitment.y.toString()
+        },
+        nullifierHash: depositParams.nullifierHash,
+        amount: depositParams.amount.toString(),
+        attestation: {
+          operation: depositParams.attestation.operation,
+          dataHash: depositParams.attestation.dataHash,
+          nonce: depositParams.attestation.nonce.toString(),
+          timestamp: depositParams.attestation.timestamp.toString(),
+          signature: depositParams.attestation.signature.substring(0, 20) + '...'
+        },
+        sender: this.currentEOA!.address
+      });
+      
+      try {
+        const [isValid, errorMessage] = await this.contract.validateDepositParams(
+          depositParams,
+          this.currentEOA!.address
+        );
+        
+        console.log('📊 Contract validation result:', {
+          isValid,
+          errorMessage,
+          contractAddress: this.contract.address
+        });
+        
+        if (!isValid) {
+          console.error('❌ Contract validation failed:', errorMessage);
+          throw new Error(`❌ Contract validation failed: ${errorMessage}`);
+        }
+        
+        console.log('✅ Contract pre-validation passed:', errorMessage);
+        
+        // Información adicional sobre el estado del contrato
+        try {
+          const currentNonce = await this.contract.lastNonce();
+          const authorizedBackend = await this.contract.authorizedBackend();
+          const registeredTokens = await this.contract.getRegisteredTokens();
+          
+          console.log('📋 Contract state verification:', {
+            currentNonce: currentNonce.toString(),
+            authorizedBackend,
+            expectedBackend: import.meta.env.VITE_PUBLIC_KEY_ADMIN,
+            backendMatch: authorizedBackend.toLowerCase() === import.meta.env.VITE_PUBLIC_KEY_ADMIN?.toLowerCase(),
+            registeredTokens,
+            isTokenRegistered: registeredTokens.some(
+              (token: string) => token.toLowerCase() === tokenAddress.toLowerCase()
+            )
+          });
+        } catch (stateError) {
+          console.warn('⚠️ Could not fetch additional contract state:', stateError);
+        }
+        
+      } catch (preValidationError: any) {
+        console.error('❌ Pre-validation error details:', {
+          error: preValidationError,
+          message: preValidationError.message,
+          code: preValidationError.code,
+          data: preValidationError.data,
+          contractAddress: this.contract.address,
+          senderAddress: this.currentEOA!.address
+        });
+        
+        // Mejorar el mensaje de error basado en el tipo
+        let enhancedMessage = preValidationError.message;
+        
+        if (preValidationError.message?.includes('InvalidToken')) {
+          enhancedMessage = `Invalid token address: ${tokenAddress}. Make sure the token contract exists and is valid.`;
+        } else if (preValidationError.message?.includes('InvalidAmount')) {
+          enhancedMessage = `Invalid amount: ${amount}. Amount must be greater than 0.`;
+        } else if (preValidationError.message?.includes('NullifierAlreadyUsed')) {
+          enhancedMessage = `This nullifier has been used before: ${depositParams.nullifierHash}. Each deposit must use a unique nullifier.`;
+        } else if (preValidationError.message?.includes('UnauthorizedBackend')) {
+          const contractBackend = await this.contract.authorizedBackend().catch(() => 'unknown');
+          enhancedMessage = `Backend not authorized. Contract backend: ${contractBackend}, Expected: ${import.meta.env.VITE_PUBLIC_KEY_ADMIN}`;
+        } else if (preValidationError.message?.includes('InvalidAttestation')) {
+          enhancedMessage = `Invalid attestation signature or data. Check that the backend signed the correct parameters.`;
+        } else if (preValidationError.message?.includes('StaleAttestation')) {
+          enhancedMessage = `Attestation is too old. Attestations expire after 10 minutes for security.`;
+        } else if (preValidationError.message?.includes('InvalidNonce')) {
+          const currentNonce = await this.contract.lastNonce().catch(() => 0n);
+          enhancedMessage = `Invalid nonce. Expected: ${currentNonce + 1n}, got: ${depositParams.attestation.nonce}`;
+        } else if (preValidationError.message?.includes('InsufficientAllowance')) {
+          enhancedMessage = `Insufficient token allowance. You need to approve the contract to spend your tokens first.`;
+        } else if (preValidationError.message?.includes('InsufficientBalance')) {
+          enhancedMessage = `Insufficient token balance. You don't have enough tokens to make this deposit.`;
+        }
+        
+        throw new Error(`Pre-validation failed: ${enhancedMessage}`);
+      }
+      
+      // 9. Si llegamos aquí, el contrato acepta los parámetros
+      console.log('🚀 Executing contract call (validation passed)...');
+      console.log('⏳ Submitting transaction to blockchain...');
       
       // Final contract check before calling
       if (!this.contract) {
@@ -561,19 +659,35 @@ export class UTXOLibrary extends EventEmitter {
         { gasLimit: this.config.defaultGasLimit }
       );
 
+      console.log('📤 Transaction submitted:', {
+        hash: tx.hash,
+        from: tx.from,
+        to: tx.to,
+        gasLimit: tx.gasLimit?.toString(),
+        gasPrice: tx.gasPrice?.toString()
+      });
+
       console.log('⏳ Waiting for transaction confirmation...');
       const receipt = await tx.wait();
       
       // Verificar que la transacción fue exitosa
       if (!receipt || receipt.status === 0) {
-        throw new Error(`Transaction failed: ${receipt?.hash || tx.hash}`);
+        console.error('❌ Transaction failed details:', {
+          hash: receipt?.hash || tx.hash,
+          status: receipt?.status,
+          gasUsed: receipt?.gasUsed?.toString(),
+          blockNumber: receipt?.blockNumber,
+          logs: receipt?.logs
+        });
+        
+        throw new Error(`Transaction failed: ${receipt?.hash || tx.hash}. The contract rejected the transaction despite pre-validation passing.`);
       }
       
-      console.log('✅ Contract call confirmed:', receipt.hash);
-      console.log('📊 Transaction details:', {
-        status: receipt.status,
-        gasUsed: receipt.gasUsed?.toString(),
-        blockNumber: receipt.blockNumber
+      console.log('✅ Transaction confirmed successfully:', {
+        hash: receipt.hash,
+        blockNumber: receipt.blockNumber,
+        gasUsed: receipt.gasUsed.toString(),
+        status: receipt.status
       });
 
       // 9. SOLO AHORA guardamos el UTXO localmente (después de confirmación exitosa)
@@ -1502,6 +1616,106 @@ private isPrivateUTXO(utxo: ExtendedUTXOData): utxo is PrivateUTXO {
    */
   get isZenroomAvailable(): boolean {
     return typeof this.zenroom !== 'undefined';
+  }
+
+  /**
+   * Debug contract interaction - test various contract methods and new validation
+   */
+  async debugContractInteraction(params: { amount: bigint; tokenAddress: string; owner: string }): Promise<void> {
+    if (!this.contract) {
+      throw new Error('Contract not initialized. Call initialize() first.');
+    }
+
+    console.log('🔍 === CONTRACT DEBUG SESSION WITH NEW VALIDATION ===');
+    console.log('Contract address:', this.contract.address);
+    console.log('Test parameters:', params);
+
+    try {
+      // 1. Test basic contract connectivity
+      console.log('\n1️⃣ Testing basic contract connectivity...');
+      const registeredTokens = await this.contract.getRegisteredTokens();
+      console.log('✅ Registered tokens:', registeredTokens);
+
+      // 2. Test backend authorization
+      console.log('\n2️⃣ Testing backend authorization...');
+      const authorizedBackend = await this.contract.authorizedBackend();
+      const expectedBackend = import.meta.env.VITE_PUBLIC_KEY_ADMIN;
+      console.log('Contract authorized backend:', authorizedBackend);
+      console.log('Expected backend (VITE_PUBLIC_KEY_ADMIN):', expectedBackend);
+      console.log('Backend match:', authorizedBackend.toLowerCase() === expectedBackend?.toLowerCase());
+
+      // 3. Test nonce sequence
+      console.log('\n3️⃣ Testing nonce sequence...');
+      const currentNonce = await this.contract.lastNonce();
+      console.log('Current contract nonce:', currentNonce.toString());
+      console.log('Next expected nonce:', (currentNonce + 1n).toString());
+
+      // 4. Create test deposit parameters
+      console.log('\n4️⃣ Creating test deposit parameters...');
+      const testBlinding = await ZenroomHelpers.generateSecureBlindingFactor();
+      const testCommitment = await ZenroomHelpers.createPedersenCommitment(
+        params.amount.toString(),
+        testBlinding
+      );
+      
+      const testAttestation = await ZenroomHelpers.createDepositWithAttestation(
+        params.amount,
+        params.owner,
+        params.tokenAddress
+      );
+      
+      const testDepositParams = {
+        tokenAddress: params.tokenAddress,
+        commitment: {
+          x: testCommitment.x,
+          y: testCommitment.y
+        },
+        nullifierHash: testAttestation.attestation.dataHash, // Use dataHash as nullifier for test
+        amount: params.amount,
+        attestation: testAttestation.attestation
+      };
+
+      // 5. TEST NEW VALIDATION FUNCTION
+      console.log('\n5️⃣ 🆕 Testing new contract validation function...');
+      try {
+        const [isValid, errorMessage] = await this.contract.validateDepositParams(
+          testDepositParams,
+          params.owner
+        );
+        
+        console.log('✅ Validation result:', {
+          isValid,
+          errorMessage
+        });
+        
+        if (!isValid) {
+          console.log('❌ Validation failed - analyzing error for debugging...');
+          console.log('📋 Error details:', errorMessage);
+          
+          // Analyze the error to provide guidance
+          if (errorMessage.includes('InvalidToken')) {
+            console.log('💡 Issue: Token not valid or zero address');
+          } else if (errorMessage.includes('UnauthorizedBackend')) {
+            console.log('💡 Issue: Backend signature verification failed');
+          } else if (errorMessage.includes('InvalidNonce')) {
+            console.log('💡 Issue: Nonce sequence is wrong');
+          } else if (errorMessage.includes('TokenNotRegistered')) {
+            console.log('💡 Issue: Token not registered in contract');
+          }
+        } else {
+          console.log('🎉 Validation passed! The contract would accept this deposit.');
+        }
+        
+      } catch (validationError: any) {
+        console.error('❌ Validation function call failed:', validationError);
+      }
+
+      console.log('\n✅ Contract debug session completed!');
+
+    } catch (error) {
+      console.error('❌ Contract debug failed:', error);
+      throw error;
+    }
   }
 }
 
