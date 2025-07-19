@@ -28,6 +28,7 @@
   import DepositForm from '../lib/components/DepositForm.svelte';
   import OperationsPanel from '../components/OperationsPanel.svelte';
   import TransactionHistory from '../components/TransactionHistory.svelte';
+  import { testMigration } from '../utils/migration.test';
 
   // State
   let isInitialized = false;
@@ -590,6 +591,22 @@
   // ========================
   // DEBUG FUNCTIONS
   // ========================
+
+  // Test crypto migration function
+  async function runMigrationTest() {
+    try {
+      addNotification('info', '🧪 Testing crypto migration...');
+      const success = await testMigration();
+      if (success) {
+        addNotification('success', '✅ Migration test passed! Check console for details.');
+      } else {
+        addNotification('error', '❌ Migration test failed! Check console for details.');
+      }
+    } catch (error: any) {
+      console.error('❌ Migration test error:', error);
+      addNotification('error', `Migration test failed: ${error.message || error}`);
+    }
+  }
 
   // Clear all local data and start fresh
   function clearAllLocalData() {
@@ -1271,6 +1288,19 @@
                 >
                   {isLibraryInitialized ? '✅ Library Initialized' : '🚀 Initialize Library'}
                 </button>
+                
+                <!-- Test Crypto Migration Button -->
+                {#if isLibraryInitialized}
+                  <div class="mt-4">
+                    <button
+                      on:click={runMigrationTest}
+                      class="bg-gradient-to-r from-green-600 to-teal-600 text-white px-6 py-3 rounded-lg font-semibold hover:from-green-700 hover:to-teal-700 transition-all duration-200 shadow-lg hover:shadow-xl"
+                    >
+                      🧪 Test Migration
+                    </button>
+                    <p class="text-gray-400 text-sm mt-2">Test the new ethers.js + elliptic crypto system</p>
+                  </div>
+                {/if}
               </div>
             {/if}
             

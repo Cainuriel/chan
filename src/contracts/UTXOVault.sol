@@ -8,7 +8,7 @@ import "./verifiers/RealPedersenVerifier.sol";
 
 /**
  * @title UTXOVault - Private UTXO System with Full Backend Delegation
- * @notice Backend (Zenroom) hace TODA la criptografía, Solidity solo mantiene estado
+ * @notice Backend hace TODA la criptografía, Solidity solo mantiene estado
  * @dev Confianza total en backend autorizado para todas las verificaciones complejas
  */
 contract UTXOVault is ReentrancyGuard, Ownable {
