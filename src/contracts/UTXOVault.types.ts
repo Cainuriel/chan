@@ -1,11 +1,11 @@
 /**
- * Structs for grouped parameters in depositAsPrivateUTXO (matching simplified Solidity)
+ * Structs for grouped parameters in depositAsPrivateUTXO (matching Solidity exactly)
  */
 export interface DepositParams {
   tokenAddress: string;
-  commitment: CommitmentPoint; // Updated to use CommitmentPoint structure
+  commitment: CommitmentPoint; // CommitmentPoint structure
   nullifierHash: string; // bytes32
-  blindingFactor: bigint;
+  amount: bigint; // uint256 - amount verified by backend
   attestation: BackendAttestation; // Required for all operations
 }
 

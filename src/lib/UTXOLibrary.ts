@@ -79,7 +79,6 @@ import {
   type UTXOVaultContract,
   type DepositParams,
   type GeneratorParams,
-  type ProofParams,
   createUTXOVaultContract,
   UTXO_VAULT_CONSTANTS
 } from '../contracts/UTXOVault.types';
@@ -452,11 +451,14 @@ export class UTXOLibrary extends EventEmitter {
         tokenAddress
       );
 
-      const depositParams: DepositParams = {
+      const depositParams = {
         tokenAddress,
-        commitment: { x: commitmentResult.x, y: commitmentResult.y }, // Use CommitmentPoint structure
+        commitment: { 
+          x: commitmentResult.x, 
+          y: commitmentResult.y 
+        }, // Use CommitmentPoint structure exactly as Solidity expects
         nullifierHash: normalizedNullifier,
-        blindingFactor: ZenroomHelpers.toBigInt('0x' + blindingFactor),
+        amount: amount, // Amount as uint256
         attestation: {
           operation: "DEPOSIT",
           dataHash: attestationResult.attestation.dataHash,
@@ -464,10 +466,6 @@ export class UTXOLibrary extends EventEmitter {
           timestamp: BigInt(Date.now()),
           signature: attestationResult.attestation.signature
         }
-      };
-
-      const proofParams: ProofParams = {
-        rangeProof: JSON.stringify(rangeProof) // Convert BulletproofRangeProof to string
       };
 
       console.log('📋 Contract parameters prepared:', {
@@ -485,7 +483,7 @@ export class UTXOLibrary extends EventEmitter {
           lengthWithoutPrefix: normalizedNullifier.startsWith('0x') ? normalizedNullifier.length - 2 : normalizedNullifier.length
         },
         blindingFactor: blindingFactor.slice(0, 10) + '...',
-        rangeProofLength: JSON.stringify(rangeProof).length
+        amount: amount.toString()
       });
 
       // 7. Approve token transfer
@@ -1427,7 +1425,6 @@ export type {
   UTXOVaultContract,
   DepositParams,
   GeneratorParams,
-  ProofParams,
   createUTXOVaultContract,
   UTXO_VAULT_CONSTANTS
 } from '../contracts/UTXOVault.types';
