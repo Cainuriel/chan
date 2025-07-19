@@ -348,119 +348,25 @@ export class PrivateUTXOManager extends UTXOLibrary {
    * Crear UTXO privado usando nueva arquitectura de attestations
    */
   async createPrivateUTXO(params: CreateUTXOParams): Promise<UTXOOperationResult> {
-    console.log('🏦 Creating private UTXO with attestation architecture...');
-    console.log('📋 Using: Backend autorizado firma attestations que Solidity confía');
+    console.log('🏦 Creating private UTXO with REAL blockchain interaction...');
+    console.log('📋 Flow: Generate attestation → Call contract → Save UTXO only if successful');
+    
+    // Check if contract is initialized before proceeding
+    if (!this.contract) {
+      const error = new Error('❌ Contract not initialized. Please complete the 3-step initialization flow:\n1. Connect Wallet\n2. Select Network\n3. Initialize Library\n\nCurrent status: Contract not connected to blockchain.');
+      console.error('❌ Contract not initialized - cannot create private UTXO');
+      console.error('📋 Required steps:');
+      console.error('   1. ✅ Connect Wallet (connectWallet)');
+      console.error('   2. ✅ Select Network (selectNetwork)'); 
+      console.error('   3. ❌ Initialize Library (initialize) ← Missing!');
+      throw error;
+    }
+    
     this.bn254OperationCount++;
 
-    try {
-      const { amount, tokenAddress, owner } = params;
-      
-      // 1. Validaciones iniciales
-      if (amount <= 0n) {
-        throw new Error('Amount must be greater than zero');
-      }
-
-      // 2. Verificar inicialización básica (sin dependencia del contrato Solidity)
-      if (!this.currentAccount?.address) {
-        throw new Error('Account not connected');
-      }
-
-      console.log('� Nueva arquitectura:', {
-        backend: 'Autoriza y firma attestations',
-        zenroom: 'Maneja toda la criptografía',
-        solidity: 'Solo verifica firmas ECDSA'
-      });
-
-      // 3. Usar ZenroomHelpers con AttestationService integrado
-      console.log('🔐 Creating deposit with attestation using crypto libraries + Backend...');
-      const { commitment, attestation } = await ZenroomHelpers.createDepositWithAttestation(
-        amount,
-        owner,
-        tokenAddress
-      );
-
-      console.log('✅ Deposit attestation created:', {
-        commitmentX: commitment.x.toString(16).slice(0, 10) + '...',
-        commitmentY: commitment.y.toString(16).slice(0, 10) + '...',
-        attestationNonce: attestation.nonce,
-        attestationTimestamp: attestation.timestamp,
-        signatureLength: attestation.signature.length
-      });
-
-      // 4. Verificar que tenemos todos los datos necesarios
-      if (!commitment || !attestation) {
-        throw new Error('Failed to create commitment or attestation');
-      }
-
-      // 5. Crear UTXO privado local con nueva estructura
-      const utxoId = await this.generateBN254UTXOId(
-        commitment.x.toString(16) + commitment.y.toString(16),
-        owner,
-        Date.now()
-      );
-
-      const privateUTXO: PrivateUTXO = {
-        id: utxoId,
-        exists: true,
-        value: amount,
-        tokenAddress,
-        owner,
-        timestamp: toBigInt(Date.now()),
-        isSpent: false,
-        commitment: '0x' + commitment.x.toString(16).padStart(64, '0') + commitment.y.toString(16).padStart(64, '0'),
-        parentUTXO: '',
-        utxoType: UTXOType.DEPOSIT,
-        blindingFactor: commitment.blindingFactor,
-        nullifierHash: attestation.dataHash, // Hash de los datos en la attestation
-        localCreatedAt: Date.now(),
-        confirmed: true, // Backend ya autorizó
-        isPrivate: true,
-        cryptographyType: 'BN254'
-      };
-
-      // 6. Almacenar en cache local
-      this.utxos.set(utxoId, privateUTXO);
-      this.privateUTXOs.set(utxoId, privateUTXO);
-
-      // 7. Guardar en localStorage
-      try {
-        const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
-        PrivateUTXOStorage.savePrivateUTXO(owner, privateUTXO);
-      } catch (storageError) {
-        console.warn('⚠️ Could not save UTXO to localStorage:', storageError);
-      }
-
-      const result: UTXOOperationResult = {
-        success: true,
-        transactionHash: `attestation_${attestation.nonce}`, // Usar nonce como referencia
-        createdUTXOIds: [utxoId]
-      };
-
-      console.log('✅ Private UTXO created with attestation architecture:', utxoId);
-      this.emit('private:utxo:created', privateUTXO);
-
-      return result;
-
-    } catch (error) {
-      console.error('❌ Private UTXO creation with attestation failed:', error);
-      
-      let errorMessage = 'Private UTXO creation failed';
-      if (error instanceof Error) {
-        if (error.message.includes('user rejected')) {
-          errorMessage = 'Transaction was rejected by user';
-        } else if (error.message.includes('insufficient funds')) {
-          errorMessage = 'Insufficient funds for transaction';
-        } else {
-          errorMessage = error.message;
-        }
-      }
-      
-      return {
-        success: false,
-        error: errorMessage,
-        errorDetails: error
-      };
-    }
+    // Delegate to the parent class which has the full contract interaction logic
+    console.log('🔄 Delegating to UTXOLibrary.depositAsPrivateUTXO with full blockchain interaction...');
+    return this.depositAsPrivateUTXO(params);
   }
 
   /**

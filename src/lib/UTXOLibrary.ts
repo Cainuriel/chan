@@ -531,19 +531,32 @@ export class UTXOLibrary extends EventEmitter {
 
       // 7. Approve token transfer
       console.log('🔓 Approving token transfer...');
+      
+      // Double-check contract is still available before using it
+      if (!this.contract) {
+        throw new Error('❌ Contract became null during execution. Please reinitialize the library.');
+      }
+      
       const tokenContract = new ethers.Contract(
         tokenAddress,
         ['function approve(address,uint256) returns (bool)'],
         this.ethereum.getSigner()
       );
-      
-      const approveTx = await tokenContract.approve(this.contract!.address, amount);
+
+      console.log(`Approving ${amount} tokenAddress ${tokenAddress}`);
+      const approveTx = await tokenContract.approve(this.contract, amount);
       await approveTx.wait();
       console.log('✅ Token approval confirmed');
 
       // 8. Call smart contract with BN254 parameters
       console.log('🚀 Executing contract call...');
-      const tx = await this.contract!.depositAsPrivateUTXO(
+      
+      // Final contract check before calling
+      if (!this.contract) {
+        throw new Error('❌ Contract became null before deposit call. Please reinitialize the library.');
+      }
+      
+      const tx = await this.contract.depositAsPrivateUTXO(
         depositParams,
         { gasLimit: this.config.defaultGasLimit }
       );
@@ -1289,24 +1302,40 @@ export class UTXOLibrary extends EventEmitter {
     }
   }
 
+ 
   /**
-   * Get REAL BN254 generators from Zenroom for contract calls
-   * @returns GeneratorParams with actual BN254 points from Zenroom cryptography
+   * Get REAL BN254 generators from CryptoHelpers for contract calls
+   * @returns GeneratorParams with actual BN254 points from CryptoHelpers cryptography
    */
   private async getBN254Generators(): Promise<GeneratorParams> {
     try {
-      const generators = await this.zenroom.getRealPedersenGenerators();
+      const generators = await ZenroomHelpers.getRealPedersenGenerators();
       
-      // Convert Zenroom generator format to contract format
-      // The generators come as hex strings from Zenroom
-      const gPoint = generators.G;
-      const hPoint = generators.H;
+      // Convert CryptoHelpers generator format to contract format
+      // The generators come as hex strings from CryptoHelpers
+      let gPoint = generators.G;
+      let hPoint = generators.H;
+      
+      // Remove '0x' prefix if present
+      if (gPoint.startsWith('0x')) {
+        gPoint = gPoint.substring(2);
+      }
+      if (hPoint.startsWith('0x')) {
+        hPoint = hPoint.substring(2);
+      }
       
       // Parse hex coordinates (assuming they're in x,y format)
       const gX = BigInt('0x' + gPoint.substring(0, 64));
       const gY = BigInt('0x' + gPoint.substring(64, 128));
       const hX = BigInt('0x' + hPoint.substring(0, 64));
       const hY = BigInt('0x' + hPoint.substring(64, 128));
+      
+      console.log('✅ BN254 generators parsed successfully:', {
+        gX: gX.toString(16).substring(0, 10) + '...',
+        gY: gY.toString(16).substring(0, 10) + '...',
+        hX: hX.toString(16).substring(0, 10) + '...',
+        hY: hY.toString(16).substring(0, 10) + '...'
+      });
       
       return {
         gX,
@@ -1315,8 +1344,8 @@ export class UTXOLibrary extends EventEmitter {
         hY
       };
     } catch (error) {
-      console.warn('Failed to get real generators from Zenroom, using fallback:', error);
-      // Fallback to known working BN254 points if Zenroom fails
+      console.warn('Failed to get real generators from CryptoHelpers, using fallback:', error);
+      // Fallback to known working BN254 points if CryptoHelpers fails
       return {
         gX: BigInt("0x01"),
         gY: BigInt("0x02"),
@@ -1325,6 +1354,7 @@ export class UTXOLibrary extends EventEmitter {
       };
     }
   }
+
 
   /**
    * Generate secure UTXO ID using cryptographic hash
