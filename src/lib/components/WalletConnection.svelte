@@ -1,9 +1,9 @@
 <!-- src/lib/components/WalletConnection.svelte -->
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
-  import type { PrivateUTXOManager } from '../lib/PrivateUTXOManager';
-  import type { EOAData } from '../types/ethereum.types';
-  import { WalletProviderType } from '../types/ethereum.types';
+  import type { PrivateUTXOManager } from '../PrivateUTXOManager';
+  import type { EOAData } from '../../types/ethereum.types';
+  import { WalletProviderType } from '../../types/ethereum.types';
 
   // Props
   export let utxoManager: PrivateUTXOManager;

@@ -1,8 +1,8 @@
 <!-- src/lib/components/DepositForm.svelte -->
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
-  import type { PrivateUTXOManager } from '../lib/PrivateUTXOManager';
-  import type { ERC20TokenData } from '../types/ethereum.types';
+  import type { PrivateUTXOManager } from '../PrivateUTXOManager';
+  import type { ERC20TokenData } from '../../types/ethereum.types';
 
   // Props
   export let utxoManager: PrivateUTXOManager;

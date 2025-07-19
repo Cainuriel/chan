@@ -25,7 +25,7 @@
   // Components
   import WalletConnection from '../components/WalletConnection.svelte';
   import UTXOBalance from '../components/UTXOBalance.svelte';
-  import DepositForm from '../components/DepositForm.svelte';
+  import DepositForm from '../lib/components/DepositForm.svelte';
   import OperationsPanel from '../components/OperationsPanel.svelte';
   import TransactionHistory from '../components/TransactionHistory.svelte';
 

@@ -1,9 +1,9 @@
 <!-- src/lib/components/UTXOBalance.svelte -->
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
-  import type { PrivateUTXO } from '../lib/PrivateUTXOManager';
-  import type { ERC20TokenData } from '../types/ethereum.types';
-  import { EthereumHelpers } from '../utils/ethereum.helpers';
+  import type { PrivateUTXO } from '../PrivateUTXOManager';
+  import type { ERC20TokenData } from '../../types/ethereum.types';
+  import { EthereumHelpers } from '../../utils/ethereum.helpers';
 
   // Props - Only private UTXOs supported
   export let privateUTXOs: PrivateUTXO[] = [];

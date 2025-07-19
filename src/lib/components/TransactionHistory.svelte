@@ -1,8 +1,8 @@
 <!-- src/lib/components/TransactionHistory.svelte -->
 <script lang="ts">
-  import type { PrivateUTXO } from '../lib/PrivateUTXOManager';
-  import type { ERC20TokenData } from '../types/ethereum.types';
-  import { EthereumHelpers } from '../utils/ethereum.helpers';
+  import type { PrivateUTXO } from '../PrivateUTXOManager';
+  import type { ERC20TokenData } from '../../types/ethereum.types';
+  import { EthereumHelpers } from '../../utils/ethereum.helpers';
 
   // Props - Solo private UTXOs
   export let privateUTXOs: PrivateUTXO[] = [];

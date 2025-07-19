@@ -1,8 +1,8 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
-  import type { PrivateUTXOManager, PrivateUTXO } from '../lib/PrivateUTXOManager';
-  import type { ERC20TokenData } from '../types/ethereum.types';
-  import { EthereumHelpers } from '../utils/ethereum.helpers';
+  import type { PrivateUTXOManager, PrivateUTXO } from '../../lib/PrivateUTXOManager';
+  import type { ERC20TokenData } from '../../types/ethereum.types';
+  import { EthereumHelpers } from '../../utils/ethereum.helpers';
 
   // Props - Solo private UTXOs
   export let utxoManager: PrivateUTXOManager;
