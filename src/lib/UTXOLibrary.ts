@@ -230,6 +230,10 @@ export class UTXOLibrary extends EventEmitter {
         try {
           const tokens = await this.contract.getRegisteredTokens();
           console.log('✅ Contrato UTXO validado correctamente e inicializado. Tokens registrados:', tokens.length);
+          
+          // Verificar que el authorizedBackend coincida con nuestra clave pública
+          await this.verifyAuthorizedBackend();
+          
         } catch (finalTestError: any) {
           console.warn('⚠️ Contrato conectado pero getRegisteredTokens() no funciona en el contrato final:', finalTestError.message);
           console.log('📢 Continuando con la inicialización - el contrato puede estar desplegado pero sin tokens registrados aún');
@@ -337,6 +341,45 @@ export class UTXOLibrary extends EventEmitter {
       
       this.emit('wallet:connection_failed', error);
       return result;
+    }
+  }
+
+  /**
+   * Verificar que el authorizedBackend del contrato coincida con nuestra clave pública
+   */
+  private async verifyAuthorizedBackend(): Promise<void> {
+    if (!this.contract) {
+      throw new Error('Contract not initialized');
+    }
+    
+    const expectedPublicKey = import.meta.env.VITE_PUBLIC_KEY_ADMIN;
+    if (!expectedPublicKey) {
+      console.warn('⚠️ VITE_PUBLIC_KEY_ADMIN not configured - skipping backend verification');
+      return;
+    }
+    
+    try {
+      const authorizedBackend = await this.contract.authorizedBackend();
+      
+      if (authorizedBackend.toLowerCase() !== expectedPublicKey.toLowerCase()) {
+        console.error('❌ Backend mismatch:', {
+          contractBackend: authorizedBackend,
+          expectedBackend: expectedPublicKey
+        });
+        throw new Error(`Contract authorizedBackend (${authorizedBackend}) does not match VITE_PUBLIC_KEY_ADMIN (${expectedPublicKey}). The contract needs to be deployed with the correct backend address.`);
+      }
+      
+      console.log('✅ Authorized backend verified:', {
+        contractBackend: authorizedBackend,
+        matches: true
+      });
+      
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('Contract authorizedBackend')) {
+        throw error; // Re-throw our custom error
+      }
+      console.warn('⚠️ Could not verify authorized backend:', error);
+      // Don't throw here - the contract might not have this method
     }
   }
 
@@ -505,10 +548,22 @@ export class UTXOLibrary extends EventEmitter {
         { gasLimit: this.config.defaultGasLimit }
       );
 
+      console.log('⏳ Waiting for transaction confirmation...');
       const receipt = await tx.wait();
-      console.log('✅ Contract call confirmed:', receipt?.hash);
+      
+      // Verificar que la transacción fue exitosa
+      if (!receipt || receipt.status === 0) {
+        throw new Error(`Transaction failed: ${receipt?.hash || tx.hash}`);
+      }
+      
+      console.log('✅ Contract call confirmed:', receipt.hash);
+      console.log('📊 Transaction details:', {
+        status: receipt.status,
+        gasUsed: receipt.gasUsed?.toString(),
+        blockNumber: receipt.blockNumber
+      });
 
-      // 9. Create local UTXO with BN254 data
+      // 9. SOLO AHORA guardamos el UTXO localmente (después de confirmación exitosa)
       const utxoId = await this.generateBN254UTXOId(
         commitmentHex,
         this.currentEOA!.address,
@@ -558,7 +613,19 @@ export class UTXOLibrary extends EventEmitter {
       
       let errorMessage = 'Deposit failed';
       if (error instanceof Error) {
-        if (error.message.includes('Invalid commitment point')) {
+        if (error.message.includes('UnauthorizedBackend')) {
+          errorMessage = 'Backend signature verification failed. Check that the contract authorizedBackend matches VITE_PUBLIC_KEY_ADMIN.';
+        } else if (error.message.includes('ReplayAttack')) {
+          errorMessage = 'Nonce replay attack detected. The nonce may be out of sync.';
+        } else if (error.message.includes('StaleAttestation')) {
+          errorMessage = 'Attestation is too old. Please try again.';
+        } else if (error.message.includes('InvalidAttestation')) {
+          errorMessage = 'Attestation verification failed. Data hash mismatch.';
+        } else if (error.message.includes('NullifierAlreadyUsed')) {
+          errorMessage = 'This nullifier has already been used. Possible double-spend attempt.';
+        } else if (error.message.includes('Transaction failed')) {
+          errorMessage = 'Contract transaction was reverted. Check the transaction details.';
+        } else if (error.message.includes('Invalid commitment point')) {
           errorMessage = 'BN254 commitment validation failed. Please try again.';
         } else if (error.message.includes('user rejected')) {
           errorMessage = 'Transaction was rejected by user';
