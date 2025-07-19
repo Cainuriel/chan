@@ -5,9 +5,9 @@ import { defineConfig } from 'vite';
 export default defineConfig({
 	plugins: [tailwindcss(), sveltekit()],
 	optimizeDeps: {
-		include: ['zenroom']
+		include: ['elliptic', 'ethers']
 	},
 	ssr: {
-		noExternal: ['zenroom']
+		noExternal: ['elliptic']
 	}
 });

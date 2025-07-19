@@ -23,12 +23,11 @@
   type NetworkKey = 'amoy' | 'alastria';
   
   // Components
-  import WalletConnection from '../components/WalletConnection.svelte';
-  import UTXOBalance from '../components/UTXOBalance.svelte';
+  import WalletConnection from '../lib/components/WalletConnection.svelte';
+  import UTXOBalance from '../lib/components/UTXOBalance.svelte';
   import DepositForm from '../lib/components/DepositForm.svelte';
-  import OperationsPanel from '../components/OperationsPanel.svelte';
-  import TransactionHistory from '../components/TransactionHistory.svelte';
-  import { testMigration } from '../utils/migration.test';
+  import OperationsPanel from '../lib/components/OperationsPanel.svelte';
+  import TransactionHistory from '../lib/components/TransactionHistory.svelte';
 
   // State
   let isInitialized = false;
@@ -76,6 +75,12 @@
 
   onMount(async () => {
     try {
+      // Make test function available globally for console access
+      if (typeof window !== 'undefined') {
+        (window as any).runMigrationTest = runMigrationTest;
+        console.log('🧪 Migration test available! Run: await window.runMigrationTest()');
+      }
+
       // Clear old contract data since we deployed a new one
       if (typeof window !== 'undefined') {
         const oldData = localStorage.getItem('private_utxos');
@@ -596,15 +601,19 @@
   async function runMigrationTest() {
     try {
       addNotification('info', '🧪 Testing crypto migration...');
-      const success = await testMigration();
-      if (success) {
+      // Dynamic import to avoid SSR issues
+      const { testMigration } = await import('../utils/migration.test');
+      const result = await testMigration();
+      if (result.overall) {
         addNotification('success', '✅ Migration test passed! Check console for details.');
       } else {
         addNotification('error', '❌ Migration test failed! Check console for details.');
       }
+      return result; // ¡Importante! Retornar el resultado
     } catch (error: any) {
       console.error('❌ Migration test error:', error);
       addNotification('error', `Migration test failed: ${error.message || error}`);
+      return { overall: false, error: error.message || error };
     }
   }
 
@@ -949,7 +958,7 @@
 
 <svelte:head>
   <title>UTXO Manager - Privacy-First Token Management</title>
-  <meta name="description" content="Manage ERC20 tokens with privacy using UTXOs and Zenroom cryptography" />
+  <meta name="description" content="Manage ERC20 tokens with privacy using UTXOs and modern cryptography" />
 </svelte:head>
 
 <div class="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900">
@@ -1325,14 +1334,14 @@
             Welcome to UTXO Manager
           </h2>
           <p class="text-xl text-gray-300 mb-8">
-            Transform your ERC20 tokens into privacy-preserving UTXOs using Zenroom cryptography
+            Transform your ERC20 tokens into privacy-preserving UTXOs using modern cryptography
           </p>
           
           <div class="grid md:grid-cols-3 gap-6 mb-8">
             <div class="bg-white/10 backdrop-blur-sm rounded-lg p-6 border border-white/20">
               <div class="text-purple-400 text-2xl mb-3">🔒</div>
               <h3 class="text-white font-semibold mb-2">Privacy First</h3>
-              <p class="text-gray-300 text-sm">Your transactions are private using Zenroom zero-knowledge proofs</p>
+              <p class="text-gray-300 text-sm">Your transactions are private using zero-knowledge proofs</p>
             </div>
             
             <div class="bg-white/10 backdrop-blur-sm rounded-lg p-6 border border-white/20">
@@ -1431,7 +1440,6 @@
             <!-- Deposit Form Component -->
             <DepositForm 
               utxoManager={privateUTXOManager}
-              privacyMode={true}
               on:deposit={handleDepositCreated}
             />
           {:else if activeTab === 'operations'}

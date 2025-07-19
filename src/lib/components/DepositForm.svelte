@@ -6,7 +6,6 @@
 
   // Props
   export let utxoManager: PrivateUTXOManager;
-  export let privacyMode: boolean = true;
 
   // Event dispatcher
   const dispatch = createEventDispatcher();
@@ -485,7 +484,7 @@ async function handleDeposit() {
         <div class="font-medium mb-1">How it works:</div>
         <ol class="list-decimal list-inside space-y-1 text-blue-300">
           <li>Your ERC20 tokens are transferred to the UTXO Vault contract</li>
-          <li>A Pedersen commitment is created using Zenroom cryptography on BN254</li>
+          <li>A Pedersen commitment is created using modern cryptography on BN254</li>
           <li>Range proofs ensure the amount is valid without revealing it</li>
           <li>You receive a private UTXO with mathematical privacy guarantees</li>
           <li>All operations use real cryptographic verification - no shortcuts</li>

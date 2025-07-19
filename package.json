@@ -29,7 +29,6 @@
 	},
 	"dependencies": {
 		"elliptic": "^6.6.1",
-		"ethers": "^6.15.0",
-		"zenroom": "^5.23.2"
+		"ethers": "^6.15.0"
 	}
 }

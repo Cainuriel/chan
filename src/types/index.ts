@@ -34,10 +34,12 @@ export type {
 
 // Re-export commonly used types for convenience
 export type {
-  ZenroomExecutionResult,
-  ZenroomExecutionOptions,
-  ZenroomCommitmentResult,
-  ZenroomSplitProofResult,
-  ZenroomOwnershipProofResult,
-  ZenroomKeyDerivationResult
+  PedersenCommitment,
+  EqualityProof,
+  BulletproofRangeProof,
+  Attestation,
+  DepositAttestationData,
+  TransferAttestationData,
+  SplitAttestationData,
+  WithdrawAttestationData
 } from './zenroom.d';

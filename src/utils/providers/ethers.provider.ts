@@ -1,23 +1,28 @@
 // src/utils/providers/ethers.provider.ts
 import { ethers } from 'ethers';
-import { ec as EC } from 'elliptic';
 import type { CryptoProvider } from '../crypto.types';
 import type { PedersenCommitment } from '../../types/zenroom.d';
 import type { BackendAttestation } from '../../contracts/UTXOVault.types';
 
 export class EthersCryptoProvider implements CryptoProvider {
-  private secp256k1: EC;
+  private secp256k1: any;
   private generatorG: any;
   private generatorH: any;
   private initialized = false;
   
   constructor() {
-    this.secp256k1 = new EC('secp256k1');
+    // Constructor vacío - inicialización asíncrona en initialize()
   }
   
   async initialize(): Promise<boolean> {
+    if (this.initialized) return true;
+    
     try {
       console.log('🔄 Initializing Ethers crypto provider...');
+      
+      // Dynamic import para evitar SSR issues
+      const { ec: EC } = await import('elliptic');
+      this.secp256k1 = new EC('secp256k1');
       
       // Test básico de funcionalidad
       const testBytes = ethers.randomBytes(32);
@@ -31,10 +36,23 @@ export class EthersCryptoProvider implements CryptoProvider {
       this.generatorG = this.secp256k1.g;
       this.generatorH = this.secp256k1.g.mul('2'); // H = 2*G (simple but valid)
       
-      // Test commitment básico
-      const testCommitment = await this.createPedersenCommitment(BigInt(100));
-      if (!testCommitment.x || !testCommitment.y) {
-        throw new Error('Commitment test failed');
+      // Test commitment básico SIN llamar al método público (evita circular reference)
+      try {
+        const value = BigInt(100);
+        const blindingFactor = ethers.randomBytes(32);
+        const blindingBN = this.secp256k1.keyFromPrivate(blindingFactor);
+        
+        // C = vG + rH
+        const commitment = this.generatorG.mul(value.toString()).add(this.generatorH.mul(blindingBN.getPrivate().toString()));
+        
+        // Verificar que el commitment es válido
+        if (!commitment.getX() || !commitment.getY()) {
+          throw new Error('Commitment test failed - invalid coordinates');
+        }
+        
+        console.log('✅ Basic commitment test passed');
+      } catch (testError) {
+        throw new Error(`Commitment test failed: ${testError}`);
       }
       
       this.initialized = true;
@@ -46,11 +64,15 @@ export class EthersCryptoProvider implements CryptoProvider {
       return false;
     }
   }
+
+  private ensureInitialized(): void {
+    if (!this.initialized || !this.secp256k1) {
+      throw new Error('EthersCryptoProvider not initialized. Call initialize() first.');
+    }
+  }
   
   async createPedersenCommitment(value: bigint, blindingFactor?: string): Promise<PedersenCommitment> {
-    if (!this.initialized) {
-      throw new Error('Provider not initialized');
-    }
+    this.ensureInitialized();
     
     const bf = blindingFactor || this.generateSecureBlindingFactor();
     
@@ -76,10 +98,13 @@ export class EthersCryptoProvider implements CryptoProvider {
   }
   
   async createNullifierHash(commitment: PedersenCommitment, owner: string): Promise<string> {
+    // Normalizar la dirección con checksum correcto
+    const normalizedOwner = ethers.getAddress(owner);
+    
     return ethers.keccak256(
       ethers.solidityPacked(
         ['uint256', 'uint256', 'address'],
-        [commitment.x, commitment.y, owner]
+        [commitment.x, commitment.y, normalizedOwner]
       )
     );
   }

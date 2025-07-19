@@ -5,7 +5,7 @@
 
 import { ethers, toBigInt, type BigNumberish } from 'ethers';
 import { UTXOLibrary } from './UTXOLibrary';
-import { ZenroomHelpers } from '../utils/zenroom.helpers.js';
+import { CryptoHelpers as ZenroomHelpers } from '../utils/crypto.helpers.js';
 import { EthereumHelpers } from './../utils/ethereum.helpers';
 import { gasManager } from './GasManager';
 import {
@@ -372,7 +372,7 @@ export class PrivateUTXOManager extends UTXOLibrary {
       });
 
       // 3. Usar ZenroomHelpers con AttestationService integrado
-      console.log('🔐 Creating deposit with attestation using Zenroom + Backend...');
+      console.log('🔐 Creating deposit with attestation using crypto libraries + Backend...');
       const { commitment, attestation } = await ZenroomHelpers.createDepositWithAttestation(
         amount,
         owner,
@@ -577,7 +577,7 @@ export class PrivateUTXOManager extends UTXOLibrary {
       };
 
       // 3. Usar ZenroomHelpers con AttestationService integrado
-      console.log('🔐 Creating transfer with attestation using Zenroom + Backend...');
+      console.log('🔐 Creating transfer with attestation using crypto libraries + Backend...');
       const { outputCommitment, attestation } = await ZenroomHelpers.createTransferWithAttestation(
         inputCommitment,
         utxo.value, // outputValue
@@ -713,7 +713,7 @@ export class PrivateUTXOManager extends UTXOLibrary {
       };
 
       // 4. Usar ZenroomHelpers con AttestationService integrado
-      console.log('� Creating split with attestation using Zenroom + Backend...');
+      console.log('🔐 Creating split with attestation using crypto libraries + Backend...');
       const { outputCommitments, attestation } = await ZenroomHelpers.createSplitWithAttestation(
         inputCommitment,
         outputValues,
@@ -844,7 +844,7 @@ export class PrivateUTXOManager extends UTXOLibrary {
       };
 
       // 4. Usar ZenroomHelpers con AttestationService integrado
-      console.log('🔐 Creating withdrawal with attestation using Zenroom + Backend...');
+      console.log('🔐 Creating withdrawal with attestation using crypto libraries + Backend...');
       const { attestation } = await ZenroomHelpers.createWithdrawWithAttestation(
         commitment,
         recipient || utxo.owner,

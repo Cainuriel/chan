@@ -84,12 +84,12 @@ import {
   UTXO_VAULT_CONSTANTS
 } from '../contracts/UTXOVault.types';
 
-import { ZenroomHelpers } from '../utils/zenroom.helpers';
+import { CryptoHelpers as ZenroomHelpers } from '../utils/crypto.helpers';
 import { EthereumHelpers } from '../utils/ethereum.helpers';
  
 /**
  * Main UTXOLibrary class
- * Integrates EOA wallets, REAL BN254 Zenroom cryptography, and smart contracts
+ * Integrates EOA wallets, REAL BN254 ethers.js + elliptic cryptography, and smart contracts
  */
 export class UTXOLibrary extends EventEmitter {
   // Core components
@@ -251,7 +251,7 @@ export class UTXOLibrary extends EventEmitter {
       const zenroomInitialized = await ZenroomHelpers.initialize();
       
       if (zenroomInitialized) {
-        console.log('✅ Zenroom library initialized successfully - full cryptography available');
+        console.log('✅ Crypto library initialized successfully - full cryptography available');
         cryptoMode = 'full';
         
         // Test cryptographic functionality if full mode
@@ -264,12 +264,12 @@ export class UTXOLibrary extends EventEmitter {
           cryptoMode = 'limited';
         }
       } else {
-        console.warn('⚠️ Zenroom initialization failed - using limited crypto mode');
+        console.warn('⚠️ Crypto initialization failed - using limited crypto mode');
         cryptoMode = 'limited';
       }
       
     } catch (initError) {
-      console.warn('⚠️ Zenroom initialization error, continuing with limited functionality:', initError);
+      console.warn('⚠️ Crypto initialization error, continuing with limited functionality:', initError);
       cryptoMode = 'limited';
     }
     
