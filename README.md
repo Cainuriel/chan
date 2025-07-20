@@ -1,4 +1,4 @@
-# 🔐 CHAN - UTXO Manager con Privacidad Criptográfica Real
+# 🔐 CHAN - UTXO Manager para ERC20s 
 
 [![Svelte](https://img.shields.io/badge/Svelte-FF3E00?style=flat&logo=svelte&logoColor=white)](https://svelte.dev/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?style=flat&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
@@ -7,7 +7,7 @@
 [![elliptic](https://img.shields.io/badge/elliptic-FF6B35?style=flat&logoColor=white)](https://github.com/indutny/elliptic)
 [![BN254](https://img.shields.io/badge/BN254-FF6B35?style=flat&logoColor=white)](https://eips.ethereum.org/EIPS/eip-196)
 
-**Sistema avanzado de gestión de tokens ERC20 con privacidad criptográfica real** usando UTXOs híbridos, Pedersen Commitments en BN254, y attestations criptográficas. Combina la privacidad de sistemas como Zcash con la programabilidad de Ethereum.
+**Sistema avanzado de gestión de tokens ERC20 con privacidad criptográfica** usando UTXOs híbridos, Pedersen Commitments en BN254, y attestations criptográficas. 
 
 ---
 
@@ -45,7 +45,7 @@ await zenroom.execute(`
 `, { data: { message: "hello" }});
 
 // AHORA (ethers.js + elliptic - Estable):
-const hash = ethers.keccak256(ethers.toUtf8Bytes("hello"));
+const hash = ethers.keccak256(ethers.toUtf8Bytes("I have 200 USDT"));
 const commitment = createPedersenCommitment(value, blindingFactor);
 ```
 
@@ -70,9 +70,8 @@ const commitment = createPedersenCommitment(value, blindingFactor);
 
 ---
 
-## 🏗️ **Arquitectura de UTXOs Híbridos**
 
-### 📋 **Estructura Completa de un UTXO Privado**
+### 📋 **Estructura Completa de un UTXO chan**
 
 Nuestros UTXOs representan una evolución híbrida que combina **privacidad criptográfica** con **eficiencia en Ethereum**:
 
@@ -299,7 +298,7 @@ function validateDepositParams(
 
 ## 🔄 **Ciclo de Vida Completo de un UTXO**
 
-### **1. 🏗️ Creación (DEPOSIT)**
+### **1. Creación (DEPOSIT)**
 ```mermaid
 sequenceDiagram
     participant U as Usuario
@@ -406,7 +405,7 @@ sequenceDiagram
 
 ## 📊 **Comparación con Otros Sistemas**
 
-| Característica | Bitcoin UTXO | Ethereum Account | **Nuestro UTXO Privado** |
+| Característica | Bitcoin UTXO | Ethereum Account | **UTXO CHAN** |
 |---------------|--------------|------------------|---------------------------|
 | **Privacidad** | 🟡 Pseudónimo | 🔴 Totalmente público | 🟢 **Criptográficamente privado** |
 | **Escalabilidad** | 🟡 Limitada por PoW | 🟡 Gas fees variables | 🟢 **Híbrido eficiente** |
@@ -477,10 +476,10 @@ VITE_PUBLIC_KEY_ADMIN=<direccion_publica_backend>
 3. **🚀 Initialize Library** → Inicializa la criptografía y conexión al contrato
 
 Solo después de completar los 3 pasos puedes:
-- **💰 Deposit** → Crear UTXOs privados desde tokens ERC-20
+- **💰 Deposit** → Crear UTXOs CHAN desde tokens ERC-20
 - **⚡ Transfer** → Transferir UTXOs a otras direcciones
 - **✂️ Split** → Dividir un UTXO en múltiples UTXOs
-- **🔄 Combine** → Combinar múltiples UTXOs en uno solo
+
 
 ---
 
@@ -600,26 +599,11 @@ await privateUTXOManager.runMigrationTest();
 
 ---
 
-## 🏆 **Logros de la Migración**
-
-### ✅ **Mejoras Técnicas Conseguidas**
-- **🚀 Rendimiento**: 10x más rápido en operaciones criptográficas
-- **📦 Bundle Size**: Reducción del 80% (2.5MB → 500KB)
-- **🔧 Estabilidad**: 99.9% éxito vs 70% con Zenroom
-- **🛠️ Desarrollo**: Debugging perfecto con mensajes específicos
-- **⚡ Compatibilidad**: 100% compatible con SvelteKit/Vite
-- **🔒 Seguridad**: Misma seguridad matemática, implementación más estable
-
-### ✅ **Funcionalidades Preservadas**
-- **API Identical**: Todas las funciones mantienen la misma interfaz
-- **Cryptographic Equivalence**: Mismos algoritmos, implementación diferente
-- **Mathematical Correctness**: Verificado con tests de compatibilidad
-- **User Experience**: Flujo idéntico para el usuario final
 
 ### ⚠️ **Limitaciones Actuales (Solo Desarrollo)**
 - [ ] 🚨 **Clave privada expuesta** - `VITE_PRIVATE_KEY_ADMIN` pública
 - [ ] 🚨 **localStorage backend** - Datos sensibles sin protección servidor
-- [ ] 🚨 **Sin autenticación** - AttestationService sin validación real
+- [ ] 🚨 **Sin permisionado de usuarios** - Sin KYC ni business logic
 - [ ] 🚨 **Client-side signing** - Firmas en navegador vs servidor seguro
 
 ---
@@ -662,8 +646,4 @@ const publicData = await blockchain.getCommitments(userAddress);
 const privateUTXOs = reconstructUTXOs(publicData, userSecrets);
 ```
 
-> **Nota Post-Migración**: Todos los algoritmos criptográficos usan ethers.js + elliptic y son matemáticamente seguros y verificados. Solo la **gestión de claves** y **almacenamiento** requieren migración para producción.
-
 ---
-
-🔬 **Sistema híbrido post-migración** con criptografía real de ethers.js + elliptic, arquitectura de seguridad simulada para testing, y debugging perfecto para desarrollo. **Listo para migración a producción** con backend seguro. 
