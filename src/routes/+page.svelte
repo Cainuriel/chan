@@ -4,6 +4,8 @@
   import { privateUTXOManager } from '$lib/PrivateUTXOManager';
   import type { PrivateUTXO } from '$lib/PrivateUTXOManager'; 
   import { PrivateUTXOStorage } from '$lib/PrivateUTXOStorage';
+  import { UTXORecoveryService } from '$lib/UTXORecoveryService';
+  import type { UTXORecoveryResult } from '$lib/UTXORecoveryService';
   import { EthereumHelpers } from '../utils/ethereum.helpers';
   import { WalletProviderType } from '../types/ethereum.types';
   import type { UTXOManagerStats, UTXOManagerConfig } from '../types/utxo.types';
@@ -80,6 +82,9 @@
       if (typeof window !== 'undefined') {
         (window as any).privateUTXOManager = privateUTXOManager;
         (window as any).runMigrationTest = runMigrationTest;
+        (window as any).scanForLostUTXOs = scanForLostUTXOs;
+        (window as any).auditUTXOConsistency = auditUTXOConsistency;
+        (window as any).getRecoveryStats = getRecoveryStats;
         
         // Add hash comparison debug function
         (window as any).debugHashCalculation = async (
@@ -656,6 +661,119 @@
   }
 
   // ========================
+  // UTXO RECOVERY FUNCTIONS
+  // ========================
+
+  async function scanForLostUTXOs() {
+    if (!isInitialized || !currentAccount) {
+      addNotification('error', 'Please connect wallet and initialize the library first');
+      return;
+    }
+
+    try {
+      addNotification('info', '🔍 Scanning blockchain for lost UTXOs...');
+      console.log('🔍 Starting UTXO recovery scan...');
+
+      // Escanear desde el bloque 0 (puedes ajustar esto para optimizar)
+      const recoveryResult = await privateUTXOManager.scanAndRecoverLostUTXOs(0);
+
+      console.log('📊 Recovery scan completed:', recoveryResult);
+
+      if (recoveryResult.recovered > 0) {
+        addNotification('success', `✅ Recovered ${recoveryResult.recovered} UTXOs from blockchain!`);
+      }
+
+      if (recoveryResult.unrecoverable > 0) {
+        addNotification('warning', 
+          `⚠️ Found ${recoveryResult.unrecoverable} UTXOs on blockchain that cannot be fully recovered due to missing cryptographic keys. They will be marked as read-only.`
+        );
+      }
+
+      if (recoveryResult.found.length === 0 && recoveryResult.missing.length === 0) {
+        addNotification('info', '✅ No missing UTXOs found - all UTXOs are synchronized');
+      }
+
+      // Refresh data after recovery
+      await refreshData();
+
+      return recoveryResult;
+
+    } catch (error: any) {
+      console.error('❌ UTXO recovery failed:', error);
+      addNotification('error', `Recovery failed: ${error.message}`);
+    }
+  }
+
+  async function auditUTXOConsistency() {
+    if (!isInitialized || !currentAccount) {
+      addNotification('error', 'Please connect wallet and initialize the library first');
+      return;
+    }
+
+    try {
+      addNotification('info', '🔍 Auditing UTXO consistency...');
+      console.log('🔍 Starting UTXO consistency audit...');
+
+      const auditResult = await privateUTXOManager.auditUTXOConsistency();
+
+      console.log('📊 Audit completed:', auditResult);
+
+      if (auditResult.consistent) {
+        addNotification('success', '✅ All UTXOs are consistent between localStorage and blockchain');
+      } else {
+        let message = '⚠️ Inconsistencies found:\n';
+        if (auditResult.localOnly.length > 0) {
+          message += `- ${auditResult.localOnly.length} UTXOs only in localStorage\n`;
+        }
+        if (auditResult.blockchainOnly.length > 0) {
+          message += `- ${auditResult.blockchainOnly.length} UTXOs only on blockchain\n`;
+        }
+        if (auditResult.mismatched.length > 0) {
+          message += `- ${auditResult.mismatched.length} mismatched UTXOs\n`;
+        }
+        
+        addNotification('warning', message);
+      }
+
+      // Show recommendations
+      for (const recommendation of auditResult.recommendedActions) {
+        addNotification('info', `💡 ${recommendation}`);
+      }
+
+      return auditResult;
+
+    } catch (error: any) {
+      console.error('❌ UTXO audit failed:', error);
+      addNotification('error', `Audit failed: ${error.message}`);
+    }
+  }
+
+  function getRecoveryStats() {
+    if (!isInitialized || !currentAccount) {
+      addNotification('error', 'Please connect wallet and initialize the library first');
+      return null;
+    }
+
+    try {
+      const recoveryStats = privateUTXOManager.getRecoveryStats();
+      
+      console.log('📊 Recovery stats:', recoveryStats);
+
+      // Show recommendations
+      for (const recommendation of recoveryStats.recommendations) {
+        addNotification('info', `💡 ${recommendation}`);
+      }
+
+      return recoveryStats;
+
+    } catch (error: any) {
+      console.error('❌ Failed to get recovery stats:', error);
+      addNotification('error', `Failed to get recovery stats: ${error.message}`);
+      return null;
+    }
+  }
+
+  // ========================
   // DEBUG FUNCTIONS
   // ========================
 
@@ -997,6 +1115,27 @@
   // Handle events from components
   function handleDepositCreated(event: CustomEvent) {
     console.log('Deposit created:', event.detail);
+    
+    const depositData = event.detail;
+    
+    // Check if there's a warning about UTXO not being saved locally
+    if (depositData.warning) {
+      addNotification('warning', `⚠️ ${depositData.warning}`);
+      addNotification('info', '💡 Use the "Scan & Recover" button in the recovery section to restore missing UTXOs');
+      
+      // Auto-trigger recovery scan after a short delay
+      setTimeout(async () => {
+        console.log('🔍 Auto-triggering recovery scan due to missing UTXO...');
+        try {
+          await scanForLostUTXOs();
+        } catch (error) {
+          console.warn('Auto-recovery scan failed:', error);
+        }
+      }, 2000);
+    } else {
+      addNotification('success', '🎉 UTXO created and saved successfully!');
+    }
+    
     refreshData();
     setActiveTab('balance');
   }
@@ -1371,6 +1510,43 @@
                     </button>
                     <p class="text-gray-400 text-sm mt-2">Test the new ethers.js + elliptic crypto system</p>
                   </div>
+                  
+                  <!-- UTXO Recovery Buttons -->
+                  <div class="mt-6 p-4 bg-gray-800 rounded-lg border border-gray-700">
+                    <h4 class="text-lg font-semibold text-white mb-3">🔍 UTXO Recovery & Audit</h4>
+                    <p class="text-gray-400 text-sm mb-4">
+                      If your deposit was successful but UTXOs are missing from your balance, use these tools to recover them.
+                    </p>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <button
+                        on:click={scanForLostUTXOs}
+                        class="bg-gradient-to-r from-blue-600 to-cyan-600 text-white px-4 py-2 rounded-lg font-medium hover:from-blue-700 hover:to-cyan-700 transition-all duration-200 shadow-md hover:shadow-lg text-sm"
+                      >
+                        🔍 Scan & Recover
+                      </button>
+                      
+                      <button
+                        on:click={auditUTXOConsistency}
+                        class="bg-gradient-to-r from-yellow-600 to-orange-600 text-white px-4 py-2 rounded-lg font-medium hover:from-yellow-700 hover:to-orange-700 transition-all duration-200 shadow-md hover:shadow-lg text-sm"
+                      >
+                        🔍 Audit Consistency
+                      </button>
+                      
+                      <button
+                        on:click={getRecoveryStats}
+                        class="bg-gradient-to-r from-purple-600 to-pink-600 text-white px-4 py-2 rounded-lg font-medium hover:from-purple-700 hover:to-pink-700 transition-all duration-200 shadow-md hover:shadow-lg text-sm"
+                      >
+                        📊 Recovery Stats
+                      </button>
+                    </div>
+                    
+                    <div class="mt-3 text-xs text-gray-500">
+                      <p><strong>Scan & Recover:</strong> Find UTXOs on blockchain missing from localStorage</p>
+                      <p><strong>Audit Consistency:</strong> Check for discrepancies between local and blockchain data</p>
+                      <p><strong>Recovery Stats:</strong> View statistics about your recoverable vs unusable UTXOs</p>
+                    </div>
+                  </div>
                 {/if}
               </div>
             {/if}
@@ -1442,6 +1618,7 @@
               { id: 'balance', label: 'Balance', icon: '💰' },
               { id: 'deposit', label: 'Deposit', icon: '📥' },
               { id: 'operations', label: 'Operations', icon: '⚡' },
+              { id: 'recovery', label: 'Recovery', icon: '🔍' },
               { id: 'history', label: 'History', icon: '📜' }
             ] as tab}
               <button
@@ -1482,7 +1659,7 @@
             <!-- Deposit Form Component -->
             <DepositForm 
               utxoManager={privateUTXOManager}
-              on:deposit={handleDepositCreated}
+              on:deposited={handleDepositCreated}
             />
           {:else if activeTab === 'operations'}
             <OperationsPanel 
@@ -1490,6 +1667,88 @@
               {privateUTXOs}
               on:operation={handleOperationCompleted} 
             />
+          {:else if activeTab === 'recovery'}
+            <!-- UTXO Recovery & Audit Panel -->
+            <div class="bg-white/10 backdrop-blur-sm rounded-lg p-8 border border-white/20">
+              <div class="text-center mb-8">
+                <div class="text-6xl mb-4">🔍</div>
+                <h3 class="text-2xl font-bold text-white mb-4">UTXO Recovery & Audit</h3>
+                <p class="text-gray-300 max-w-2xl mx-auto">
+                  If your deposit transaction was successful but UTXOs are missing from your balance, 
+                  use these tools to recover them from the blockchain.
+                </p>
+              </div>
+
+              <!-- Test Migration Button -->
+              <div class="mb-8 text-center">
+                <button
+                  on:click={runMigrationTest}
+                  class="bg-gradient-to-r from-green-600 to-teal-600 text-white px-8 py-4 rounded-lg font-semibold hover:from-green-700 hover:to-teal-700 transition-all duration-200 shadow-lg hover:shadow-xl text-lg"
+                >
+                  🧪 Test Migration
+                </button>
+                <p class="text-gray-400 text-sm mt-2">Test the new ethers.js + elliptic crypto system</p>
+              </div>
+
+              <!-- Recovery Tools -->
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                <div class="bg-white/5 rounded-lg p-6 border border-white/10">
+                  <div class="text-center mb-4">
+                    <div class="text-4xl mb-2">🔍</div>
+                    <h4 class="text-lg font-semibold text-white">Scan & Recover</h4>
+                    <p class="text-gray-400 text-sm">Find UTXOs on blockchain missing from localStorage</p>
+                  </div>
+                  <button
+                    on:click={scanForLostUTXOs}
+                    class="w-full bg-gradient-to-r from-blue-600 to-cyan-600 text-white px-4 py-3 rounded-lg font-medium hover:from-blue-700 hover:to-cyan-700 transition-all duration-200 shadow-md hover:shadow-lg"
+                  >
+                    🔍 Scan & Recover
+                  </button>
+                </div>
+
+                <div class="bg-white/5 rounded-lg p-6 border border-white/10">
+                  <div class="text-center mb-4">
+                    <div class="text-4xl mb-2">🔍</div>
+                    <h4 class="text-lg font-semibold text-white">Audit Consistency</h4>
+                    <p class="text-gray-400 text-sm">Check for discrepancies between local and blockchain data</p>
+                  </div>
+                  <button
+                    on:click={auditUTXOConsistency}
+                    class="w-full bg-gradient-to-r from-yellow-600 to-orange-600 text-white px-4 py-3 rounded-lg font-medium hover:from-yellow-700 hover:to-orange-700 transition-all duration-200 shadow-md hover:shadow-lg"
+                  >
+                    🔍 Audit Consistency
+                  </button>
+                </div>
+
+                <div class="bg-white/5 rounded-lg p-6 border border-white/10">
+                  <div class="text-center mb-4">
+                    <div class="text-4xl mb-2">📊</div>
+                    <h4 class="text-lg font-semibold text-white">Recovery Stats</h4>
+                    <p class="text-gray-400 text-sm">View statistics about your recoverable vs unusable UTXOs</p>
+                  </div>
+                  <button
+                    on:click={getRecoveryStats}
+                    class="w-full bg-gradient-to-r from-purple-600 to-pink-600 text-white px-4 py-3 rounded-lg font-medium hover:from-purple-700 hover:to-pink-700 transition-all duration-200 shadow-md hover:shadow-lg"
+                  >
+                    📊 Recovery Stats
+                  </button>
+                </div>
+              </div>
+
+              <!-- Information Panel -->
+              <div class="bg-blue-900/20 border border-blue-500/30 rounded-lg p-6">
+                <h5 class="text-blue-300 font-semibold mb-3 flex items-center">
+                  <span class="mr-2">ℹ️</span>
+                  How Recovery Works
+                </h5>
+                <div class="space-y-2 text-sm text-blue-200">
+                  <p><strong>Scan & Recover:</strong> Searches the blockchain for UTXOs belonging to your address that aren't saved locally.</p>
+                  <p><strong>Audit Consistency:</strong> Compares your local UTXO storage with what actually exists on the blockchain.</p>
+                  <p><strong>Recovery Stats:</strong> Shows how many of your UTXOs are usable vs read-only (missing cryptographic keys).</p>
+                  <p class="text-yellow-300 mt-4"><strong>Note:</strong> Recovered UTXOs may be read-only if the blinding factors were lost.</p>
+                </div>
+              </div>
+            </div>
           {:else if activeTab === 'history'}
             <TransactionHistory 
               {privateUTXOs}

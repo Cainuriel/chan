@@ -81,6 +81,14 @@ export interface PrivateUTXO extends ExtendedUTXOData {
   cryptographyType: 'BN254';
   /** Range proof (Bulletproof format) - opcional */
   rangeProof?: string;
+  
+  // Campos para recuperación de UTXOs
+  /** Indica si este UTXO fue recuperado del blockchain */
+  recovered?: boolean;
+  /** Razón de la recuperación */
+  recoveryReason?: string;
+  /** Indica si este UTXO puede ser usado para operaciones criptográficas */
+  usable?: boolean;
 }
 
 

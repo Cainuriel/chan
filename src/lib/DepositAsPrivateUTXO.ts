@@ -16,6 +16,7 @@ export async function depositAsPrivateUTXOSimplified(
   params: CreateUTXOParams,
   contract: any,
   currentEOA: any,
+  ethereum: any,
   utxos: Map<string, ExtendedUTXOData>,
   savePrivateUTXOToLocal: Function,
   emit: Function
@@ -65,16 +66,52 @@ export async function depositAsPrivateUTXOSimplified(
       console.warn('⚠️ Could not get current nonce, using 0:', error);
     }
 
-    // 5. Create attestation (simplified structure matching contract)
-    console.log('📝 Creating attestation...');
+    // 5. Create real attestation with proper backend signature
+    console.log('📝 Creating attestation with real backend signature...');
     const currentTime = Math.floor(Date.now() / 1000);
     
-    const attestation = {
+    // Get backend private key for signing
+    const backendPrivateKey = import.meta.env.VITE_PRIVATE_KEY_ADMIN;
+    if (!backendPrivateKey) {
+      throw new Error('❌ VITE_PRIVATE_KEY_ADMIN not configured. Cannot create attestation signature.');
+    }
+    
+    // Ensure private key has 0x prefix
+    const formattedPrivateKey = backendPrivateKey.startsWith('0x') ? 
+      backendPrivateKey : '0x' + backendPrivateKey;
+    
+    // Create attestation structure (without signature first)
+    const attestationData = {
       operation: "DEPOSIT",
       dataHash: dataHashResult,
       nonce: currentNonce + 1n,
-      timestamp: BigInt(currentTime),
-      signature: "0x" + "00".repeat(65) // Dummy signature for testing
+      timestamp: BigInt(currentTime)
+    };
+    
+    // Create message hash exactly as the contract expects
+    const messageHash = ethers.keccak256(ethers.solidityPacked(
+      ['string', 'bytes32', 'uint256', 'uint256'],
+      [
+        attestationData.operation,
+        attestationData.dataHash,
+        attestationData.nonce,
+        attestationData.timestamp
+      ]
+    ));
+    
+    // Sign the message hash using Ethereum's standard format
+    const backendWallet = new ethers.Wallet(formattedPrivateKey);
+    const signature = await backendWallet.signMessage(ethers.getBytes(messageHash));
+    
+    console.log('✅ Attestation signed by backend:', {
+      messageHash,
+      signerAddress: backendWallet.address,
+      signature: signature.substring(0, 20) + '...'
+    });
+    
+    const attestation = {
+      ...attestationData,
+      signature
     };
 
     // 6. Prepare deposit parameters (exactly matching contract structure)
@@ -113,7 +150,7 @@ export async function depositAsPrivateUTXOSimplified(
     const tokenContract = new ethers.Contract(
       tokenAddress,
       ['function approve(address,uint256) returns (bool)'],
-      currentEOA // Assuming currentEOA has a signer
+      ethereum.getSigner() // Use ethereum.getSigner() for transactions
     );
 
     const approveTx = await tokenContract.approve(contract.target || contract.address, amount);

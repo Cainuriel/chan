@@ -45,10 +45,10 @@ class EventEmitter {
 
 import { ethers, toBigInt, type BigNumberish } from 'ethers';
 import { depositAsPrivateUTXOSimplified } from './DepositAsPrivateUTXO';
+import { UTXORecoveryService, type UTXORecoveryResult } from './UTXORecoveryService';
 
 // Type imports
 import {
-  type PrivateUTXO,
   type ExtendedUTXOData,
   UTXOType,
   type CreateUTXOParams,
@@ -66,6 +66,9 @@ import {
   InsufficientFundsError,
   UTXOAlreadySpentError
 } from '../types/utxo.types';
+
+// Import the extended PrivateUTXO type with recovery fields
+import type { PrivateUTXO } from './PrivateUTXOManager';
 
 import {
   type EOAData,
@@ -431,6 +434,7 @@ export class UTXOLibrary extends EventEmitter {
         params,
         this.contract,
         this.currentEOA,
+        this.ethereum,
         this.utxos,
         this.savePrivateUTXOToLocal.bind(this),
         this.emit.bind(this)
@@ -1880,6 +1884,198 @@ private isPrivateUTXO(utxo: ExtendedUTXOData): utxo is PrivateUTXO {
     } catch (error) {
       console.error('❌ Debug dataHash failed:', error);
       throw error;
+    }
+  }
+
+  // ========================
+  // UTXO RECOVERY & SYNC
+  // ========================
+
+  /**
+   * Escanear blockchain para UTXOs perdidos y recuperar los que sea posible
+   */
+  async scanAndRecoverLostUTXOs(fromBlock: number = 0): Promise<UTXORecoveryResult> {
+    if (!this.contract || !this.currentEOA) {
+      throw new Error('Contract and EOA must be initialized before recovery');
+    }
+
+    console.log(`🔍 Scanning for lost UTXOs for user ${this.currentEOA.address.substring(0, 8)}...`);
+
+    const recoveryService = new UTXORecoveryService(
+      this.contract,
+      this.contract.runner!.provider!
+    );
+
+    const result = await recoveryService.scanAndRecoverUTXOs(
+      this.currentEOA.address,
+      fromBlock
+    );
+
+    // Actualizar caché con UTXOs recuperados
+    for (const recoveredUTXO of result.found) {
+      if (!(recoveredUTXO as any).recovered) {
+        // Solo cachear UTXOs que no están marcados como recuperados
+        this.utxos.set(recoveredUTXO.id, recoveredUTXO);
+      }
+    }
+
+    this.emit('utxos:recovered', result);
+
+    return result;
+  }
+
+  /**
+   * Verificar consistencia entre localStorage y blockchain
+   */
+  async auditUTXOConsistency(): Promise<{
+    consistent: boolean;
+    localOnly: string[];
+    blockchainOnly: string[];
+    mismatched: string[];
+    recommendedActions: string[];
+  }> {
+    if (!this.contract || !this.currentEOA) {
+      throw new Error('Contract and EOA must be initialized before audit');
+    }
+
+    console.log(`🔍 Auditing UTXO consistency for user ${this.currentEOA.address.substring(0, 8)}...`);
+
+    const recoveryService = new UTXORecoveryService(
+      this.contract,
+      this.contract.runner!.provider!
+    );
+
+    const auditResult = await recoveryService.auditUTXOConsistency(this.currentEOA.address);
+    
+    // Generar recomendaciones
+    const recommendedActions: string[] = [];
+    
+    if (auditResult.localOnly.length > 0) {
+      recommendedActions.push(`Found ${auditResult.localOnly.length} UTXOs only in localStorage - check if they were properly submitted to blockchain`);
+    }
+    
+    if (auditResult.blockchainOnly.length > 0) {
+      recommendedActions.push(`Found ${auditResult.blockchainOnly.length} UTXOs only on blockchain - run recovery to restore missing UTXOs`);
+    }
+    
+    if (auditResult.mismatched.length > 0) {
+      recommendedActions.push(`Found ${auditResult.mismatched.length} mismatched UTXOs - manual reconciliation required`);
+    }
+
+    if (auditResult.consistent) {
+      recommendedActions.push('All UTXOs are consistent between localStorage and blockchain');
+    }
+
+    return {
+      ...auditResult,
+      recommendedActions
+    };
+  }
+
+  /**
+   * Obtener estadísticas de recuperación del usuario actual
+   */
+  getRecoveryStats(): {
+    totalUTXOs: number;
+    usableUTXOs: number;
+    recoveredUTXOs: number;
+    unusableUTXOs: number;
+    recommendations: string[];
+  } {
+    if (!this.currentEOA) {
+      throw new Error('EOA must be initialized before getting recovery stats');
+    }
+
+    const stats = UTXORecoveryService.getRecoveryStats(this.currentEOA.address);
+    
+    const recommendations: string[] = [];
+    
+    if (stats.unusableUTXOs > 0) {
+      recommendations.push(`You have ${stats.unusableUTXOs} UTXOs that cannot be used due to missing blinding factors`);
+      recommendations.push('Consider using the deposit function with proper cryptographic parameters to create new usable UTXOs');
+    }
+    
+    if (stats.recoveredUTXOs > 0) {
+      recommendations.push(`${stats.recoveredUTXOs} UTXOs were recovered from blockchain but lack private keys for spending`);
+      recommendations.push('These UTXOs serve as historical records but cannot be spent');
+    }
+
+    if (stats.usableUTXOs === 0 && stats.totalUTXOs > 0) {
+      recommendations.push('All your UTXOs are unusable - you may need to create new deposits with proper cryptographic setup');
+    }
+
+    return {
+      ...stats,
+      recommendations
+    };
+  }
+
+  /**
+   * Función de emergencia: intentar recuperar UTXO específico por ID
+   */
+  async emergencyRecoverUTXO(utxoId: string): Promise<{
+    success: boolean;
+    utxo?: PrivateUTXO;
+    message: string;
+  }> {
+    if (!this.contract || !this.currentEOA) {
+      throw new Error('Contract and EOA must be initialized for emergency recovery');
+    }
+
+    console.log(`🚨 Emergency recovery for UTXO: ${utxoId.substring(0, 8)}...`);
+
+    try {
+      // Verificar si el UTXO existe en el contrato
+      const utxoInfo = await this.contract.getUTXOInfo(utxoId);
+      const [exists, commitmentHash, tokenAddress, timestamp, isSpent, , , blockNumber] = utxoInfo;
+
+      if (!exists) {
+        return {
+          success: false,
+          message: `UTXO ${utxoId.substring(0, 8)}... does not exist on blockchain`
+        };
+      }
+
+      // Crear UTXO de solo lectura
+      const recoveredUTXO: PrivateUTXO = {
+        id: utxoId,
+        exists: true,
+        value: BigInt(0), // Valor desconocido
+        tokenAddress,
+        owner: this.currentEOA.address,
+        timestamp: BigInt(Number(timestamp)),
+        isSpent,
+        commitment: commitmentHash,
+        parentUTXO: '',
+        utxoType: UTXOType.DEPOSIT,
+        blindingFactor: 'UNKNOWN',
+        nullifierHash: 'UNKNOWN',
+        localCreatedAt: Date.now(),
+        confirmed: true,
+        blockNumber: Number(blockNumber),
+        isPrivate: true,
+        cryptographyType: 'BN254',
+        recovered: true,
+        recoveryReason: 'Emergency recovery by user request',
+        usable: false
+      };
+
+      // Guardar en localStorage
+      const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
+      PrivateUTXOStorage.savePrivateUTXO(this.currentEOA.address, recoveredUTXO);
+
+      return {
+        success: true,
+        utxo: recoveredUTXO,
+        message: `UTXO ${utxoId.substring(0, 8)}... recovered as read-only record`
+      };
+
+    } catch (error) {
+      console.error('❌ Emergency recovery failed:', error);
+      return {
+        success: false,
+        message: `Emergency recovery failed: ${error instanceof Error ? error.message : 'Unknown error'}`
+      };
     }
   }
 }

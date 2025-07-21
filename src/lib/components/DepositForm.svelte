@@ -144,13 +144,47 @@ async function handleDeposit() {
         
         console.log('✅ Deposit successful!');
         
-        // Notify parent
-        dispatch('deposited', {
-          utxoId: result.createdUTXOIds?.[0],
-          amount: amountBigInt,
-          tokenAddress,
-          txHash: result.transactionHash
-        });
+        // Check if UTXO was actually saved locally
+        if (result.createdUTXOIds && result.createdUTXOIds.length > 0) {
+          const createdUTXOId = result.createdUTXOIds[0];
+          
+          // Check if UTXO exists in localStorage
+          const storedUTXOs = utxoManager.getPrivateUTXOsByOwner(utxoManager.currentAccount.address);
+          const foundUTXO = storedUTXOs.find(u => u.id === createdUTXOId);
+          
+          if (!foundUTXO) {
+            console.warn('⚠️ UTXO was created on blockchain but not saved locally!');
+            console.warn('🔍 This may happen if cryptographic keys are missing');
+            console.warn(`💡 You can recover this UTXO using the recovery tools`);
+            console.warn(`📍 UTXO ID: ${createdUTXOId}`);
+            console.warn(`📍 Transaction: ${result.transactionHash}`);
+            
+            // Add warning to the dispatch event
+            dispatch('deposited', {
+              utxoId: createdUTXOId,
+              amount: amountBigInt,
+              tokenAddress,
+              txHash: result.transactionHash,
+              warning: 'UTXO created on blockchain but not saved locally. Use recovery tools to restore it.'
+            });
+          } else {
+            console.log('✅ UTXO successfully saved locally:', foundUTXO.id);
+            dispatch('deposited', {
+              utxoId: createdUTXOId,
+              amount: amountBigInt,
+              tokenAddress,
+              txHash: result.transactionHash
+            });
+          }
+        } else {
+          // Fallback for when no UTXO ID is returned
+          dispatch('deposited', {
+            utxoId: null,
+            amount: amountBigInt,
+            tokenAddress,
+            txHash: result.transactionHash
+          });
+        }
       } else {
         console.error('❌ Deposit failed:', result.error);
         depositError = result.error || 'Deposit failed';
