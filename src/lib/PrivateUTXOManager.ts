@@ -120,8 +120,16 @@ export class PrivateUTXOManager extends UTXOLibrary {
       // Call parent initialize method
       const success = await super.initialize(contractAddressOrProvider);
       
-      if (success) {
+      if (success && this.contract) {
         try {
+          // ✅ ESTABLECER EL CONTRATO EN LOS SERVICIOS PARA VALIDACIÓN DE HASH
+          console.log('🔗 Setting up contract for hash validation in services...');
+          
+          // Configurar CryptoHelpers con el contrato
+          const { CryptoHelpers } = await import('../utils/crypto.helpers');
+          CryptoHelpers.setContract(this.contract as any);
+          console.log('✅ Contract set in CryptoHelpers for hash validation');
+          
           // Get chain ID for gas management
           const provider = EthereumHelpers.getProvider();
           if (provider) {
@@ -135,7 +143,7 @@ export class PrivateUTXOManager extends UTXOLibrary {
             gasManager.debugConfiguration();
           }
         } catch (networkError: any) {
-          console.warn('⚠️ Could not detect chain ID:', networkError.message);
+          console.warn('⚠️ Could not complete setup:', networkError.message);
           this.currentChainId = null;
         }
       }

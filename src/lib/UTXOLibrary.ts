@@ -85,6 +85,7 @@ import {
 
 import { CryptoHelpers as ZenroomHelpers } from '../utils/crypto.helpers';
 import { EthereumHelpers } from '../utils/ethereum.helpers';
+import { logAttestationData } from './HashCalculator';
  
 /**
  * Main UTXOLibrary class
@@ -510,6 +511,25 @@ export class UTXOLibrary extends EventEmitter {
           signature: attestationResult.attestation.signature
         }
       };
+
+      // 🚨 LOGGING DETALLADO DE ATTESTATION PARA DEBUGGING
+      console.log('🚨 === BEFORE CONTRACT VALIDATION - COMPLETE DEPOSIT PARAMS ===');
+      console.log('📋 Complete DepositParams being sent to contract:');
+      console.log('Token Address:', depositParams.tokenAddress);
+      console.log('Commitment X:', depositParams.commitment.x);
+      console.log('Commitment Y:', depositParams.commitment.y);
+      console.log('Nullifier Hash:', depositParams.nullifierHash);
+      console.log('Amount:', depositParams.amount.toString());
+      console.log('Sender:', this.currentEOA!.address);
+      
+      // Log attestation específicamente con función dedicada
+      logAttestationData({
+        operation: depositParams.attestation.operation,
+        dataHash: depositParams.attestation.dataHash,
+        nonce: depositParams.attestation.nonce.toString(),
+        timestamp: depositParams.attestation.timestamp.toString(),
+        signature: depositParams.attestation.signature
+      }, 'DEPOSIT');
 
       console.log('📋 Contract parameters prepared:', {
         tokenAddress,
@@ -1714,6 +1734,114 @@ private isPrivateUTXO(utxo: ExtendedUTXOData): utxo is PrivateUTXO {
 
     } catch (error) {
       console.error('❌ Contract debug failed:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Debug dataHash calculation comparison
+   */
+  async debugDataHashMismatch(params: { 
+    tokenAddress: string; 
+    commitment: { x: bigint; y: bigint }; 
+    nullifierHash: string; 
+    amount: bigint; 
+    sender: string 
+  }) {
+    if (!this.contract || !this.currentEOA) {
+      throw new Error('Contract or account not initialized');
+    }
+
+    try {
+      console.log('\n🔍 === DEBUG DATAHASH CALCULATION ===');
+      
+      // 1. Frontend calculation
+      console.log('\n1️⃣ Frontend calculation:');
+      const frontendDataHash = ethers.keccak256(
+        ethers.solidityPacked(
+          ['address', 'uint256', 'uint256', 'bytes32', 'uint256', 'address'],
+          [params.tokenAddress, params.commitment.x, params.commitment.y, params.nullifierHash, params.amount, params.sender]
+        )
+      );
+      
+      console.log('📊 Frontend values:', {
+        tokenAddress: params.tokenAddress,
+        commitmentX: params.commitment.x.toString(),
+        commitmentY: params.commitment.y.toString(),
+        nullifierHash: params.nullifierHash,
+        amount: params.amount.toString(),
+        sender: params.sender,
+        calculatedHash: frontendDataHash
+      });
+
+      // 2. Contract calculation
+      console.log('\n2️⃣ Contract calculation:');
+      const depositParams = {
+        tokenAddress: params.tokenAddress,
+        commitment: {
+          x: params.commitment.x,
+          y: params.commitment.y
+        },
+        nullifierHash: params.nullifierHash,
+        amount: params.amount,
+        attestation: {
+          operation: "DEPOSIT",
+          dataHash: frontendDataHash, // Use frontend hash
+          nonce: BigInt(1),
+          timestamp: BigInt(Date.now()),
+          signature: "0x" + "00".repeat(65)
+        }
+      };
+
+      const debugResult = await this.contract.debugDataHashCalculation(
+        depositParams,
+        params.sender
+      );
+
+      console.log('📊 Contract values:', {
+        tokenAddress: debugResult[0],
+        commitmentX: debugResult[1],
+        commitmentY: debugResult[2],
+        nullifierHash: debugResult[3],
+        amount: debugResult[4],
+        sender: debugResult[5],
+        calculatedHash: debugResult[6]
+      });
+
+      // 3. Compare
+      console.log('\n3️⃣ Comparison:');
+      console.log('Frontend hash:', frontendDataHash);
+      console.log('Contract hash: ', debugResult[6]);
+      console.log('Match:        ', frontendDataHash === debugResult[6]);
+
+      if (frontendDataHash !== debugResult[6]) {
+        console.log('\n❌ HASH MISMATCH DETECTED!');
+        console.log('🔍 Checking individual values...');
+        
+        // Check each value individually
+        const checks = [
+          ['tokenAddress', params.tokenAddress.toLowerCase(), debugResult[0].toLowerCase()],
+          ['commitmentX', params.commitment.x.toString(), debugResult[1]],
+          ['commitmentY', params.commitment.y.toString(), debugResult[2]],
+          ['nullifierHash', params.nullifierHash.toLowerCase(), debugResult[3].toLowerCase()],
+          ['amount', params.amount.toString(), debugResult[4]],
+          ['sender', params.sender.toLowerCase(), debugResult[5].toLowerCase()]
+        ];
+
+        checks.forEach(([name, frontend, contract]) => {
+          const match = frontend === contract;
+          console.log(`${match ? '✅' : '❌'} ${name}: ${match ? 'MATCH' : 'MISMATCH'}`);
+          if (!match) {
+            console.log(`  Frontend: ${frontend}`);
+            console.log(`  Contract: ${contract}`);
+          }
+        });
+      } else {
+        console.log('✅ All values match perfectly!');
+      }
+
+    } catch (error) {
+      console.error('❌ Debug dataHash failed:', error);
       throw error;
     }
   }

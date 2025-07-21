@@ -874,6 +874,126 @@ export const UTXO_VAULT_ABI =
 		"type": "function"
 	},
 	{
+		"inputs": [
+			{
+				"components": [
+					{
+						"internalType": "address",
+						"name": "tokenAddress",
+						"type": "address"
+					},
+					{
+						"components": [
+							{
+								"internalType": "uint256",
+								"name": "x",
+								"type": "uint256"
+							},
+							{
+								"internalType": "uint256",
+								"name": "y",
+								"type": "uint256"
+							}
+						],
+						"internalType": "struct UTXOVault.CommitmentPoint",
+						"name": "commitment",
+						"type": "tuple"
+					},
+					{
+						"internalType": "bytes32",
+						"name": "nullifierHash",
+						"type": "bytes32"
+					},
+					{
+						"internalType": "uint256",
+						"name": "amount",
+						"type": "uint256"
+					},
+					{
+						"components": [
+							{
+								"internalType": "string",
+								"name": "operation",
+								"type": "string"
+							},
+							{
+								"internalType": "bytes32",
+								"name": "dataHash",
+								"type": "bytes32"
+							},
+							{
+								"internalType": "uint256",
+								"name": "nonce",
+								"type": "uint256"
+							},
+							{
+								"internalType": "uint256",
+								"name": "timestamp",
+								"type": "uint256"
+							},
+							{
+								"internalType": "bytes",
+								"name": "signature",
+								"type": "bytes"
+							}
+						],
+						"internalType": "struct UTXOVault.BackendAttestation",
+						"name": "attestation",
+						"type": "tuple"
+					}
+				],
+				"internalType": "struct UTXOVault.DepositParams",
+				"name": "params",
+				"type": "tuple"
+			},
+			{
+				"internalType": "address",
+				"name": "sender",
+				"type": "address"
+			}
+		],
+		"name": "debugDataHashCalculation",
+		"outputs": [
+			{
+				"internalType": "string",
+				"name": "tokenAddr",
+				"type": "string"
+			},
+			{
+				"internalType": "string",
+				"name": "commitX",
+				"type": "string"
+			},
+			{
+				"internalType": "string",
+				"name": "commitY",
+				"type": "string"
+			},
+			{
+				"internalType": "string",
+				"name": "nullifier",
+				"type": "string"
+			},
+			{
+				"internalType": "string",
+				"name": "amount",
+				"type": "string"
+			},
+			{
+				"internalType": "string",
+				"name": "senderAddr",
+				"type": "string"
+			},
+			{
+				"internalType": "bytes32",
+				"name": "calculatedHash",
+				"type": "bytes32"
+			}
+		],
+		"stateMutability": "pure",
+		"type": "function"
+	},
+	{
 		"inputs": [],
 		"name": "getRegisteredTokens",
 		"outputs": [
@@ -1494,6 +1614,385 @@ export const UTXO_VAULT_ABI =
 		],
 		"stateMutability": "view",
 		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"components": [
+					{
+						"internalType": "address",
+						"name": "tokenAddress",
+						"type": "address"
+					},
+					{
+						"components": [
+							{
+								"internalType": "uint256",
+								"name": "x",
+								"type": "uint256"
+							},
+							{
+								"internalType": "uint256",
+								"name": "y",
+								"type": "uint256"
+							}
+						],
+						"internalType": "struct UTXOVault.CommitmentPoint",
+						"name": "commitment",
+						"type": "tuple"
+					},
+					{
+						"internalType": "bytes32",
+						"name": "nullifierHash",
+						"type": "bytes32"
+					},
+					{
+						"internalType": "uint256",
+						"name": "amount",
+						"type": "uint256"
+					},
+					{
+						"components": [
+							{
+								"internalType": "string",
+								"name": "operation",
+								"type": "string"
+							},
+							{
+								"internalType": "bytes32",
+								"name": "dataHash",
+								"type": "bytes32"
+							},
+							{
+								"internalType": "uint256",
+								"name": "nonce",
+								"type": "uint256"
+							},
+							{
+								"internalType": "uint256",
+								"name": "timestamp",
+								"type": "uint256"
+							},
+							{
+								"internalType": "bytes",
+								"name": "signature",
+								"type": "bytes"
+							}
+						],
+						"internalType": "struct UTXOVault.BackendAttestation",
+						"name": "attestation",
+						"type": "tuple"
+					}
+				],
+				"internalType": "struct UTXOVault.DepositParams",
+				"name": "params",
+				"type": "tuple"
+			},
+			{
+				"internalType": "address",
+				"name": "sender",
+				"type": "address"
+			}
+		],
+		"name": "calculateDepositDataHash",
+		"outputs": [
+			{
+				"internalType": "bytes32",
+				"name": "",
+				"type": "bytes32"
+			}
+		],
+		"stateMutability": "pure",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"components": [
+					{
+						"components": [
+							{
+								"internalType": "uint256",
+								"name": "x",
+								"type": "uint256"
+							},
+							{
+								"internalType": "uint256",
+								"name": "y",
+								"type": "uint256"
+							}
+						],
+						"internalType": "struct UTXOVault.CommitmentPoint",
+						"name": "inputCommitment",
+						"type": "tuple"
+					},
+					{
+						"components": [
+							{
+								"internalType": "uint256",
+								"name": "x",
+								"type": "uint256"
+							},
+							{
+								"internalType": "uint256",
+								"name": "y",
+								"type": "uint256"
+							}
+						],
+						"internalType": "struct UTXOVault.CommitmentPoint[]",
+						"name": "outputCommitments",
+						"type": "tuple[]"
+					},
+					{
+						"internalType": "bytes32",
+						"name": "inputNullifier",
+						"type": "bytes32"
+					},
+					{
+						"internalType": "bytes32[]",
+						"name": "outputNullifiers",
+						"type": "bytes32[]"
+					},
+					{
+						"components": [
+							{
+								"internalType": "string",
+								"name": "operation",
+								"type": "string"
+							},
+							{
+								"internalType": "bytes32",
+								"name": "dataHash",
+								"type": "bytes32"
+							},
+							{
+								"internalType": "uint256",
+								"name": "nonce",
+								"type": "uint256"
+							},
+							{
+								"internalType": "uint256",
+								"name": "timestamp",
+								"type": "uint256"
+							},
+							{
+								"internalType": "bytes",
+								"name": "signature",
+								"type": "bytes"
+							}
+						],
+						"internalType": "struct UTXOVault.BackendAttestation",
+						"name": "attestation",
+						"type": "tuple"
+					}
+				],
+				"internalType": "struct UTXOVault.SplitParams",
+				"name": "params",
+				"type": "tuple"
+			},
+			{
+				"internalType": "address",
+				"name": "sender",
+				"type": "address"
+			}
+		],
+		"name": "calculateSplitDataHash",
+		"outputs": [
+			{
+				"internalType": "bytes32",
+				"name": "",
+				"type": "bytes32"
+			}
+		],
+		"stateMutability": "pure",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"components": [
+					{
+						"components": [
+							{
+								"internalType": "uint256",
+								"name": "x",
+								"type": "uint256"
+							},
+							{
+								"internalType": "uint256",
+								"name": "y",
+								"type": "uint256"
+							}
+						],
+						"internalType": "struct UTXOVault.CommitmentPoint",
+						"name": "inputCommitment",
+						"type": "tuple"
+					},
+					{
+						"components": [
+							{
+								"internalType": "uint256",
+								"name": "x",
+								"type": "uint256"
+							},
+							{
+								"internalType": "uint256",
+								"name": "y",
+								"type": "uint256"
+							}
+						],
+						"internalType": "struct UTXOVault.CommitmentPoint",
+						"name": "outputCommitment",
+						"type": "tuple"
+					},
+					{
+						"internalType": "bytes32",
+						"name": "inputNullifier",
+						"type": "bytes32"
+					},
+					{
+						"internalType": "bytes32",
+						"name": "outputNullifier",
+						"type": "bytes32"
+					},
+					{
+						"components": [
+							{
+								"internalType": "string",
+								"name": "operation",
+								"type": "string"
+							},
+							{
+								"internalType": "bytes32",
+								"name": "dataHash",
+								"type": "bytes32"
+							},
+							{
+								"internalType": "uint256",
+								"name": "nonce",
+								"type": "uint256"
+							},
+							{
+								"internalType": "uint256",
+								"name": "timestamp",
+								"type": "uint256"
+							},
+							{
+								"internalType": "bytes",
+								"name": "signature",
+								"type": "bytes"
+							}
+						],
+						"internalType": "struct UTXOVault.BackendAttestation",
+						"name": "attestation",
+						"type": "tuple"
+					}
+				],
+				"internalType": "struct UTXOVault.TransferParams",
+				"name": "params",
+				"type": "tuple"
+			},
+			{
+				"internalType": "address",
+				"name": "sender",
+				"type": "address"
+			}
+		],
+		"name": "calculateTransferDataHash",
+		"outputs": [
+			{
+				"internalType": "bytes32",
+				"name": "",
+				"type": "bytes32"
+			}
+		],
+		"stateMutability": "pure",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"components": [
+					{
+						"components": [
+							{
+								"internalType": "uint256",
+								"name": "x",
+								"type": "uint256"
+							},
+							{
+								"internalType": "uint256",
+								"name": "y",
+								"type": "uint256"
+							}
+						],
+						"internalType": "struct UTXOVault.CommitmentPoint",
+						"name": "commitment",
+						"type": "tuple"
+					},
+					{
+						"internalType": "bytes32",
+						"name": "nullifierHash",
+						"type": "bytes32"
+					},
+					{
+						"internalType": "uint256",
+						"name": "revealedAmount",
+						"type": "uint256"
+					},
+					{
+						"components": [
+							{
+								"internalType": "string",
+								"name": "operation",
+								"type": "string"
+							},
+							{
+								"internalType": "bytes32",
+								"name": "dataHash",
+								"type": "bytes32"
+							},
+							{
+								"internalType": "uint256",
+								"name": "nonce",
+								"type": "uint256"
+							},
+							{
+								"internalType": "uint256",
+								"name": "timestamp",
+								"type": "uint256"
+							},
+							{
+								"internalType": "bytes",
+								"name": "signature",
+								"type": "bytes"
+							}
+						],
+						"internalType": "struct UTXOVault.BackendAttestation",
+						"name": "attestation",
+						"type": "tuple"
+					}
+				],
+				"internalType": "struct UTXOVault.WithdrawParams",
+				"name": "params",
+				"type": "tuple"
+			},
+			{
+				"internalType": "address",
+				"name": "sender",
+				"type": "address"
+			}
+		],
+		"name": "calculateWithdrawDataHash",
+		"outputs": [
+			{
+				"internalType": "bytes32",
+				"name": "",
+				"type": "bytes32"
+			}
+		],
+		"stateMutability": "pure",
+		"type": "function"
 	}
 ] as const;
 
@@ -1544,6 +2043,10 @@ export interface UTXOVaultInterface {
   encodeFunctionData(functionFragment: "isNullifierUsed", values: [string]): string;
   encodeFunctionData(functionFragment: "isTokenRegistered", values: [string]): string;
   encodeFunctionData(functionFragment: "updateAuthorizedBackend", values: [string]): string;
+  encodeFunctionData(functionFragment: "calculateDepositDataHash", values: [DepositParams, string]): string;
+  encodeFunctionData(functionFragment: "calculateSplitDataHash", values: [SplitParams, string]): string;
+  encodeFunctionData(functionFragment: "calculateTransferDataHash", values: [TransferParams, string]): string;
+  encodeFunctionData(functionFragment: "calculateWithdrawDataHash", values: [WithdrawParams, string]): string;
   
   // Decode function result - CORREGIDO según ABI real
   decodeFunctionResult(functionFragment: "splitPrivateUTXO", data: string): Result;
@@ -1556,6 +2059,10 @@ export interface UTXOVaultInterface {
   decodeFunctionResult(functionFragment: "isTokenRegistered", data: string): Result;
   decodeFunctionResult(functionFragment: "getCurrentNonce", data: string): Result;
   decodeFunctionResult(functionFragment: "authorizedBackend", data: string): Result;
+  decodeFunctionResult(functionFragment: "calculateDepositDataHash", data: string): Result;
+  decodeFunctionResult(functionFragment: "calculateSplitDataHash", data: string): Result;
+  decodeFunctionResult(functionFragment: "calculateTransferDataHash", data: string): Result;
+  decodeFunctionResult(functionFragment: "calculateWithdrawDataHash", data: string): Result;
 }
 
 /**
@@ -1589,6 +2096,27 @@ export interface UTXOVaultContract {
     params: DepositParams, 
     sender: string
   ): Promise<[boolean, string]>;
+  
+  // Hash calculation functions (pure functions)
+  calculateDepositDataHash(
+    params: DepositParams,
+    sender: string
+  ): Promise<string>;
+  
+  calculateSplitDataHash(
+    params: SplitParams,
+    sender: string
+  ): Promise<string>;
+  
+  calculateTransferDataHash(
+    params: TransferParams,
+    sender: string
+  ): Promise<string>;
+  
+  calculateWithdrawDataHash(
+    params: WithdrawParams,
+    sender: string
+  ): Promise<string>;
   
   // Private UTXO functions - CORREGIDO según ABI real
   depositAsPrivateUTXO: ((
@@ -1662,6 +2190,19 @@ export interface UTXOVaultContract {
 
   // Método para obtener funciones específicas (Ethers v6)
   getFunction(name: string): ethers.BaseContractMethod<any[], any, any>;
+  
+  // Debug function (temporal)
+  debugDataHashCalculation: ((
+    params: DepositParams,
+    sender: string,
+    overrides?: ContractCallOptions
+  ) => Promise<[string, string, string, string, string, string, string]>) & {
+    estimateGas(
+      params: DepositParams,
+      sender: string,
+      overrides?: ContractCallOptions
+    ): Promise<bigint>;
+  };
   
   // Event methods
   on(event: string, listener: (...args: any[]) => void): UTXOVaultContract;

@@ -306,14 +306,7 @@ contract UTXOVault is ReentrancyGuard, Ownable {
         }
         
         // 3. Verificar que el dataHash incluye todos nuestros parámetros
-        bytes32 expectedDataHash = keccak256(abi.encodePacked(
-            params.tokenAddress,
-            params.commitment.x,
-            params.commitment.y,
-            params.nullifierHash,
-            params.amount,
-            sender
-        ));
+        bytes32 expectedDataHash = calculateDepositDataHash(params, sender);
         
         if (params.attestation.dataHash != expectedDataHash) {
             return (false, string(abi.encodePacked(
@@ -568,26 +561,8 @@ contract UTXOVault is ReentrancyGuard, Ownable {
         
         if (keccak256(bytes(params.attestation.operation)) != keccak256("SPLIT")) revert InvalidAttestation();
         
-        // Construir dataHash esperado
-        bytes memory commitmentData = abi.encodePacked(
-            params.inputCommitment.x,
-            params.inputCommitment.y,
-            params.inputNullifier
-        );
-        
-        for (uint256 i = 0; i < params.outputCommitments.length; i++) {
-            commitmentData = abi.encodePacked(
-                commitmentData,
-                params.outputCommitments[i].x,
-                params.outputCommitments[i].y,
-                params.outputNullifiers[i]
-            );
-        }
-        
-        bytes32 expectedDataHash = keccak256(abi.encodePacked(
-            commitmentData,
-            msg.sender
-        ));
+        // Usar función centralizada para calcular dataHash
+        bytes32 expectedDataHash = calculateSplitDataHash(params, msg.sender);
         
         if (params.attestation.dataHash != expectedDataHash) revert InvalidAttestation();
         
@@ -662,15 +637,8 @@ contract UTXOVault is ReentrancyGuard, Ownable {
         
         if (keccak256(bytes(params.attestation.operation)) != keccak256("TRANSFER")) revert InvalidAttestation();
         
-        bytes32 expectedDataHash = keccak256(abi.encodePacked(
-            params.inputCommitment.x,
-            params.inputCommitment.y,
-            params.inputNullifier,
-            params.outputCommitment.x,
-            params.outputCommitment.y,
-            params.outputNullifier,
-            msg.sender
-        ));
+        // Usar función centralizada para calcular dataHash
+        bytes32 expectedDataHash = calculateTransferDataHash(params, msg.sender);
         
         if (params.attestation.dataHash != expectedDataHash) revert InvalidAttestation();
         
@@ -735,13 +703,8 @@ contract UTXOVault is ReentrancyGuard, Ownable {
         
         if (keccak256(bytes(params.attestation.operation)) != keccak256("WITHDRAW")) revert InvalidAttestation();
         
-        bytes32 expectedDataHash = keccak256(abi.encodePacked(
-            params.commitment.x,
-            params.commitment.y,
-            params.nullifierHash,
-            params.revealedAmount,
-            msg.sender
-        ));
+        // Usar función centralizada para calcular dataHash
+        bytes32 expectedDataHash = calculateWithdrawDataHash(params, msg.sender);
         
         if (params.attestation.dataHash != expectedDataHash) revert InvalidAttestation();
         
@@ -898,5 +861,88 @@ contract UTXOVault is ReentrancyGuard, Ownable {
     
     function getCurrentNonce() external view returns (uint256) {
         return lastNonce;
+    }
+    
+    // ========================
+    // FUNCIONES DE CÁLCULO DE HASH CENTRALIZADAS
+    // ========================
+    
+    /**
+     * @dev Calcular dataHash para depósito
+     */
+    function calculateDepositDataHash(
+        DepositParams calldata params,
+        address sender
+    ) public pure returns (bytes32) {
+        return keccak256(abi.encodePacked(
+            params.tokenAddress,
+            params.commitment.x,
+            params.commitment.y,
+            params.nullifierHash,
+            params.amount,
+            sender
+        ));
+    }
+    
+    /**
+     * @dev Calcular dataHash para split
+     */
+    function calculateSplitDataHash(
+        SplitParams calldata params,
+        address sender
+    ) public pure returns (bytes32) {
+        bytes memory commitmentData = abi.encodePacked(
+            params.inputCommitment.x,
+            params.inputCommitment.y,
+            params.inputNullifier
+        );
+        
+        for (uint256 i = 0; i < params.outputCommitments.length; i++) {
+            commitmentData = abi.encodePacked(
+                commitmentData,
+                params.outputCommitments[i].x,
+                params.outputCommitments[i].y,
+                params.outputNullifiers[i]
+            );
+        }
+        
+        return keccak256(abi.encodePacked(
+            commitmentData,
+            sender
+        ));
+    }
+    
+    /**
+     * @dev Calcular dataHash para transfer
+     */
+    function calculateTransferDataHash(
+        TransferParams calldata params,
+        address sender
+    ) public pure returns (bytes32) {
+        return keccak256(abi.encodePacked(
+            params.inputCommitment.x,
+            params.inputCommitment.y,
+            params.inputNullifier,
+            params.outputCommitment.x,
+            params.outputCommitment.y,
+            params.outputNullifier,
+            sender
+        ));
+    }
+    
+    /**
+     * @dev Calcular dataHash para withdraw
+     */
+    function calculateWithdrawDataHash(
+        WithdrawParams calldata params,
+        address sender
+    ) public pure returns (bytes32) {
+        return keccak256(abi.encodePacked(
+            params.commitment.x,
+            params.commitment.y,
+            params.nullifierHash,
+            params.revealedAmount,
+            sender
+        ));
     }
 }

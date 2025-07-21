@@ -8,6 +8,7 @@
   import { WalletProviderType } from '../types/ethereum.types';
   import type { UTXOManagerStats, UTXOManagerConfig } from '../types/utxo.types';
   import type { EOAData } from '../types/ethereum.types';
+  import { calculateDepositDataHash } from '$lib/HashCalculator';
   
   // Types for networks
   type NetworkConfig = {
@@ -75,38 +76,99 @@
 
   onMount(async () => {
     try {
-      // Make test function available globally for console access
+      // Make privateUTXOManager available globally for console access
       if (typeof window !== 'undefined') {
+        (window as any).privateUTXOManager = privateUTXOManager;
         (window as any).runMigrationTest = runMigrationTest;
-        console.log('🧪 Migration test available! Run: await window.runMigrationTest()');
-      }
-
-      // Clear old contract data since we deployed a new one
-      if (typeof window !== 'undefined') {
-        const oldData = localStorage.getItem('private_utxos');
-        if (oldData) {
-          console.log('🗑️ Clearing old contract data...');
-          localStorage.removeItem('private_utxos');
-          localStorage.removeItem('utxo_cache');
-          // Clear any other old keys that might exist
-          Object.keys(localStorage).forEach(key => {
-            if (key.startsWith('utxo_') || key.startsWith('private_utxo_') || key.startsWith('bbs_')) {
-              localStorage.removeItem(key);
-            }
+        
+        // Add hash comparison debug function
+        (window as any).debugHashCalculation = async (
+          tokenAddress: string,
+          commitmentX: string | bigint,
+          commitmentY: string | bigint,
+          nullifierHash: string,
+          amount: string | bigint,
+          sender: string
+        ) => {
+          console.log('🔍 === DEBUG HASH CALCULATION ===');
+          
+          // Ensure consistent types for comparison
+          const normalizedParams = {
+            tokenAddress: tokenAddress,
+            commitmentX: BigInt(commitmentX),
+            commitmentY: BigInt(commitmentY),
+            nullifierHash: nullifierHash,
+            amount: BigInt(amount),
+            sender: sender
+          };
+          
+          console.log('📊 Normalized params:', normalizedParams);
+          
+          // Frontend calculation with explicit types
+          const frontendHash = ethers.keccak256(
+            ethers.solidityPacked(
+              ['address', 'uint256', 'uint256', 'bytes32', 'uint256', 'address'],
+              [
+                normalizedParams.tokenAddress,
+                normalizedParams.commitmentX,
+                normalizedParams.commitmentY,
+                normalizedParams.nullifierHash,
+                normalizedParams.amount,
+                normalizedParams.sender
+              ]
+            )
+          );
+          
+          console.log('📱 Frontend hash (patrón anterior):', frontendHash);
+          
+          // Usar el HashCalculator actualizado con el patrón VERIFICADO
+          const hashResult = calculateDepositDataHash({
+            tokenAddress: normalizedParams.tokenAddress,
+            commitmentX: normalizedParams.commitmentX,
+            commitmentY: normalizedParams.commitmentY,
+            nullifierHash: normalizedParams.nullifierHash,
+            amount: normalizedParams.amount,
+            sender: normalizedParams.sender
           });
-          addNotification('info', 'Cleared old contract data for new deployment');
-        }
+          
+          if (hashResult.success) {
+            console.log('✅ HashCalculator hash (patrón VERIFICADO):', hashResult.hash);
+            
+            // Comparar con el método anterior
+            const match = frontendHash.toLowerCase() === hashResult.hash.toLowerCase();
+            console.log(match ? '✅ Ambos métodos coinciden!' : '⚠️ Métodos difieren - usar el VERIFICADO');
+            
+            if (!match) {
+              console.log('🔍 Comparación de métodos:');
+              console.log('  Método anterior:', frontendHash);
+              console.log('  Método VERIFICADO:', hashResult.hash);
+              console.log('  🎯 Usar el método VERIFICADO que coincide con el contrato');
+            }
+            
+            return { 
+              frontendHash, 
+              verifiedHash: hashResult.hash, 
+              match,
+              shouldUseVerified: !match
+            };
+          } else {
+            console.log('❌ HashCalculator error:', hashResult.error);
+            return { frontendHash, error: hashResult.error };
+          }
+        };
+        
+        console.log('🔍 Hash debug function available: window.debugHashCalculation(tokenAddress, commitmentX, commitmentY, nullifierHash, amount, sender)');
       }
-
-      // Setup event listeners
+        
+      console.log('🔍 Hash debug function available: window.debugHashCalculation(tokenAddress, commitmentX, commitmentY, nullifierHash, amount, sender)');
+      // Setup event listeners - THIS IS CRITICAL for the flow to work
       setupEventListeners();
 
       console.log('🔐 Private UTXO Manager ready - waiting for user interaction');
       addNotification('info', '🚀 Ready! Please follow the steps to get started');
-      
     } catch (error) {
-      console.error('❌ Failed to initialize Private UTXO Manager:', error);
-      addNotification('error', 'Failed to initialize Private UTXO Manager');
+      console.error('Error during onMount initialization:', error);
+      addNotification('error', 'Initialization failed. See console for details.');
     }
   });
 
@@ -1325,46 +1387,6 @@
           </div>
         </div>
       </div>
-      
-    {:else if !isInitialized}
-      <!-- Welcome Screen -->
-      <div class="text-center py-20">
-        <div class="max-w-2xl mx-auto">
-          <h2 class="text-4xl font-bold text-white mb-6">
-            Welcome to UTXO Manager
-          </h2>
-          <p class="text-xl text-gray-300 mb-8">
-            Transform your ERC20 tokens into privacy-preserving UTXOs using modern cryptography
-          </p>
-          
-          <div class="grid md:grid-cols-3 gap-6 mb-8">
-            <div class="bg-white/10 backdrop-blur-sm rounded-lg p-6 border border-white/20">
-              <div class="text-purple-400 text-2xl mb-3">🔒</div>
-              <h3 class="text-white font-semibold mb-2">Privacy First</h3>
-              <p class="text-gray-300 text-sm">Your transactions are private using zero-knowledge proofs</p>
-            </div>
-            
-            <div class="bg-white/10 backdrop-blur-sm rounded-lg p-6 border border-white/20">
-              <div class="text-blue-400 text-2xl mb-3">⚡</div>
-              <h3 class="text-white font-semibold mb-2">UTXO Model</h3>
-              <p class="text-gray-300 text-sm">Efficient transaction model with better privacy and scalability</p>
-            </div>
-            
-            <div class="bg-white/10 backdrop-blur-sm rounded-lg p-6 border border-white/20">
-              <div class="text-green-400 text-2xl mb-3">🔗</div>
-              <h3 class="text-white font-semibold mb-2">ERC20 Compatible</h3>
-              <p class="text-gray-300 text-sm">Use any ERC20 token with seamless conversion to UTXOs</p>
-            </div>
-          </div>
-
-          <button 
-            on:click={initializeLibrary}
-            class="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white px-8 py-3 rounded-lg font-semibold transition-all duration-200 shadow-lg hover:shadow-xl"
-          >
-            Get Started
-          </button>
-        </div>
-      </div>
     {:else if currentStep === 4 && isInitialized}
       <!-- Dashboard -->
       <div class="space-y-8">
@@ -1372,23 +1394,43 @@
         {#if stats}
           <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
             <div class="bg-white/10 backdrop-blur-sm rounded-lg p-6 border border-white/20">
-              <div class="text-pink-400 text-sm font-medium mb-1">Private UTXOs</div>
-              <div class="text-white text-2xl font-bold">{privateUTXOs.length}</div>
+              <div class="flex items-center justify-between">
+                <div>
+                  <p class="text-gray-400 text-sm">Total UTXOs</p>
+                  <p class="text-2xl font-bold text-white">{stats.totalUTXOs}</p>
+                </div>
+                <div class="text-purple-400 text-2xl">📦</div>
+              </div>
             </div>
             
             <div class="bg-white/10 backdrop-blur-sm rounded-lg p-6 border border-white/20">
-              <div class="text-blue-400 text-sm font-medium mb-1">Unique Tokens</div>
-              <div class="text-white text-2xl font-bold">{stats.uniqueTokens}</div>
+              <div class="flex items-center justify-between">
+                <div>
+                  <p class="text-gray-400 text-sm">Available</p>
+                  <p class="text-2xl font-bold text-green-400">{stats.unspentUTXOs}</p>
+                </div>
+                <div class="text-green-400 text-2xl">✅</div>
+              </div>
             </div>
             
             <div class="bg-white/10 backdrop-blur-sm rounded-lg p-6 border border-white/20">
-              <div class="text-green-400 text-sm font-medium mb-1">BN254 UTXOs</div>
-              <div class="text-white text-2xl font-bold">{stats.bn254UTXOs || 0}</div>
+              <div class="flex items-center justify-between">
+                <div>
+                  <p class="text-gray-400 text-sm">Spent</p>
+                  <p class="text-2xl font-bold text-gray-400">{stats.spentUTXOs}</p>
+                </div>
+                <div class="text-gray-400 text-2xl">🔒</div>
+              </div>
             </div>
             
             <div class="bg-white/10 backdrop-blur-sm rounded-lg p-6 border border-white/20">
-              <div class="text-yellow-400 text-sm font-medium mb-1">BN254 Operations</div>
-              <div class="text-white text-2xl font-bold">{stats.bn254Operations || 0}</div>
+              <div class="flex items-center justify-between">
+                <div>
+                  <p class="text-gray-400 text-sm">Operations</p>
+                  <p class="text-2xl font-bold text-blue-400">{stats.bn254Operations}</p>
+                </div>
+                <div class="text-blue-400 text-2xl">⚡</div>
+              </div>
             </div>
           </div>
         {/if}
@@ -1535,7 +1577,26 @@
   
   /* Dark mode optimizations */
   :global(body) {
-    background: #0f0f23;
-    color: white;
+    background-color: #0f0f23;
+    color: #ffffff;
+  }
+  
+  /* Animation improvements */
+  .transition-all {
+    transition: all 0.2s ease-in-out;
+  }
+  
+  /* Glass morphism effects */
+  .backdrop-blur-sm {
+    backdrop-filter: blur(12px);
+  }
+  
+  /* Enhanced shadows */
+  .shadow-lg {
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3), 0 4px 6px -2px rgba(0, 0, 0, 0.2);
+  }
+  
+  .shadow-xl {
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.4), 0 10px 10px -5px rgba(0, 0, 0, 0.3);
   }
 </style>

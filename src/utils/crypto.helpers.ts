@@ -1,6 +1,8 @@
 // src/utils/crypto.helpers.ts
 import { ethers } from 'ethers';
 import { CryptoAdapter } from './crypto.adapter';
+import { calculateCryptoHelperHash } from '../lib/HashCalculator';
+import type { Contract } from 'ethers';
 import type { 
   PedersenCommitment, 
   EqualityProof, 
@@ -18,6 +20,7 @@ import type { BackendAttestation } from '../contracts/UTXOVault.types';
 export class CryptoHelpers {
   private static _isInitialized = false;
   private static _initializationPromise: Promise<boolean> | null = null;
+  private static _contract: Contract | null = null;
   
   // Propiedades de compatibilidad con ZenroomHelpers
   static get isFullCryptoAvailable(): boolean {
@@ -70,6 +73,14 @@ export class CryptoHelpers {
       this._initializationPromise = null;
       return false;
     }
+  }
+
+  /**
+   * Set contract instance for hash validation
+   */
+  static setContract(contract: Contract): void {
+    this._contract = contract;
+    console.log('🏛️ Contract instance set in CryptoHelpers for hash validation');
   }
   
   // =====================================================
@@ -347,13 +358,25 @@ export class CryptoHelpers {
     // 2. Crear nullifier hash
     const nullifierHash = await CryptoAdapter.createNullifierHash(commitment, recipient);
     
-    // 3. Crear data hash para attestation
-    const dataHash = ethers.keccak256(
-      ethers.solidityPacked(
-        ['address', 'uint256', 'uint256', 'bytes32', 'uint256', 'address'],
-        [tokenAddress, commitment.x, commitment.y, nullifierHash, value, recipient]
-      )
-    );
+    // 3. Crear data hash para attestation usando FUNCIÓN CENTRALIZADA CON VALIDACIÓN
+    console.log('🔍 Using CENTRALIZED hash calculator in CryptoHelpers...');
+    
+    let dataHash: string;
+    try {
+      dataHash = calculateCryptoHelperHash(
+        tokenAddress,
+        commitment,
+        nullifierHash,
+        value,
+        recipient
+      );
+    } catch (error) {
+      console.error('❌ CRITICAL: CryptoHelpers hash validation failed:', error);
+      // STOP THE ENTIRE FLOW - this is a critical error
+      throw new Error(`CryptoHelpers hash validation failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    
+    console.log('✅ Hash calculated and validated by CryptoHelpers:', dataHash);
     
     // 4. Crear attestation
     const nonce = await this.getNextNonce();
