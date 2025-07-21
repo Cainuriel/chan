@@ -13,24 +13,50 @@ const ERROR_INFO = {
   contractAddress: '0xfFc0B9175A53F98bE81e59bF0C3bf93DAe2d3260' // Alastria desde .env
 };
 
-// 🚨 DATOS REALES CAPTURADOS DE LA APLICACIÓN (NUEVOS)
+// 🚨 DATOS REALES CAPTURADOS DE LA APLICACIÓN (NUEVOS - PROBLEMA ENCONTRADO)
 const REAL_DATA = {
   tokenAddress: '0xB058DadED40d0a020a492cE5Ed3eB368A78e6497',
-  commitmentX: '40164952100054088644172368984195258984582003648151981270050510730406419927508',
-  commitmentY: '113001430366289626739174943439038331009376033485666511518297397630463826450746',
-  nullifierHash: '0xbc8b2b6d374ff6ce1780dfcceaa347e9029ad6646756f2da01aed99243203c4c',
-  amount: '1000000000',
+  commitmentX: '33328068764261947090086695116018393458387350780185549786357764171789283296385',
+  commitmentY: '35420491854987331529841883611583123367969004174431800530033953279768513729904',
+  nullifierHash: '0xffecb93b249e02134289671d3ada4e84a54d5bf44b0c9c6aca302e9fafba4328',
+  amount: '5000000000',
   sender: '0x86DF4B738D592c31F4A9A657D6c8d6D05DC1D462'
 };
 
-// Hash que calculó el frontend según los datos capturados (NUEVO)
-const FRONTEND_CALCULATED_HASH = '0xa191a069f75c1235d00b696fa649cecfd84b66a1bd5b6b94b608796f22da9b2b';
+// 🚨 DATOS QUE REALMENTE SE ENVÍAN AL CONTRATO (DIFERENTES!)
+const CONTRACT_DATA = {
+  tokenAddress: '0xB058DadED40d0a020a492cE5Ed3eB368A78e6497',
+  commitmentX: '66587332571241682828367850492306361513640920310834748932601118011419370482057',
+  commitmentY: '109805568440526974947966924342243001438265122196475814917601383060199132281380',
+  nullifierHash: '0x6ec354dde84f20999726e070bf4ee5f6d9cd27fd2b13ba78da9d975c86f531e0',
+  amount: '5000000000',
+  sender: '0x86DF4B738D592c31F4A9A657D6c8d6D05DC1D462'
+};
+
+// Attestation data capturada
+const ATTESTATION_DATA = {
+  operation: 'DEPOSIT',
+  dataHash: '0x4581f410a11f189bceb4e437dcc845a702ceb685244e2e92a4008d96a6d0c198',
+  nonce: '1753090321',
+  timestamp: '1753090321364',
+  signature: '0xc1b514905f6c086b13fa5fe9e41e1119bf57418cd56b07491c19c9b5bdd56009671063b8e69fd65836672f7e75c6b6083dbdfe8495fbcd67ceff3330ea0896c51b'
+};
+
+// Hash que calculó el frontend vs lo que espera el contrato
+const FRONTEND_CALCULATED_HASH = '0x4581f410a11f189bceb4e437dcc845a702ceb685244e2e92a4008d96a6d0c198';
+const CONTRACT_EXPECTED_HASH = '0xd93bf5e3c528943389efeb9c0c081fb42f8ab7445a5ccffcdafbfe4379a4aca1';
 
 console.log('🔍 === DEBUG HASH MISMATCH ===\n');
 console.log('📋 Error Info:');
 console.log('  Expected:', ERROR_INFO.expectedHash);
 console.log('  Received:', ERROR_INFO.receivedHash);
 console.log('  Contract:', ERROR_INFO.contractAddress);
+console.log('\n');
+
+console.log('🎯 === PROBLEMA IDENTIFICADO ===');
+console.log('✅ Hash calculation method: CORRECTO');
+console.log('❌ Data inconsistency: Los datos que van al HashCalculator son DIFERENTES a los que van al contrato');
+console.log('🔍 Esto explica por qué los hashes no coinciden');
 console.log('\n');
 
 /**
@@ -80,22 +106,30 @@ async function debugHashMismatch() {
       currentNonce = 0n;
     }
     
-    // 🚨 PRIMERO: Probar con datos reales si están disponibles
+    // 🚨 ANÁLISIS DE INCONSISTENCIA DE DATOS
     if (REAL_DATA.tokenAddress !== 'REPLACE_WITH_REAL_DATA') {
-      console.log('🚨 === TESTING WITH REAL DATA FROM APPLICATION ===\n');
+      console.log('🚨 === ANÁLISIS DE INCONSISTENCIA DE DATOS ===\n');
       
-      console.log('Real data captured:');
+      console.log('📊 Datos que recibe HashCalculator:');
       console.log('  Token:', REAL_DATA.tokenAddress);
       console.log('  CommitmentX:', REAL_DATA.commitmentX);
       console.log('  CommitmentY:', REAL_DATA.commitmentY);
       console.log('  Nullifier:', REAL_DATA.nullifierHash);
       console.log('  Amount:', REAL_DATA.amount);
       console.log('  Sender:', REAL_DATA.sender);
-      console.log('  Frontend calculó:', FRONTEND_CALCULATED_HASH);
       console.log('');
       
-      // Calcular hash con datos reales
-      const realFrontendHash = calculateDepositHash(
+      console.log('📊 Datos que se envían al contrato:');
+      console.log('  Token:', CONTRACT_DATA.tokenAddress);
+      console.log('  CommitmentX:', CONTRACT_DATA.commitmentX);
+      console.log('  CommitmentY:', CONTRACT_DATA.commitmentY);
+      console.log('  Nullifier:', CONTRACT_DATA.nullifierHash);
+      console.log('  Amount:', CONTRACT_DATA.amount);
+      console.log('  Sender:', CONTRACT_DATA.sender);
+      console.log('');
+      
+      // Calcular hash con datos del HashCalculator
+      const realHashCalcHash = calculateDepositHash(
         REAL_DATA.tokenAddress,
         REAL_DATA.commitmentX,
         REAL_DATA.commitmentY,
@@ -104,85 +138,44 @@ async function debugHashMismatch() {
         REAL_DATA.sender
       );
       
-      console.log('📱 Real frontend hash (recalculado):', realFrontendHash);
-      console.log('📱 Real frontend hash (original):', FRONTEND_CALCULATED_HASH);
-      console.log('🔍 ¿Coinciden recalculado vs original?:', realFrontendHash.toLowerCase() === FRONTEND_CALCULATED_HASH.toLowerCase() ? '✅ SÍ' : '❌ NO');
+      // Calcular hash con datos del contrato
+      const contractDataHash = calculateDepositHash(
+        CONTRACT_DATA.tokenAddress,
+        CONTRACT_DATA.commitmentX,
+        CONTRACT_DATA.commitmentY,
+        CONTRACT_DATA.nullifierHash,
+        CONTRACT_DATA.amount,
+        CONTRACT_DATA.sender
+      );
       
-      // 🚨 NUEVA FUNCIÓN: Construir DepositParams completos con BackendAttestation
-      function createDepositParams(data, nonce, dataHash) {
-        return {
-          tokenAddress: data.tokenAddress,
-          commitment: {
-            x: data.commitmentX,
-            y: data.commitmentY
-          },
-          nullifierHash: data.nullifierHash,
-          amount: data.amount,
-          attestation: {
-            operation: "DEPOSIT",
-            dataHash: dataHash,
-            nonce: nonce,
-            timestamp: Math.floor(Date.now() / 1000),
-            signature: "0x" + "00".repeat(65) // Firma dummy para testing
-          }
-        };
+      console.log('🔍 Resultados del análisis:');
+      console.log('📱 Hash con datos de HashCalculator:', realHashCalcHash);
+      console.log('�️ Hash con datos de contrato:', contractDataHash);
+      console.log('📝 Frontend calculó:', FRONTEND_CALCULATED_HASH);
+      console.log('� Contrato esperaba:', CONTRACT_EXPECTED_HASH);
+      console.log('');
+      
+      console.log('✅ Verificaciones:');
+      console.log('HashCalculator vs Frontend:', realHashCalcHash.toLowerCase() === FRONTEND_CALCULATED_HASH.toLowerCase() ? '✅ MATCH' : '❌ NO MATCH');
+      console.log('Contract Data vs Contract Expected:', contractDataHash.toLowerCase() === CONTRACT_EXPECTED_HASH.toLowerCase() ? '✅ MATCH' : '❌ NO MATCH');
+      console.log('');
+      
+      // Identificar las diferencias específicas
+      console.log('� Diferencias encontradas:');
+      if (REAL_DATA.commitmentX !== CONTRACT_DATA.commitmentX) {
+        console.log('❌ CommitmentX es diferente!');
+        console.log('  HashCalculator:', REAL_DATA.commitmentX);
+        console.log('  Contract:', CONTRACT_DATA.commitmentX);
       }
-      
-      // Probar contra contrato con datos reales
-      const realContractParams = createDepositParams(REAL_DATA, currentNonce + 1n, realFrontendHash);
-      
-      try {
-        console.log('\n🏛️ === PROBANDO calculateDepositDataHash ===');
-        const realContractHash = await contract.calculateDepositDataHash(realContractParams, REAL_DATA.sender);
-        console.log('🏛️ Real contract hash:', realContractHash);
-        console.log('📱 Real frontend hash:', realFrontendHash);
-        
-        const match = realFrontendHash.toLowerCase() === realContractHash.toLowerCase();
-        console.log('🎯 Real data match:', match ? '✅ YES' : '❌ NO');
-        
-        if (realContractHash === ERROR_INFO.expectedHash) {
-          console.log('🎉 ✅ REAL CONTRACT HASH MATCHES EXPECTED HASH!');
-        }
-        if (realContractHash === ERROR_INFO.receivedHash) {
-          console.log('🎉 ✅ REAL CONTRACT HASH MATCHES RECEIVED HASH!');
-        }
-        
-      } catch (error) {
-        console.log('❌ Real contract calculateDepositDataHash failed:', error.message);
+      if (REAL_DATA.commitmentY !== CONTRACT_DATA.commitmentY) {
+        console.log('❌ CommitmentY es diferente!');
+        console.log('  HashCalculator:', REAL_DATA.commitmentY);
+        console.log('  Contract:', CONTRACT_DATA.commitmentY);
       }
-      
-      try {
-        console.log('\n🔍 === PROBANDO validateDepositParams ===');
-        const [isValid, errorMessage] = await contract.validateDepositParams(realContractParams, REAL_DATA.sender);
-        
-        console.log('Validation result:');
-        console.log('  ✅ Valid:', isValid);
-        console.log('  📝 Message:', errorMessage);
-        
-        if (!isValid) {
-          console.log('🚨 ¡VALIDACIÓN FALLÓ! Mensaje:', errorMessage);
-        } else {
-          console.log('🎉 ¡VALIDACIÓN EXITOSA!');
-        }
-        
-      } catch (error) {
-        console.log('❌ validateDepositParams failed:', error.message);
-        console.log('🔍 Esto puede indicar problemas con la firma o los parámetros');
-      }
-      
-      // También probar con el hash que calculó originalmente el frontend
-      if (realFrontendHash.toLowerCase() !== FRONTEND_CALCULATED_HASH.toLowerCase()) {
-        console.log('\n🧪 === PROBANDO CON HASH ORIGINAL DEL FRONTEND ===');
-        const originalContractParams = createDepositParams(REAL_DATA, currentNonce + 1n, FRONTEND_CALCULATED_HASH);
-        
-        try {
-          const [isValidOriginal, errorMessageOriginal] = await contract.validateDepositParams(originalContractParams, REAL_DATA.sender);
-          console.log('Validation with original frontend hash:');
-          console.log('  ✅ Valid:', isValidOriginal);
-          console.log('  📝 Message:', errorMessageOriginal);
-        } catch (error) {
-          console.log('❌ validateDepositParams with original hash failed:', error.message);
-        }
+      if (REAL_DATA.nullifierHash !== CONTRACT_DATA.nullifierHash) {
+        console.log('❌ NullifierHash es diferente!');
+        console.log('  HashCalculator:', REAL_DATA.nullifierHash);
+        console.log('  Contract:', CONTRACT_DATA.nullifierHash);
       }
       
       console.log('\n' + '='.repeat(60) + '\n');
