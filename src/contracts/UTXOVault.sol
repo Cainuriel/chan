@@ -130,13 +130,16 @@ contract UTXOVault is UTXOVaultBase, ReentrancyGuard {
         IERC20(params.tokenAddress).transferFrom(msg.sender, address(this), params.amount);
         
         // Crear UTXO
-        _createUTXO(
+        bytes32 utxoId = _createUTXO(
             params.commitment,
             params.tokenAddress,
             params.nullifierHash,
             UTXOType.DEPOSIT,
             bytes32(0)
         );
+        
+        // NUEVO: Almacenar la attestation
+        _storeAttestation(utxoId, params.attestation, msg.sender);
     }
     
     /**
@@ -303,6 +306,9 @@ contract UTXOVault is UTXOVaultBase, ReentrancyGuard {
                 UTXOType.SPLIT,
                 inputUTXOId
             );
+            
+            // NUEVO: Almacenar attestation para cada UTXO de salida
+            _storeAttestation(outputUTXOIds[i], params.attestation, msg.sender);
         }
         
         // Preparar evento
@@ -377,6 +383,9 @@ contract UTXOVault is UTXOVaultBase, ReentrancyGuard {
             inputUTXOId
         );
         
+        // NUEVO: Almacenar la attestation
+        _storeAttestation(outputUTXOId, params.attestation, msg.sender);
+        
         emit PrivateTransfer(
             _hashCommitment(params.inputCommitment),
             _hashCommitment(params.outputCommitment),
@@ -433,6 +442,9 @@ contract UTXOVault is UTXOVaultBase, ReentrancyGuard {
         // Marcar como gastado
         utxos[utxoId].isSpent = true;
         nullifiers[params.nullifierHash] = true;
+        
+        // NUEVO: Almacenar la attestation del withdraw
+        _storeAttestation(utxoId, params.attestation, msg.sender);
         
         // Transferir tokens
         address tokenAddress = utxos[utxoId].tokenAddress;

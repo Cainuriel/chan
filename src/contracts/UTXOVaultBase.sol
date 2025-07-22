@@ -131,6 +131,12 @@ abstract contract UTXOVaultBase is Ownable {
     // Commitment tracking
     mapping(bytes32 => bytes32) internal commitmentHashToUTXO;
     
+    // NUEVO: Almacenamiento de Attestations
+    mapping(bytes32 => BackendAttestation) internal attestations;     // utxoId -> attestation
+    mapping(bytes32 => bytes32) internal utxoToAttestation;          // utxoId -> attestation hash
+    mapping(bytes32 => bool) internal attestationHashes;            // attestation hash -> exists
+    mapping(address => bytes32[]) internal userAttestations;        // user -> array de attestation hashes
+    
     // Token registry
     mapping(address => bool) public registeredTokens;
     address[] public allRegisteredTokens;
@@ -158,6 +164,16 @@ abstract contract UTXOVaultBase is Ownable {
         address indexed tokenAddress,
         bytes32 nullifierHash,
         UTXOType utxoType,
+        uint256 timestamp
+    );
+    
+    // NUEVO: Evento para attestations almacenadas
+    event AttestationStored(
+        bytes32 indexed utxoId,
+        bytes32 indexed attestationHash,
+        address indexed user,
+        string operation,
+        uint256 nonce,
         uint256 timestamp
     );
     
@@ -367,6 +383,194 @@ abstract contract UTXOVaultBase is Ownable {
         });
         
         return details;
+    }
+    
+    // ========================
+    // FUNCIONES VIEW - CONSULTAS DE ATTESTATIONS
+    // ========================
+    
+    /**
+     * @notice Obtiene la attestation de un UTXO específico
+     */
+    function getUTXOAttestation(bytes32 utxoId) external view returns (
+        bool exists,
+        string memory operation,
+        bytes32 dataHash,
+        uint256 nonce,
+        uint256 timestamp,
+        bytes memory signature
+    ) {
+        bytes32 attestationHash = utxoToAttestation[utxoId];
+        if (attestationHash == bytes32(0)) {
+            return (false, "", bytes32(0), 0, 0, "");
+        }
+        
+        BackendAttestation storage attestation = attestations[utxoId];
+        return (
+            true,
+            attestation.operation,
+            attestation.dataHash,
+            attestation.nonce,
+            attestation.timestamp,
+            attestation.signature
+        );
+    }
+    
+    /**
+     * @notice Obtiene todas las attestations de un usuario
+     */
+    function getUserAttestations(address user) external view returns (
+        bytes32[] memory _attestationHashes,
+        string[] memory operations,
+        uint256[] memory nonces,
+        uint256[] memory timestamps
+    ) {
+        bytes32[] storage userAttestationHashes = userAttestations[user];
+        uint256 length = userAttestationHashes.length;
+        
+        _attestationHashes = new bytes32[](length);
+        operations = new string[](length);
+        nonces = new uint256[](length);
+        timestamps = new uint256[](length);
+        
+        for (uint256 i = 0; i < length; i++) {
+            bytes32 attestationHash = userAttestationHashes[i];
+            // Buscar el UTXO que corresponde a esta attestation
+            bytes32 utxoId = _findUTXOByAttestationHash(attestationHash);
+            if (utxoId != bytes32(0)) {
+                BackendAttestation storage attestation = attestations[utxoId];
+                _attestationHashes[i] = attestationHash;
+                operations[i] = attestation.operation;
+                nonces[i] = attestation.nonce;
+                timestamps[i] = attestation.timestamp;
+            }
+        }
+    }
+    
+    /**
+     * @notice Verifica si una attestation hash existe
+     */
+    function attestationExists(bytes32 attestationHash) external view returns (bool) {
+        return attestationHashes[attestationHash];
+    }
+    
+    /**
+     * @notice Obtiene el hash de la attestation de un UTXO
+     */
+    function getUTXOAttestationHash(bytes32 utxoId) external view returns (bytes32) {
+        return utxoToAttestation[utxoId];
+    }
+    
+    /**
+     * @notice Calcula el hash de una attestation
+     */
+    function calculateAttestationHash(
+        string memory operation,
+        bytes32 dataHash,
+        uint256 nonce,
+        uint256 timestamp,
+        bytes memory signature
+    ) public pure returns (bytes32) {
+        return keccak256(abi.encodePacked(
+            operation,
+            dataHash,
+            nonce,
+            timestamp,
+            signature
+        ));
+    }
+    
+    /**
+     * @notice Función mejorada que incluye información de attestation
+     */
+    function getUTXODetailsWithAttestation(bytes32 commitmentHash) external view returns (
+        UTXODetails memory details,
+        bool hasAttestation,
+        string memory operation,
+        uint256 attestationNonce,
+        uint256 attestationTimestamp
+    ) {
+        bytes32 utxoId = commitmentHashToUTXO[commitmentHash];
+        PrivateUTXO storage utxo = utxos[utxoId];
+        
+        details = UTXODetails({
+            exists: utxo.exists,
+            tokenAddress: utxo.tokenAddress,
+            timestamp: utxo.timestamp,
+            isSpent: utxo.isSpent,
+            parentUTXO: utxo.parentUTXO,
+            utxoType: utxo.utxoType,
+            blockNumber: utxo.blockNumber,
+            owner: utxoToUser[commitmentHash]
+        });
+        
+        // Información de attestation
+        bytes32 attestationHash = utxoToAttestation[utxoId];
+        if (attestationHash != bytes32(0)) {
+            BackendAttestation storage attestation = attestations[utxoId];
+            hasAttestation = true;
+            operation = attestation.operation;
+            attestationNonce = attestation.nonce;
+            attestationTimestamp = attestation.timestamp;
+        } else {
+            hasAttestation = false;
+            operation = "";
+            attestationNonce = 0;
+            attestationTimestamp = 0;
+        }
+        
+        return (details, hasAttestation, operation, attestationNonce, attestationTimestamp);
+    }
+    
+    /**
+     * @notice Función auxiliar interna para buscar UTXO por attestation hash
+     */
+    function _findUTXOByAttestationHash(bytes32 attestationHash) internal view returns (bytes32) {
+        // Esta es una función costosa, pero necesaria para las consultas
+        // En producción se podría optimizar con un mapping adicional
+        for (uint256 i = 1; i < nextUTXOId; i++) {
+            bytes32 utxoId = bytes32(i);
+            if (utxoToAttestation[utxoId] == attestationHash) {
+                return utxoId;
+            }
+        }
+        return bytes32(0);
+    }
+    
+    /**
+     * @notice Función auxiliar para almacenar attestation (interna)
+     */
+    function _storeAttestation(
+        bytes32 utxoId,
+        BackendAttestation memory attestation,
+        address user
+    ) internal {
+        // Calcular hash de la attestation
+        bytes32 attestationHash = calculateAttestationHash(
+            attestation.operation,
+            attestation.dataHash,
+            attestation.nonce,
+            attestation.timestamp,
+            attestation.signature
+        );
+        
+        // Guardar la attestation
+        attestations[utxoId] = attestation;
+        utxoToAttestation[utxoId] = attestationHash;
+        attestationHashes[attestationHash] = true;
+        
+        // Agregar a la lista del usuario
+        userAttestations[user].push(attestationHash);
+        
+        // Emitir evento
+        emit AttestationStored(
+            utxoId,
+            attestationHash,
+            user,
+            attestation.operation,
+            attestation.nonce,
+            attestation.timestamp
+        );
     }
     
     // ========================
