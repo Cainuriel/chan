@@ -58,6 +58,20 @@ export interface WithdrawParams {
   revealedAmount: bigint; // uint256
   attestation: BackendAttestation;
 }
+
+/**
+ * Struct para detalles de UTXO (nuevo en el contrato actualizado)
+ */
+export interface UTXODetails {
+  exists: boolean;
+  tokenAddress: string;
+  timestamp: bigint;
+  isSpent: boolean;
+  parentUTXO: string; // bytes32
+  utxoType: number; // enum UTXOType
+  blockNumber: bigint;
+  owner: string;
+}
 /**
  * @fileoverview TypeScript type definitions for UTXOVault smart contract (simplified)
  * @description Types, ABI, and interfaces for simplified UTXOVault contract interaction
@@ -437,7 +451,17 @@ export const UTXO_VAULT_ABI =
 	},
 	{
 		"inputs": [],
+		"name": "InvalidArrayLength",
+		"type": "error"
+	},
+	{
+		"inputs": [],
 		"name": "InvalidAttestation",
+		"type": "error"
+	},
+	{
+		"inputs": [],
+		"name": "InvalidCommitment",
 		"type": "error"
 	},
 	{
@@ -648,7 +672,7 @@ export const UTXO_VAULT_ABI =
 			},
 			{
 				"indexed": false,
-				"internalType": "enum UTXOVault.UTXOType",
+				"internalType": "enum UTXOVaultBase.UTXOType",
 				"name": "utxoType",
 				"type": "uint8"
 			},
@@ -772,7 +796,7 @@ export const UTXO_VAULT_ABI =
 								"type": "uint256"
 							}
 						],
-						"internalType": "struct UTXOVault.CommitmentPoint",
+						"internalType": "struct UTXOVaultBase.CommitmentPoint",
 						"name": "commitment",
 						"type": "tuple"
 					},
@@ -814,19 +838,30 @@ export const UTXO_VAULT_ABI =
 								"type": "bytes"
 							}
 						],
-						"internalType": "struct UTXOVault.BackendAttestation",
+						"internalType": "struct UTXOVaultBase.BackendAttestation",
 						"name": "attestation",
 						"type": "tuple"
 					}
 				],
-				"internalType": "struct UTXOVault.DepositParams",
+				"internalType": "struct UTXOVaultBase.DepositParams",
 				"name": "params",
 				"type": "tuple"
+			},
+			{
+				"internalType": "address",
+				"name": "sender",
+				"type": "address"
 			}
 		],
-		"name": "depositAsPrivateUTXO",
-		"outputs": [],
-		"stateMutability": "nonpayable",
+		"name": "calculateDepositDataHash",
+		"outputs": [
+			{
+				"internalType": "bytes32",
+				"name": "",
+				"type": "bytes32"
+			}
+		],
+		"stateMutability": "pure",
 		"type": "function"
 	},
 	{
@@ -834,43 +869,288 @@ export const UTXO_VAULT_ABI =
 			{
 				"components": [
 					{
-						"internalType": "uint256",
-						"name": "x",
-						"type": "uint256"
+						"components": [
+							{
+								"internalType": "uint256",
+								"name": "x",
+								"type": "uint256"
+							},
+							{
+								"internalType": "uint256",
+								"name": "y",
+								"type": "uint256"
+							}
+						],
+						"internalType": "struct UTXOVaultBase.CommitmentPoint",
+						"name": "inputCommitment",
+						"type": "tuple"
 					},
 					{
-						"internalType": "uint256",
-						"name": "y",
-						"type": "uint256"
+						"components": [
+							{
+								"internalType": "uint256",
+								"name": "x",
+								"type": "uint256"
+							},
+							{
+								"internalType": "uint256",
+								"name": "y",
+								"type": "uint256"
+							}
+						],
+						"internalType": "struct UTXOVaultBase.CommitmentPoint[]",
+						"name": "outputCommitments",
+						"type": "tuple[]"
+					},
+					{
+						"internalType": "bytes32",
+						"name": "inputNullifier",
+						"type": "bytes32"
+					},
+					{
+						"internalType": "bytes32[]",
+						"name": "outputNullifiers",
+						"type": "bytes32[]"
+					},
+					{
+						"components": [
+							{
+								"internalType": "string",
+								"name": "operation",
+								"type": "string"
+							},
+							{
+								"internalType": "bytes32",
+								"name": "dataHash",
+								"type": "bytes32"
+							},
+							{
+								"internalType": "uint256",
+								"name": "nonce",
+								"type": "uint256"
+							},
+							{
+								"internalType": "uint256",
+								"name": "timestamp",
+								"type": "uint256"
+							},
+							{
+								"internalType": "bytes",
+								"name": "signature",
+								"type": "bytes"
+							}
+						],
+						"internalType": "struct UTXOVaultBase.BackendAttestation",
+						"name": "attestation",
+						"type": "tuple"
 					}
 				],
-				"internalType": "struct UTXOVault.CommitmentPoint",
-				"name": "commitment",
+				"internalType": "struct UTXOVaultBase.SplitParams",
+				"name": "params",
 				"type": "tuple"
+			},
+			{
+				"internalType": "address",
+				"name": "sender",
+				"type": "address"
 			}
 		],
-		"name": "doesCommitmentExist",
+		"name": "calculateSplitDataHash",
 		"outputs": [
 			{
-				"internalType": "bool",
+				"internalType": "bytes32",
 				"name": "",
-				"type": "bool"
+				"type": "bytes32"
 			}
 		],
-		"stateMutability": "view",
+		"stateMutability": "pure",
 		"type": "function"
 	},
 	{
-		"inputs": [],
-		"name": "getCurrentNonce",
-		"outputs": [
+		"inputs": [
 			{
-				"internalType": "uint256",
-				"name": "",
-				"type": "uint256"
+				"components": [
+					{
+						"components": [
+							{
+								"internalType": "uint256",
+								"name": "x",
+								"type": "uint256"
+							},
+							{
+								"internalType": "uint256",
+								"name": "y",
+								"type": "uint256"
+							}
+						],
+						"internalType": "struct UTXOVaultBase.CommitmentPoint",
+						"name": "inputCommitment",
+						"type": "tuple"
+					},
+					{
+						"components": [
+							{
+								"internalType": "uint256",
+								"name": "x",
+								"type": "uint256"
+							},
+							{
+								"internalType": "uint256",
+								"name": "y",
+								"type": "uint256"
+							}
+						],
+						"internalType": "struct UTXOVaultBase.CommitmentPoint",
+						"name": "outputCommitment",
+						"type": "tuple"
+					},
+					{
+						"internalType": "bytes32",
+						"name": "inputNullifier",
+						"type": "bytes32"
+					},
+					{
+						"internalType": "bytes32",
+						"name": "outputNullifier",
+						"type": "bytes32"
+					},
+					{
+						"components": [
+							{
+								"internalType": "string",
+								"name": "operation",
+								"type": "string"
+							},
+							{
+								"internalType": "bytes32",
+								"name": "dataHash",
+								"type": "bytes32"
+							},
+							{
+								"internalType": "uint256",
+								"name": "nonce",
+								"type": "uint256"
+							},
+							{
+								"internalType": "uint256",
+								"name": "timestamp",
+								"type": "uint256"
+							},
+							{
+								"internalType": "bytes",
+								"name": "signature",
+								"type": "bytes"
+							}
+						],
+						"internalType": "struct UTXOVaultBase.BackendAttestation",
+						"name": "attestation",
+						"type": "tuple"
+					}
+				],
+				"internalType": "struct UTXOVaultBase.TransferParams",
+				"name": "params",
+				"type": "tuple"
+			},
+			{
+				"internalType": "address",
+				"name": "sender",
+				"type": "address"
 			}
 		],
-		"stateMutability": "view",
+		"name": "calculateTransferDataHash",
+		"outputs": [
+			{
+				"internalType": "bytes32",
+				"name": "",
+				"type": "bytes32"
+			}
+		],
+		"stateMutability": "pure",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"components": [
+					{
+						"components": [
+							{
+								"internalType": "uint256",
+								"name": "x",
+								"type": "uint256"
+							},
+							{
+								"internalType": "uint256",
+								"name": "y",
+								"type": "uint256"
+							}
+						],
+						"internalType": "struct UTXOVaultBase.CommitmentPoint",
+						"name": "commitment",
+						"type": "tuple"
+					},
+					{
+						"internalType": "bytes32",
+						"name": "nullifierHash",
+						"type": "bytes32"
+					},
+					{
+						"internalType": "uint256",
+						"name": "revealedAmount",
+						"type": "uint256"
+					},
+					{
+						"components": [
+							{
+								"internalType": "string",
+								"name": "operation",
+								"type": "string"
+							},
+							{
+								"internalType": "bytes32",
+								"name": "dataHash",
+								"type": "bytes32"
+							},
+							{
+								"internalType": "uint256",
+								"name": "nonce",
+								"type": "uint256"
+							},
+							{
+								"internalType": "uint256",
+								"name": "timestamp",
+								"type": "uint256"
+							},
+							{
+								"internalType": "bytes",
+								"name": "signature",
+								"type": "bytes"
+							}
+						],
+						"internalType": "struct UTXOVaultBase.BackendAttestation",
+						"name": "attestation",
+						"type": "tuple"
+					}
+				],
+				"internalType": "struct UTXOVaultBase.WithdrawParams",
+				"name": "params",
+				"type": "tuple"
+			},
+			{
+				"internalType": "address",
+				"name": "sender",
+				"type": "address"
+			}
+		],
+		"name": "calculateWithdrawDataHash",
+		"outputs": [
+			{
+				"internalType": "bytes32",
+				"name": "",
+				"type": "bytes32"
+			}
+		],
+		"stateMutability": "pure",
 		"type": "function"
 	},
 	{
@@ -895,7 +1175,7 @@ export const UTXO_VAULT_ABI =
 								"type": "uint256"
 							}
 						],
-						"internalType": "struct UTXOVault.CommitmentPoint",
+						"internalType": "struct UTXOVaultBase.CommitmentPoint",
 						"name": "commitment",
 						"type": "tuple"
 					},
@@ -937,60 +1217,127 @@ export const UTXO_VAULT_ABI =
 								"type": "bytes"
 							}
 						],
-						"internalType": "struct UTXOVault.BackendAttestation",
+						"internalType": "struct UTXOVaultBase.BackendAttestation",
 						"name": "attestation",
 						"type": "tuple"
 					}
 				],
-				"internalType": "struct UTXOVault.DepositParams",
+				"internalType": "struct UTXOVaultBase.DepositParams",
 				"name": "params",
 				"type": "tuple"
+			}
+		],
+		"name": "depositAsPrivateUTXO",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"components": [
+					{
+						"internalType": "uint256",
+						"name": "x",
+						"type": "uint256"
+					},
+					{
+						"internalType": "uint256",
+						"name": "y",
+						"type": "uint256"
+					}
+				],
+				"internalType": "struct UTXOVaultBase.CommitmentPoint",
+				"name": "commitment",
+				"type": "tuple"
+			}
+		],
+		"name": "doesCommitmentExist",
+		"outputs": [
+			{
+				"internalType": "bool",
+				"name": "",
+				"type": "bool"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "emergencyPaused",
+		"outputs": [
+			{
+				"internalType": "bool",
+				"name": "",
+				"type": "bool"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "address",
+				"name": "token",
+				"type": "address"
+			},
+			{
+				"internalType": "uint256",
+				"name": "amount",
+				"type": "uint256"
+			}
+		],
+		"name": "emergencyWithdraw",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "getContractStats",
+		"outputs": [
+			{
+				"internalType": "uint256",
+				"name": "totalUTXOs",
+				"type": "uint256"
+			},
+			{
+				"internalType": "uint256",
+				"name": "totalTokens",
+				"type": "uint256"
+			},
+			{
+				"internalType": "uint256",
+				"name": "currentNonce",
+				"type": "uint256"
 			},
 			{
 				"internalType": "address",
-				"name": "sender",
+				"name": "backend",
 				"type": "address"
+			},
+			{
+				"internalType": "bool",
+				"name": "isPaused",
+				"type": "bool"
 			}
 		],
-		"name": "debugDataHashCalculation",
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "getCurrentNonce",
 		"outputs": [
 			{
-				"internalType": "string",
-				"name": "tokenAddr",
-				"type": "string"
-			},
-			{
-				"internalType": "string",
-				"name": "commitX",
-				"type": "string"
-			},
-			{
-				"internalType": "string",
-				"name": "commitY",
-				"type": "string"
-			},
-			{
-				"internalType": "string",
-				"name": "nullifier",
-				"type": "string"
-			},
-			{
-				"internalType": "string",
-				"name": "amount",
-				"type": "string"
-			},
-			{
-				"internalType": "string",
-				"name": "senderAddr",
-				"type": "string"
-			},
-			{
-				"internalType": "bytes32",
-				"name": "calculatedHash",
-				"type": "bytes32"
+				"internalType": "uint256",
+				"name": "",
+				"type": "uint256"
 			}
 		],
-		"stateMutability": "pure",
+		"stateMutability": "view",
 		"type": "function"
 	},
 	{
@@ -1001,6 +1348,25 @@ export const UTXO_VAULT_ABI =
 				"internalType": "address[]",
 				"name": "",
 				"type": "address[]"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "address",
+				"name": "token",
+				"type": "address"
+			}
+		],
+		"name": "getTokenBalance",
+		"outputs": [
+			{
+				"internalType": "uint256",
+				"name": "",
+				"type": "uint256"
 			}
 		],
 		"stateMutability": "view",
@@ -1021,7 +1387,7 @@ export const UTXO_VAULT_ABI =
 						"type": "uint256"
 					}
 				],
-				"internalType": "struct UTXOVault.CommitmentPoint",
+				"internalType": "struct UTXOVaultBase.CommitmentPoint",
 				"name": "commitment",
 				"type": "tuple"
 			}
@@ -1032,6 +1398,67 @@ export const UTXO_VAULT_ABI =
 				"internalType": "bytes32",
 				"name": "",
 				"type": "bytes32"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "bytes32",
+				"name": "commitmentHash",
+				"type": "bytes32"
+			}
+		],
+		"name": "getUTXODetails",
+		"outputs": [
+			{
+				"components": [
+					{
+						"internalType": "bool",
+						"name": "exists",
+						"type": "bool"
+					},
+					{
+						"internalType": "address",
+						"name": "tokenAddress",
+						"type": "address"
+					},
+					{
+						"internalType": "uint256",
+						"name": "timestamp",
+						"type": "uint256"
+					},
+					{
+						"internalType": "bool",
+						"name": "isSpent",
+						"type": "bool"
+					},
+					{
+						"internalType": "bytes32",
+						"name": "parentUTXO",
+						"type": "bytes32"
+					},
+					{
+						"internalType": "enum UTXOVaultBase.UTXOType",
+						"name": "utxoType",
+						"type": "uint8"
+					},
+					{
+						"internalType": "uint256",
+						"name": "blockNumber",
+						"type": "uint256"
+					},
+					{
+						"internalType": "address",
+						"name": "owner",
+						"type": "address"
+					}
+				],
+				"internalType": "struct UTXOVaultBase.UTXODetails",
+				"name": "details",
+				"type": "tuple"
 			}
 		],
 		"stateMutability": "view",
@@ -1078,7 +1505,7 @@ export const UTXO_VAULT_ABI =
 				"type": "bytes32"
 			},
 			{
-				"internalType": "enum UTXOVault.UTXOType",
+				"internalType": "enum UTXOVaultBase.UTXOType",
 				"name": "utxoType",
 				"type": "uint8"
 			},
@@ -1086,6 +1513,107 @@ export const UTXO_VAULT_ABI =
 				"internalType": "uint256",
 				"name": "blockNumber",
 				"type": "uint256"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "bytes32",
+				"name": "commitmentHash",
+				"type": "bytes32"
+			}
+		],
+		"name": "getUTXOOwner",
+		"outputs": [
+			{
+				"internalType": "address",
+				"name": "",
+				"type": "address"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "address",
+				"name": "user",
+				"type": "address"
+			}
+		],
+		"name": "getUserUTXOCount",
+		"outputs": [
+			{
+				"internalType": "uint256",
+				"name": "",
+				"type": "uint256"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "address",
+				"name": "user",
+				"type": "address"
+			}
+		],
+		"name": "getUserUTXOs",
+		"outputs": [
+			{
+				"internalType": "bytes32[]",
+				"name": "commitments",
+				"type": "bytes32[]"
+			},
+			{
+				"internalType": "bool[]",
+				"name": "spentStatus",
+				"type": "bool[]"
+			},
+			{
+				"internalType": "address[]",
+				"name": "tokens",
+				"type": "address[]"
+			},
+			{
+				"internalType": "uint256[]",
+				"name": "timestamps",
+				"type": "uint256[]"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "address",
+				"name": "user",
+				"type": "address"
+			}
+		],
+		"name": "getUserUnspentUTXOs",
+		"outputs": [
+			{
+				"internalType": "bytes32[]",
+				"name": "commitments",
+				"type": "bytes32[]"
+			},
+			{
+				"internalType": "address[]",
+				"name": "tokens",
+				"type": "address[]"
+			},
+			{
+				"internalType": "uint256[]",
+				"name": "timestamps",
+				"type": "uint256[]"
 			}
 		],
 		"stateMutability": "view",
@@ -1130,6 +1658,30 @@ export const UTXO_VAULT_ABI =
 		"type": "function"
 	},
 	{
+		"inputs": [
+			{
+				"internalType": "address",
+				"name": "user",
+				"type": "address"
+			},
+			{
+				"internalType": "bytes32",
+				"name": "commitmentHash",
+				"type": "bytes32"
+			}
+		],
+		"name": "isUserUTXO",
+		"outputs": [
+			{
+				"internalType": "bool",
+				"name": "",
+				"type": "bool"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
 		"inputs": [],
 		"name": "lastNonce",
 		"outputs": [
@@ -1150,6 +1702,113 @@ export const UTXO_VAULT_ABI =
 				"internalType": "address",
 				"name": "",
 				"type": "address"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "bytes32",
+				"name": "sourceCommitment",
+				"type": "bytes32"
+			},
+			{
+				"internalType": "bytes32[]",
+				"name": "outputCommitments",
+				"type": "bytes32[]"
+			},
+			{
+				"internalType": "bytes32",
+				"name": "sourceNullifier",
+				"type": "bytes32"
+			}
+		],
+		"name": "preValidateSplit",
+		"outputs": [
+			{
+				"internalType": "bool",
+				"name": "isValid",
+				"type": "bool"
+			},
+			{
+				"internalType": "uint8",
+				"name": "errorCode",
+				"type": "uint8"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "bytes32",
+				"name": "sourceCommitment",
+				"type": "bytes32"
+			},
+			{
+				"internalType": "bytes32",
+				"name": "sourceNullifier",
+				"type": "bytes32"
+			},
+			{
+				"internalType": "bytes32",
+				"name": "outputCommitment",
+				"type": "bytes32"
+			}
+		],
+		"name": "preValidateTransfer",
+		"outputs": [
+			{
+				"internalType": "bool",
+				"name": "isValid",
+				"type": "bool"
+			},
+			{
+				"internalType": "uint8",
+				"name": "errorCode",
+				"type": "uint8"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "bytes32",
+				"name": "sourceCommitment",
+				"type": "bytes32"
+			},
+			{
+				"internalType": "bytes32",
+				"name": "sourceNullifier",
+				"type": "bytes32"
+			},
+			{
+				"internalType": "uint256",
+				"name": "amount",
+				"type": "uint256"
+			},
+			{
+				"internalType": "address",
+				"name": "recipient",
+				"type": "address"
+			}
+		],
+		"name": "preValidateWithdraw",
+		"outputs": [
+			{
+				"internalType": "bool",
+				"name": "isValid",
+				"type": "bool"
+			},
+			{
+				"internalType": "uint8",
+				"name": "errorCode",
+				"type": "uint8"
 			}
 		],
 		"stateMutability": "view",
@@ -1184,6 +1843,19 @@ export const UTXO_VAULT_ABI =
 	{
 		"inputs": [
 			{
+				"internalType": "bool",
+				"name": "paused",
+				"type": "bool"
+			}
+		],
+		"name": "setEmergencyPause",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
 				"components": [
 					{
 						"components": [
@@ -1198,7 +1870,7 @@ export const UTXO_VAULT_ABI =
 								"type": "uint256"
 							}
 						],
-						"internalType": "struct UTXOVault.CommitmentPoint",
+						"internalType": "struct UTXOVaultBase.CommitmentPoint",
 						"name": "inputCommitment",
 						"type": "tuple"
 					},
@@ -1215,7 +1887,7 @@ export const UTXO_VAULT_ABI =
 								"type": "uint256"
 							}
 						],
-						"internalType": "struct UTXOVault.CommitmentPoint[]",
+						"internalType": "struct UTXOVaultBase.CommitmentPoint[]",
 						"name": "outputCommitments",
 						"type": "tuple[]"
 					},
@@ -1257,12 +1929,12 @@ export const UTXO_VAULT_ABI =
 								"type": "bytes"
 							}
 						],
-						"internalType": "struct UTXOVault.BackendAttestation",
+						"internalType": "struct UTXOVaultBase.BackendAttestation",
 						"name": "attestation",
 						"type": "tuple"
 					}
 				],
-				"internalType": "struct UTXOVault.SplitParams",
+				"internalType": "struct UTXOVaultBase.SplitParams",
 				"name": "params",
 				"type": "tuple"
 			}
@@ -1308,7 +1980,7 @@ export const UTXO_VAULT_ABI =
 								"type": "uint256"
 							}
 						],
-						"internalType": "struct UTXOVault.CommitmentPoint",
+						"internalType": "struct UTXOVaultBase.CommitmentPoint",
 						"name": "inputCommitment",
 						"type": "tuple"
 					},
@@ -1325,7 +1997,7 @@ export const UTXO_VAULT_ABI =
 								"type": "uint256"
 							}
 						],
-						"internalType": "struct UTXOVault.CommitmentPoint",
+						"internalType": "struct UTXOVaultBase.CommitmentPoint",
 						"name": "outputCommitment",
 						"type": "tuple"
 					},
@@ -1367,12 +2039,12 @@ export const UTXO_VAULT_ABI =
 								"type": "bytes"
 							}
 						],
-						"internalType": "struct UTXOVault.BackendAttestation",
+						"internalType": "struct UTXOVaultBase.BackendAttestation",
 						"name": "attestation",
 						"type": "tuple"
 					}
 				],
-				"internalType": "struct UTXOVault.TransferParams",
+				"internalType": "struct UTXOVaultBase.TransferParams",
 				"name": "params",
 				"type": "tuple"
 			}
@@ -1406,80 +2078,6 @@ export const UTXO_VAULT_ABI =
 			{
 				"components": [
 					{
-						"components": [
-							{
-								"internalType": "uint256",
-								"name": "x",
-								"type": "uint256"
-							},
-							{
-								"internalType": "uint256",
-								"name": "y",
-								"type": "uint256"
-							}
-						],
-						"internalType": "struct UTXOVault.CommitmentPoint",
-						"name": "commitment",
-						"type": "tuple"
-					},
-					{
-						"internalType": "bytes32",
-						"name": "nullifierHash",
-						"type": "bytes32"
-					},
-					{
-						"internalType": "uint256",
-						"name": "revealedAmount",
-						"type": "uint256"
-					},
-					{
-						"components": [
-							{
-								"internalType": "string",
-								"name": "operation",
-								"type": "string"
-							},
-							{
-								"internalType": "bytes32",
-								"name": "dataHash",
-								"type": "bytes32"
-							},
-							{
-								"internalType": "uint256",
-								"name": "nonce",
-								"type": "uint256"
-							},
-							{
-								"internalType": "uint256",
-								"name": "timestamp",
-								"type": "uint256"
-							},
-							{
-								"internalType": "bytes",
-								"name": "signature",
-								"type": "bytes"
-							}
-						],
-						"internalType": "struct UTXOVault.BackendAttestation",
-						"name": "attestation",
-						"type": "tuple"
-					}
-				],
-				"internalType": "struct UTXOVault.WithdrawParams",
-				"name": "params",
-				"type": "tuple"
-			}
-		],
-		"name": "withdrawFromPrivateUTXO",
-		"outputs": [],
-		"stateMutability": "nonpayable",
-		"type": "function"
-	},
-	{
-		"inputs": [
-			{
-				"components": [
-					{
 						"internalType": "address",
 						"name": "tokenAddress",
 						"type": "address"
@@ -1497,7 +2095,7 @@ export const UTXO_VAULT_ABI =
 								"type": "uint256"
 							}
 						],
-						"internalType": "struct UTXOVault.CommitmentPoint",
+						"internalType": "struct UTXOVaultBase.CommitmentPoint",
 						"name": "commitment",
 						"type": "tuple"
 					},
@@ -1539,12 +2137,12 @@ export const UTXO_VAULT_ABI =
 								"type": "bytes"
 							}
 						],
-						"internalType": "struct UTXOVault.BackendAttestation",
+						"internalType": "struct UTXOVaultBase.BackendAttestation",
 						"name": "attestation",
 						"type": "tuple"
 					}
 				],
-				"internalType": "struct UTXOVault.DepositParams",
+				"internalType": "struct UTXOVaultBase.DepositParams",
 				"name": "params",
 				"type": "tuple"
 			},
@@ -1571,141 +2169,6 @@ export const UTXO_VAULT_ABI =
 		"type": "function"
 	},
 	{
-		"inputs": [],
-		"name": "lastNonce",
-		"outputs": [
-			{
-				"internalType": "uint256",
-				"name": "",
-				"type": "uint256"
-			}
-		],
-		"stateMutability": "view",
-		"type": "function"
-	},
-	{
-		"inputs": [],
-		"name": "authorizedBackend",
-		"outputs": [
-			{
-				"internalType": "address",
-				"name": "",
-				"type": "address"
-			}
-		],
-		"stateMutability": "view",
-		"type": "function"
-	},
-	{
-		"inputs": [
-			{
-				"internalType": "bytes32",
-				"name": "nullifier",
-				"type": "bytes32"
-			}
-		],
-		"name": "isNullifierUsed",
-		"outputs": [
-			{
-				"internalType": "bool",
-				"name": "",
-				"type": "bool"
-			}
-		],
-		"stateMutability": "view",
-		"type": "function"
-	},
-	{
-		"inputs": [
-			{
-				"components": [
-					{
-						"internalType": "address",
-						"name": "tokenAddress",
-						"type": "address"
-					},
-					{
-						"components": [
-							{
-								"internalType": "uint256",
-								"name": "x",
-								"type": "uint256"
-							},
-							{
-								"internalType": "uint256",
-								"name": "y",
-								"type": "uint256"
-							}
-						],
-						"internalType": "struct UTXOVault.CommitmentPoint",
-						"name": "commitment",
-						"type": "tuple"
-					},
-					{
-						"internalType": "bytes32",
-						"name": "nullifierHash",
-						"type": "bytes32"
-					},
-					{
-						"internalType": "uint256",
-						"name": "amount",
-						"type": "uint256"
-					},
-					{
-						"components": [
-							{
-								"internalType": "string",
-								"name": "operation",
-								"type": "string"
-							},
-							{
-								"internalType": "bytes32",
-								"name": "dataHash",
-								"type": "bytes32"
-							},
-							{
-								"internalType": "uint256",
-								"name": "nonce",
-								"type": "uint256"
-							},
-							{
-								"internalType": "uint256",
-								"name": "timestamp",
-								"type": "uint256"
-							},
-							{
-								"internalType": "bytes",
-								"name": "signature",
-								"type": "bytes"
-							}
-						],
-						"internalType": "struct UTXOVault.BackendAttestation",
-						"name": "attestation",
-						"type": "tuple"
-					}
-				],
-				"internalType": "struct UTXOVault.DepositParams",
-				"name": "params",
-				"type": "tuple"
-			},
-			{
-				"internalType": "address",
-				"name": "sender",
-				"type": "address"
-			}
-		],
-		"name": "calculateDepositDataHash",
-		"outputs": [
-			{
-				"internalType": "bytes32",
-				"name": "",
-				"type": "bytes32"
-			}
-		],
-		"stateMutability": "pure",
-		"type": "function"
-	},
-	{
 		"inputs": [
 			{
 				"components": [
@@ -1722,211 +2185,7 @@ export const UTXO_VAULT_ABI =
 								"type": "uint256"
 							}
 						],
-						"internalType": "struct UTXOVault.CommitmentPoint",
-						"name": "inputCommitment",
-						"type": "tuple"
-					},
-					{
-						"components": [
-							{
-								"internalType": "uint256",
-								"name": "x",
-								"type": "uint256"
-							},
-							{
-								"internalType": "uint256",
-								"name": "y",
-								"type": "uint256"
-							}
-						],
-						"internalType": "struct UTXOVault.CommitmentPoint[]",
-						"name": "outputCommitments",
-						"type": "tuple[]"
-					},
-					{
-						"internalType": "bytes32",
-						"name": "inputNullifier",
-						"type": "bytes32"
-					},
-					{
-						"internalType": "bytes32[]",
-						"name": "outputNullifiers",
-						"type": "bytes32[]"
-					},
-					{
-						"components": [
-							{
-								"internalType": "string",
-								"name": "operation",
-								"type": "string"
-							},
-							{
-								"internalType": "bytes32",
-								"name": "dataHash",
-								"type": "bytes32"
-							},
-							{
-								"internalType": "uint256",
-								"name": "nonce",
-								"type": "uint256"
-							},
-							{
-								"internalType": "uint256",
-								"name": "timestamp",
-								"type": "uint256"
-							},
-							{
-								"internalType": "bytes",
-								"name": "signature",
-								"type": "bytes"
-							}
-						],
-						"internalType": "struct UTXOVault.BackendAttestation",
-						"name": "attestation",
-						"type": "tuple"
-					}
-				],
-				"internalType": "struct UTXOVault.SplitParams",
-				"name": "params",
-				"type": "tuple"
-			},
-			{
-				"internalType": "address",
-				"name": "sender",
-				"type": "address"
-			}
-		],
-		"name": "calculateSplitDataHash",
-		"outputs": [
-			{
-				"internalType": "bytes32",
-				"name": "",
-				"type": "bytes32"
-			}
-		],
-		"stateMutability": "pure",
-		"type": "function"
-	},
-	{
-		"inputs": [
-			{
-				"components": [
-					{
-						"components": [
-							{
-								"internalType": "uint256",
-								"name": "x",
-								"type": "uint256"
-							},
-							{
-								"internalType": "uint256",
-								"name": "y",
-								"type": "uint256"
-							}
-						],
-						"internalType": "struct UTXOVault.CommitmentPoint",
-						"name": "inputCommitment",
-						"type": "tuple"
-					},
-					{
-						"components": [
-							{
-								"internalType": "uint256",
-								"name": "x",
-								"type": "uint256"
-							},
-							{
-								"internalType": "uint256",
-								"name": "y",
-								"type": "uint256"
-							}
-						],
-						"internalType": "struct UTXOVault.CommitmentPoint",
-						"name": "outputCommitment",
-						"type": "tuple"
-					},
-					{
-						"internalType": "bytes32",
-						"name": "inputNullifier",
-						"type": "bytes32"
-					},
-					{
-						"internalType": "bytes32",
-						"name": "outputNullifier",
-						"type": "bytes32"
-					},
-					{
-						"components": [
-							{
-								"internalType": "string",
-								"name": "operation",
-								"type": "string"
-							},
-							{
-								"internalType": "bytes32",
-								"name": "dataHash",
-								"type": "bytes32"
-							},
-							{
-								"internalType": "uint256",
-								"name": "nonce",
-								"type": "uint256"
-							},
-							{
-								"internalType": "uint256",
-								"name": "timestamp",
-								"type": "uint256"
-							},
-							{
-								"internalType": "bytes",
-								"name": "signature",
-								"type": "bytes"
-							}
-						],
-						"internalType": "struct UTXOVault.BackendAttestation",
-						"name": "attestation",
-						"type": "tuple"
-					}
-				],
-				"internalType": "struct UTXOVault.TransferParams",
-				"name": "params",
-				"type": "tuple"
-			},
-			{
-				"internalType": "address",
-				"name": "sender",
-				"type": "address"
-			}
-		],
-		"name": "calculateTransferDataHash",
-		"outputs": [
-			{
-				"internalType": "bytes32",
-				"name": "",
-				"type": "bytes32"
-			}
-		],
-		"stateMutability": "pure",
-		"type": "function"
-	},
-	{
-		"inputs": [
-			{
-				"components": [
-					{
-						"components": [
-							{
-								"internalType": "uint256",
-								"name": "x",
-								"type": "uint256"
-							},
-							{
-								"internalType": "uint256",
-								"name": "y",
-								"type": "uint256"
-							}
-						],
-						"internalType": "struct UTXOVault.CommitmentPoint",
+						"internalType": "struct UTXOVaultBase.CommitmentPoint",
 						"name": "commitment",
 						"type": "tuple"
 					},
@@ -1968,30 +2227,19 @@ export const UTXO_VAULT_ABI =
 								"type": "bytes"
 							}
 						],
-						"internalType": "struct UTXOVault.BackendAttestation",
+						"internalType": "struct UTXOVaultBase.BackendAttestation",
 						"name": "attestation",
 						"type": "tuple"
 					}
 				],
-				"internalType": "struct UTXOVault.WithdrawParams",
+				"internalType": "struct UTXOVaultBase.WithdrawParams",
 				"name": "params",
 				"type": "tuple"
-			},
-			{
-				"internalType": "address",
-				"name": "sender",
-				"type": "address"
 			}
 		],
-		"name": "calculateWithdrawDataHash",
-		"outputs": [
-			{
-				"internalType": "bytes32",
-				"name": "",
-				"type": "bytes32"
-			}
-		],
-		"stateMutability": "pure",
+		"name": "withdrawFromPrivateUTXO",
+		"outputs": [],
+		"stateMutability": "nonpayable",
 		"type": "function"
 	}
 ] as const;
@@ -2000,7 +2248,7 @@ export const UTXO_VAULT_ABI =
  * Contract interface for type-safe contract interaction (actualizada según ABI real)
  */
 export interface UTXOVaultInterface {
-  // Function fragments - CORREGIDO según ABI real
+  // Function fragments - COMPLETO según nuevo ABI
   getFunction(nameOrSignatureOrTopic: 
     | "depositAsPrivateUTXO"
     | "splitPrivateUTXO" 
@@ -2008,17 +2256,38 @@ export interface UTXOVaultInterface {
     | "withdrawFromPrivateUTXO"
     | "getUTXOInfo"
     | "getUTXOByCommitment"
+    | "getUTXODetails"
+    | "getUTXOOwner"
+    | "getUserUTXOs"
+    | "getUserUnspentUTXOs"
+    | "getUserUTXOCount"
+    | "isUserUTXO"
     | "doesCommitmentExist"
     | "isNullifierUsed"
     | "getRegisteredTokens"
     | "isTokenRegistered"
     | "getCurrentNonce"
     | "lastNonce"
+    | "getContractStats"
+    | "getTokenBalance"
+    | "preValidateSplit"
+    | "preValidateTransfer"
+    | "preValidateWithdraw"
+    | "validateDepositParams"
+    | "calculateDepositDataHash"
+    | "calculateSplitDataHash"
+    | "calculateTransferDataHash"
+    | "calculateWithdrawDataHash"
     | "owner"
     | "authorizedBackend"
     | "updateAuthorizedBackend"
     | "transferOwnership"
     | "renounceOwnership"
+    | "emergencyPaused"
+    | "emergencyWithdraw"
+    | "setEmergencyPause"
+    | "registeredTokens"
+    | "allRegisteredTokens"
   ): ethers.FunctionFragment;
   
   // Event fragments - CORREGIDO según ABI real
@@ -2032,33 +2301,59 @@ export interface UTXOVaultInterface {
     | "OwnershipTransferred"
   ): ethers.EventFragment;
   
-  // Encode function data - CORREGIDO según structs del ABI
+  // Encode function data - COMPLETO según structs del ABI
   encodeFunctionData(functionFragment: "depositAsPrivateUTXO", values: [DepositParams]): string;
   encodeFunctionData(functionFragment: "splitPrivateUTXO", values: [SplitParams]): string;
   encodeFunctionData(functionFragment: "transferPrivateUTXO", values: [TransferParams]): string;
   encodeFunctionData(functionFragment: "withdrawFromPrivateUTXO", values: [WithdrawParams]): string;
   encodeFunctionData(functionFragment: "getUTXOInfo", values: [string]): string;
   encodeFunctionData(functionFragment: "getUTXOByCommitment", values: [CommitmentPoint]): string;
+  encodeFunctionData(functionFragment: "getUTXODetails", values: [string]): string;
+  encodeFunctionData(functionFragment: "getUTXOOwner", values: [string]): string;
+  encodeFunctionData(functionFragment: "getUserUTXOs", values: [string]): string;
+  encodeFunctionData(functionFragment: "getUserUnspentUTXOs", values: [string]): string;
+  encodeFunctionData(functionFragment: "getUserUTXOCount", values: [string]): string;
+  encodeFunctionData(functionFragment: "isUserUTXO", values: [string, string]): string;
   encodeFunctionData(functionFragment: "doesCommitmentExist", values: [CommitmentPoint]): string;
   encodeFunctionData(functionFragment: "isNullifierUsed", values: [string]): string;
   encodeFunctionData(functionFragment: "isTokenRegistered", values: [string]): string;
+  encodeFunctionData(functionFragment: "getTokenBalance", values: [string]): string;
+  encodeFunctionData(functionFragment: "preValidateSplit", values: [string, string[], string]): string;
+  encodeFunctionData(functionFragment: "preValidateTransfer", values: [string, string, string]): string;
+  encodeFunctionData(functionFragment: "preValidateWithdraw", values: [string, string, bigint, string]): string;
+  encodeFunctionData(functionFragment: "validateDepositParams", values: [DepositParams, string]): string;
   encodeFunctionData(functionFragment: "updateAuthorizedBackend", values: [string]): string;
+  encodeFunctionData(functionFragment: "emergencyWithdraw", values: [string, bigint]): string;
+  encodeFunctionData(functionFragment: "setEmergencyPause", values: [boolean]): string;
   encodeFunctionData(functionFragment: "calculateDepositDataHash", values: [DepositParams, string]): string;
   encodeFunctionData(functionFragment: "calculateSplitDataHash", values: [SplitParams, string]): string;
   encodeFunctionData(functionFragment: "calculateTransferDataHash", values: [TransferParams, string]): string;
   encodeFunctionData(functionFragment: "calculateWithdrawDataHash", values: [WithdrawParams, string]): string;
   
-  // Decode function result - CORREGIDO según ABI real
+  // Decode function result - COMPLETO según ABI real
   decodeFunctionResult(functionFragment: "splitPrivateUTXO", data: string): Result;
   decodeFunctionResult(functionFragment: "transferPrivateUTXO", data: string): Result;
   decodeFunctionResult(functionFragment: "getUTXOInfo", data: string): Result;
   decodeFunctionResult(functionFragment: "getUTXOByCommitment", data: string): Result;
+  decodeFunctionResult(functionFragment: "getUTXODetails", data: string): Result;
+  decodeFunctionResult(functionFragment: "getUTXOOwner", data: string): Result;
+  decodeFunctionResult(functionFragment: "getUserUTXOs", data: string): Result;
+  decodeFunctionResult(functionFragment: "getUserUnspentUTXOs", data: string): Result;
+  decodeFunctionResult(functionFragment: "getUserUTXOCount", data: string): Result;
+  decodeFunctionResult(functionFragment: "isUserUTXO", data: string): Result;
   decodeFunctionResult(functionFragment: "doesCommitmentExist", data: string): Result;
   decodeFunctionResult(functionFragment: "isNullifierUsed", data: string): Result;
   decodeFunctionResult(functionFragment: "getRegisteredTokens", data: string): Result;
   decodeFunctionResult(functionFragment: "isTokenRegistered", data: string): Result;
   decodeFunctionResult(functionFragment: "getCurrentNonce", data: string): Result;
+  decodeFunctionResult(functionFragment: "getContractStats", data: string): Result;
+  decodeFunctionResult(functionFragment: "getTokenBalance", data: string): Result;
+  decodeFunctionResult(functionFragment: "preValidateSplit", data: string): Result;
+  decodeFunctionResult(functionFragment: "preValidateTransfer", data: string): Result;
+  decodeFunctionResult(functionFragment: "preValidateWithdraw", data: string): Result;
+  decodeFunctionResult(functionFragment: "validateDepositParams", data: string): Result;
   decodeFunctionResult(functionFragment: "authorizedBackend", data: string): Result;
+  decodeFunctionResult(functionFragment: "emergencyPaused", data: string): Result;
   decodeFunctionResult(functionFragment: "calculateDepositDataHash", data: string): Result;
   decodeFunctionResult(functionFragment: "calculateSplitDataHash", data: string): Result;
   decodeFunctionResult(functionFragment: "calculateTransferDataHash", data: string): Result;
@@ -2077,21 +2372,50 @@ export interface UTXOVaultContract {
   readonly runner: ethers.ContractRunner | null;
   readonly target: string;
   
-  // Read-only functions - CORREGIDO según ABI real
+  // Read-only functions - COMPLETO según nuevo ABI
   registeredTokens(tokenAddress: string): Promise<boolean>;
   allRegisteredTokens(index: bigint): Promise<string>;
   authorizedBackend(): Promise<string>;
   owner(): Promise<string>;
   lastNonce(): Promise<bigint>;
   getCurrentNonce(): Promise<bigint>;
+  emergencyPaused(): Promise<boolean>;
   getRegisteredTokens(): Promise<string[]>;
   isTokenRegistered(tokenAddress: string): Promise<boolean>;
+  getTokenBalance(token: string): Promise<bigint>;
   getUTXOInfo(utxoId: string): Promise<[boolean, string, string, bigint, boolean, string, number, bigint]>;
   getUTXOByCommitment(commitment: CommitmentPoint): Promise<string>;
+  getUTXODetails(commitmentHash: string): Promise<UTXODetails>;
+  getUTXOOwner(commitmentHash: string): Promise<string>;
+  getUserUTXOs(user: string): Promise<[string[], boolean[], string[], bigint[]]>;
+  getUserUnspentUTXOs(user: string): Promise<[string[], string[], bigint[]]>;
+  getUserUTXOCount(user: string): Promise<bigint>;
+  isUserUTXO(user: string, commitmentHash: string): Promise<boolean>;
   doesCommitmentExist(commitment: CommitmentPoint): Promise<boolean>;
   isNullifierUsed(nullifier: string): Promise<boolean>;
+  getContractStats(): Promise<[bigint, bigint, bigint, string, boolean]>;
   
-  // Nueva función de validación
+  // Pre-validation functions (SIN gastar gas)
+  preValidateSplit(
+    sourceCommitment: string,
+    outputCommitments: string[],
+    sourceNullifier: string
+  ): Promise<[boolean, number]>;
+  
+  preValidateTransfer(
+    sourceCommitment: string,
+    sourceNullifier: string,
+    outputCommitment: string
+  ): Promise<[boolean, number]>;
+  
+  preValidateWithdraw(
+    sourceCommitment: string,
+    sourceNullifier: string,
+    amount: bigint,
+    recipient: string
+  ): Promise<[boolean, number]>;
+  
+  // Validation function
   validateDepositParams(
     params: DepositParams, 
     sender: string
@@ -2155,6 +2479,29 @@ export interface UTXOVaultContract {
   ) => Promise<ContractTransactionResponse>) & {
     estimateGas(
       params: WithdrawParams,
+      overrides?: ContractCallOptions
+    ): Promise<bigint>;
+  };
+
+  // Emergency functions
+  emergencyWithdraw: ((
+    utxoId: string,
+    recipient: string,
+    overrides?: ContractCallOptions
+  ) => Promise<ContractTransactionResponse>) & {
+    estimateGas(
+      utxoId: string,
+      recipient: string,
+      overrides?: ContractCallOptions
+    ): Promise<bigint>;
+  };
+
+  setEmergencyPause: ((
+    paused: boolean,
+    overrides?: ContractCallOptions
+  ) => Promise<ContractTransactionResponse>) & {
+    estimateGas(
+      paused: boolean,
       overrides?: ContractCallOptions
     ): Promise<bigint>;
   };

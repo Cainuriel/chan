@@ -3,185 +3,22 @@ pragma solidity ^0.8.19;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
-import "./verifiers/RealPedersenVerifier.sol";
+import "./UTXOVaultBase.sol";
 
 /**
- * @title UTXOVault - Private UTXO System with Full Backend Delegation
+ * @title UTXOVault - Private UTXO System with Full Backend Delegation  
  * @notice Backend hace TODA la criptografía, Solidity solo mantiene estado
  * @dev Confianza total en backend autorizado para todas las verificaciones complejas
+ * @dev OPTIMIZADO: Con mappings de usuarios para recuperación eficiente sin scanning
  */
-contract UTXOVault is ReentrancyGuard, Ownable {
-    
-    // ========================
-    // ESTRUCTURAS SIMPLIFICADAS
-    // ========================
-    
-    struct CommitmentPoint {
-        uint256 x;
-        uint256 y;
-    }
-    
-    /**
-     * @dev UTXO completamente privado - solo metadatos
-     */
-    struct PrivateUTXO {
-        bool exists;
-        bytes32 commitmentHash;       // Hash del commitment
-        address tokenAddress;         // Token address
-        uint256 timestamp;           // Timestamp
-        bool isSpent;               // Estado
-        bytes32 parentUTXO;         // Parent UTXO
-        UTXOType utxoType;          // Tipo
-        uint256 blockNumber;        // Block number
-    }
-    
-    /**
-     * @dev Attestation simple del backend - Zenroom verificó TODO
-     */
-    struct BackendAttestation {
-        string operation;            // Tipo de operación ("DEPOSIT", "SPLIT", etc.)
-        bytes32 dataHash;           // Hash de todos los datos relevantes
-        uint256 nonce;              // Nonce único
-        uint256 timestamp;          // Timestamp de la attestation
-        bytes signature;            // Firma del backend autorizado
-    }
-    
-    /**
-     * @dev Parámetros para depósito - Backend verificó TODO
-     */
-    struct DepositParams {
-        address tokenAddress;
-        CommitmentPoint commitment;
-        bytes32 nullifierHash;
-        uint256 amount;             // Amount verificado por backend
-        BackendAttestation attestation;  // Backend dice: "Todo está correcto"
-    }
-    
-    /**
-     * @dev Parámetros para split - Backend verificó TODO
-     */
-    struct SplitParams {
-        CommitmentPoint inputCommitment;
-        CommitmentPoint[] outputCommitments;
-        bytes32 inputNullifier;
-        bytes32[] outputNullifiers;
-        BackendAttestation attestation;  // Backend dice: "Conservación de valor OK"
-    }
-    
-    /**
-     * @dev Parámetros para transferencia - Backend verificó TODO
-     */
-    struct TransferParams {
-        CommitmentPoint inputCommitment;
-        CommitmentPoint outputCommitment;
-        bytes32 inputNullifier;
-        bytes32 outputNullifier;
-        BackendAttestation attestation;  // Backend dice: "Ownership y transfer OK"
-    }
-    
-    /**
-     * @dev Parámetros para retiro - Backend verificó TODO
-     */
-    struct WithdrawParams {
-        CommitmentPoint commitment;
-        bytes32 nullifierHash;
-        uint256 revealedAmount;     // Amount verificado por backend
-        BackendAttestation attestation;  // Backend dice: "Ownership y amount OK"
-    }
-    
-    enum UTXOType { DEPOSIT, SPLIT, TRANSFER, WITHDRAW }
-    
-    // ========================
-    // STORAGE MÍNIMO
-    // ========================
-    
-    // UTXOs (solo metadatos)
-    mapping(bytes32 => PrivateUTXO) private utxos;
-    
-    // Nullifier tracking
-    mapping(bytes32 => bool) private nullifiers;
-    
-    // Commitment tracking
-    mapping(bytes32 => bytes32) private commitmentHashToUTXO;
-    
-    // Token registry
-    mapping(address => bool) public registeredTokens;
-    address[] public allRegisteredTokens;
-    
-    // Backend autorizado
-    address public authorizedBackend;
-    
-    // UTXO counter
-    uint256 private nextUTXOId;
-    
-    // Nonce para prevenir replay
-    uint256 public lastNonce;
-    
-    // ========================
-    // EVENTOS
-    // ========================
-    
-    event BackendUpdated(address indexed oldBackend, address indexed newBackend);
-    
-    event TokenRegistered(address indexed tokenAddress, uint256 timestamp);
-    
-    event PrivateUTXOCreated(
-        bytes32 indexed utxoId,
-        bytes32 indexed commitmentHash,
-        address indexed tokenAddress,
-        bytes32 nullifierHash,
-        UTXOType utxoType,
-        uint256 timestamp
-    );
-    
-    event PrivateTransfer(
-        bytes32 indexed inputCommitmentHash,
-        bytes32 indexed outputCommitmentHash,
-        bytes32 inputNullifier,
-        bytes32 outputNullifier,
-        uint256 timestamp
-    );
-    
-    event PrivateSplit(
-        bytes32 indexed inputCommitmentHash,
-        bytes32[] outputCommitmentHashes,
-        bytes32 inputNullifier,
-        bytes32[] outputNullifiers,
-        uint256 timestamp
-    );
-    
-    event PrivateWithdrawal(
-        bytes32 indexed commitmentHash,
-        bytes32 nullifier,
-        address indexed recipient,
-        uint256 revealedAmount,
-        uint256 timestamp
-    );
-    
-    // ========================
-    // ERRORES
-    // ========================
-    
-    error InvalidToken();
-    error InvalidAmount();
-    error InvalidNullifier();
-    error NullifierAlreadyUsed();
-    error UTXONotFound();
-    error UTXOAlreadySpent();
-    error UnauthorizedBackend();
-    error InvalidAttestation();
-    error StaleAttestation();
-    error ReplayAttack();
+contract UTXOVault is UTXOVaultBase, ReentrancyGuard {
     
     // ========================
     // CONSTRUCTOR
     // ========================
     
-    constructor(address _authorizedBackend) Ownable(msg.sender) {
-        authorizedBackend = _authorizedBackend;
-        nextUTXOId = 1;
-        lastNonce = 0;
+    constructor(address _authorizedBackend) UTXOVaultBase(_authorizedBackend) {
+        // La inicialización se hace en el contrato base
     }
     
     // ========================
@@ -201,7 +38,7 @@ contract UTXOVault is ReentrancyGuard, Ownable {
     }
     
     // ========================
-    // VERIFICACIÓN SIMPLIFICADA DE ATTESTATION
+    // VERIFICACIÓN DE ATTESTATION
     // ========================
     
     /**
@@ -234,7 +71,7 @@ contract UTXOVault is ReentrancyGuard, Ownable {
     }
     
     /**
-     * @dev Verificar firma ECDSA
+     * @dev Verificar firma ECDSA (versión state-changing)
      */
     function _verifyECDSASignature(
         bytes32 messageHash,
@@ -265,245 +102,28 @@ contract UTXOVault is ReentrancyGuard, Ownable {
         return recoveredAddress == expectedSigner;
     }
     
-    // ...existing code...
-
     // ========================
-    // VALIDACIÓN PRE-TRANSACCIÓN
+    // DEPÓSITO
     // ========================
     
     /**
-     * @dev Validar parámetros de depósito ANTES de ejecutar la transacción
-     * @param params Parámetros del depósito
-     * @param sender Dirección que ejecutará el depósito (msg.sender)
-     * @return success True si la validación es exitosa
-     * @return errorMessage Mensaje de error específico si falla
-     */
-    function validateDepositParams(
-        DepositParams calldata params,
-        address sender
-    ) external view returns (bool success, string memory errorMessage) {
-        
-        // 1. Validaciones básicas de Solidity
-        if (params.tokenAddress == address(0)) {
-            return (false, "InvalidToken: Token address cannot be zero");
-        }
-        
-        if (params.amount == 0) {
-            return (false, "InvalidAmount: Amount cannot be zero");
-        }
-        
-        if (nullifiers[params.nullifierHash]) {
-            return (false, "NullifierAlreadyUsed: This nullifier has been used before");
-        }
-        
-        // 2. Verificar que la operación es del tipo correcto
-        if (keccak256(bytes(params.attestation.operation)) != keccak256("DEPOSIT")) {
-            return (false, string(abi.encodePacked(
-                "InvalidOperation: Expected 'DEPOSIT', got '", 
-                params.attestation.operation, 
-                "'"
-            )));
-        }
-        
-        // 3. Verificar que el dataHash incluye todos nuestros parámetros
-        bytes32 expectedDataHash = calculateDepositDataHash(params, sender);
-        
-        if (params.attestation.dataHash != expectedDataHash) {
-            return (false, string(abi.encodePacked(
-                "InvalidDataHash: Expected ", 
-                _bytes32ToString(expectedDataHash),
-                ", got ",
-                _bytes32ToString(params.attestation.dataHash)
-            )));
-        }
-        
-        // 4. Verificar nonce secuencial
-        if (params.attestation.nonce != lastNonce + 1) {
-            return (false, string(abi.encodePacked(
-                "InvalidNonce: Expected ",
-                _uint256ToString(lastNonce + 1),
-                ", got ",
-                _uint256ToString(params.attestation.nonce)
-            )));
-        }
-        
-        // 5. Verificar timestamp no muy antiguo (máximo 10 minutos)
-        if (block.timestamp > params.attestation.timestamp + 600) {
-            return (false, string(abi.encodePacked(
-                "StaleAttestation: Attestation is ",
-                _uint256ToString(block.timestamp - params.attestation.timestamp),
-                " seconds old (max: 600)"
-            )));
-        }
-        
-        // 6. Verificar firma del backend
-        bytes32 messageHash = keccak256(abi.encodePacked(
-            params.attestation.operation,
-            params.attestation.dataHash,
-            params.attestation.nonce,
-            params.attestation.timestamp
-        ));
-        
-        if (!_verifyECDSASignatureView(messageHash, params.attestation.signature, authorizedBackend)) {
-            return (false, string(abi.encodePacked(
-                "UnauthorizedBackend: Signature verification failed. Expected signer: ",
-                _addressToString(authorizedBackend)
-            )));
-        }
-        
-        // 7. Verificar que el token tiene allowance suficiente
-        try IERC20(params.tokenAddress).allowance(sender, address(this)) returns (uint256 allowance) {
-            if (allowance < params.amount) {
-                return (false, string(abi.encodePacked(
-                    "InsufficientAllowance: Required ",
-                    _uint256ToString(params.amount),
-                    ", available ",
-                    _uint256ToString(allowance)
-                )));
-            }
-        } catch {
-            return (false, "InvalidToken: Unable to check token allowance");
-        }
-        
-        // 8. Verificar que el sender tiene balance suficiente
-        try IERC20(params.tokenAddress).balanceOf(sender) returns (uint256 balance) {
-            if (balance < params.amount) {
-                return (false, string(abi.encodePacked(
-                    "InsufficientBalance: Required ",
-                    _uint256ToString(params.amount),
-                    ", available ",
-                    _uint256ToString(balance)
-                )));
-            }
-        } catch {
-            return (false, "InvalidToken: Unable to check token balance");
-        }
-        
-        return (true, "All validations passed");
-    }
-    
-    /**
-     * @dev Verificar firma ECDSA (versión view para validación)
-     */
-    function _verifyECDSASignatureView(
-        bytes32 messageHash,
-        bytes memory signature,
-        address expectedSigner
-    ) internal pure returns (bool) {
-        if (signature.length != 65) return false;
-        
-        bytes32 r;
-        bytes32 s;
-        uint8 v;
-        
-        assembly {
-            r := mload(add(signature, 32))
-            s := mload(add(signature, 64))
-            v := byte(0, mload(add(signature, 96)))
-        }
-        
-        if (v < 27) v += 27;
-        
-        address recoveredAddress = ecrecover(
-            keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", messageHash)),
-            v,
-            r,
-            s
-        );
-        
-        return recoveredAddress == expectedSigner;
-    }
-    
-    // ========================
-    // FUNCIONES AUXILIARES PARA STRINGS
-    // ========================
-    
-    function _bytes32ToString(bytes32 value) internal pure returns (string memory) {
-        bytes memory alphabet = "0123456789abcdef";
-        bytes memory str = new bytes(66);
-        str[0] = '0';
-        str[1] = 'x';
-        for (uint256 i = 0; i < 32; i++) {
-            str[2 + i * 2] = alphabet[uint256(uint8(value[i] >> 4))];
-            str[3 + i * 2] = alphabet[uint256(uint8(value[i] & 0x0f))];
-        }
-        return string(str);
-    }
-    
-    function _uint256ToString(uint256 value) internal pure returns (string memory) {
-        if (value == 0) return "0";
-        
-        uint256 temp = value;
-        uint256 digits;
-        while (temp != 0) {
-            digits++;
-            temp /= 10;
-        }
-        
-        bytes memory buffer = new bytes(digits);
-        while (value != 0) {
-            digits -= 1;
-            buffer[digits] = bytes1(uint8(48 + uint256(value % 10)));
-            value /= 10;
-        }
-        
-        return string(buffer);
-    }
-    
-    function _addressToString(address addr) internal pure returns (string memory) {
-        bytes memory alphabet = "0123456789abcdef";
-        bytes memory str = new bytes(42);
-        str[0] = '0';
-        str[1] = 'x';
-        for (uint256 i = 0; i < 20; i++) {
-            str[2 + i * 2] = alphabet[uint256(uint8(bytes20(addr)[i] >> 4))];
-            str[3 + i * 2] = alphabet[uint256(uint8(bytes20(addr)[i] & 0x0f))];
-        }
-        return string(str);
-    }
-
-    // ========================
-    // DEPÓSITO ACTUALIZADO
-    // ========================
-    
-    /**
-     * @dev Depositar - Ahora usa validación interna
+     * @dev Depositar - Versión simplificada con validación mejorada
      */
     function depositAsPrivateUTXO(
         DepositParams calldata params
     ) external nonReentrant {
-        // Ejecutar EXACTAMENTE las mismas validaciones que el getter
+        // Usar validación externa para consistencia
         (bool isValid, string memory errorMessage) = this.validateDepositParams(params, msg.sender);
         
         if (!isValid) {
-            // Convertir el mensaje de error en un revert específico
-            if (keccak256(bytes(errorMessage)) == keccak256("InvalidToken: Token address cannot be zero")) {
-                revert InvalidToken();
-            } else if (keccak256(bytes(errorMessage)) == keccak256("InvalidAmount: Amount cannot be zero")) {
-                revert InvalidAmount();
-            } else if (bytes(errorMessage).length > 20 && 
-                      keccak256(abi.encodePacked(substring(errorMessage, 0, 20))) == keccak256("NullifierAlreadyUsed")) {
-                revert NullifierAlreadyUsed();
-            } else if (bytes(errorMessage).length > 18 && 
-                      keccak256(abi.encodePacked(substring(errorMessage, 0, 18))) == keccak256("UnauthorizedBackend")) {
-                revert UnauthorizedBackend();
-            } else if (bytes(errorMessage).length > 16 && 
-                      keccak256(abi.encodePacked(substring(errorMessage, 0, 16))) == keccak256("InvalidAttestation") ||
-                      keccak256(abi.encodePacked(substring(errorMessage, 0, 15))) == keccak256("StaleAttestation") ||
-                      keccak256(abi.encodePacked(substring(errorMessage, 0, 12))) == keccak256("InvalidNonce") ||
-                      keccak256(abi.encodePacked(substring(errorMessage, 0, 15))) == keccak256("InvalidDataHash") ||
-                      keccak256(abi.encodePacked(substring(errorMessage, 0, 16))) == keccak256("InvalidOperation")) {
-                revert InvalidAttestation();
-            } else {
-                // Para cualquier otro error, usar InvalidAttestation como fallback
-                revert InvalidAttestation();
-            }
+            // Mapeo simplificado de errores basado en el mensaje
+            _revertWithAppropriateError(errorMessage);
         }
         
         // Actualizar nonce (CRÍTICO: Solo aquí, no en el getter)
         lastNonce = params.attestation.nonce;
         
-        // Si llegamos aquí, todas las validaciones pasaron
+        // Registrar token si es necesario
         _registerToken(params.tokenAddress);
         
         // Transferir tokens
@@ -519,20 +139,33 @@ contract UTXOVault is ReentrancyGuard, Ownable {
         );
     }
     
-    function substring(string memory str, uint256 startIndex, uint256 length) 
-        internal pure returns (string memory) {
-        bytes memory strBytes = bytes(str);
-        require(startIndex + length <= strBytes.length, "Index out of bounds");
+    /**
+     * @dev Mapear mensaje de error a custom error apropiado
+     */
+    function _revertWithAppropriateError(string memory errorMessage) internal pure {
+        bytes32 errorHash = keccak256(bytes(errorMessage));
         
-        bytes memory result = new bytes(length);
-        for (uint256 i = 0; i < length; i++) {
-            result[i] = strBytes[startIndex + i];
+        if (errorHash == keccak256("InvalidToken")) {
+            revert InvalidToken();
+        } else if (errorHash == keccak256("InvalidAmount")) {
+            revert InvalidAmount();
+        } else if (errorHash == keccak256("NullifierAlreadyUsed")) {
+            revert NullifierAlreadyUsed();
+        } else if (errorHash == keccak256("UnauthorizedBackend")) {
+            revert UnauthorizedBackend();
+        } else if (errorHash == keccak256("InvalidNonce")) {
+            revert ReplayAttack();
+        } else if (errorHash == keccak256("StaleAttestation")) {
+            revert StaleAttestation();
+        } else {
+            // Para cualquier otro error de validación
+            revert InvalidAttestation();
         }
-        
-        return string(result);
     }
-
-
+    
+    // ========================
+    // SPLIT
+    // ========================
     
     /**
      * @dev Split - Backend ya verificó conservación de valor
@@ -540,17 +173,17 @@ contract UTXOVault is ReentrancyGuard, Ownable {
     function splitPrivateUTXO(
         SplitParams calldata params
     ) external nonReentrant returns (bytes32[] memory) {
-        // Solo validaciones básicas
+        // Validaciones básicas
         if (nullifiers[params.inputNullifier]) revert NullifierAlreadyUsed();
-        if (params.outputCommitments.length == 0) revert InvalidAttestation();
-        if (params.outputCommitments.length != params.outputNullifiers.length) revert InvalidAttestation();
+        if (params.outputCommitments.length == 0) revert InvalidArrayLength();
+        if (params.outputCommitments.length != params.outputNullifiers.length) revert InvalidArrayLength();
         
-        // Verificar nullifiers únicos
+        // Verificar nullifiers únicos en outputs
         for (uint256 i = 0; i < params.outputNullifiers.length; i++) {
             if (nullifiers[params.outputNullifiers[i]]) revert NullifierAlreadyUsed();
         }
         
-        // Verificar que input UTXO existe
+        // Verificar que input UTXO existe y no está gastado
         bytes32 inputCommitmentHash = _hashCommitment(params.inputCommitment);
         bytes32 inputUTXOId = commitmentHashToUTXO[inputCommitmentHash];
         if (inputUTXOId == bytes32(0)) revert UTXONotFound();
@@ -559,14 +192,15 @@ contract UTXOVault is ReentrancyGuard, Ownable {
         // Verificar attestation del backend
         if (!_verifyAttestation(params.attestation)) revert InvalidAttestation();
         
-        if (keccak256(bytes(params.attestation.operation)) != keccak256("SPLIT")) revert InvalidAttestation();
+        if (keccak256(bytes(params.attestation.operation)) != keccak256("SPLIT")) {
+            revert InvalidAttestation();
+        }
         
-        // Usar función centralizada para calcular dataHash
+        // Verificar dataHash
         bytes32 expectedDataHash = calculateSplitDataHash(params, msg.sender);
-        
         if (params.attestation.dataHash != expectedDataHash) revert InvalidAttestation();
         
-        // Si backend dice OK, ejecutar split
+        // Ejecutar split
         return _executeSplit(inputUTXOId, params);
     }
     
@@ -595,7 +229,7 @@ contract UTXOVault is ReentrancyGuard, Ownable {
             );
         }
         
-        // Emitir evento
+        // Preparar evento
         bytes32[] memory outputHashes = new bytes32[](params.outputCommitments.length);
         for (uint256 i = 0; i < params.outputCommitments.length; i++) {
             outputHashes[i] = _hashCommitment(params.outputCommitments[i]);
@@ -613,7 +247,7 @@ contract UTXOVault is ReentrancyGuard, Ownable {
     }
     
     // ========================
-    // TRANSFERENCIA - BACKEND VERIFICÓ TODO
+    // TRANSFERENCIA
     // ========================
     
     /**
@@ -622,7 +256,7 @@ contract UTXOVault is ReentrancyGuard, Ownable {
     function transferPrivateUTXO(
         TransferParams calldata params
     ) external nonReentrant returns (bytes32) {
-        // Solo validaciones básicas
+        // Validaciones básicas
         if (nullifiers[params.inputNullifier]) revert NullifierAlreadyUsed();
         if (nullifiers[params.outputNullifier]) revert NullifierAlreadyUsed();
         
@@ -635,11 +269,12 @@ contract UTXOVault is ReentrancyGuard, Ownable {
         // Verificar attestation del backend
         if (!_verifyAttestation(params.attestation)) revert InvalidAttestation();
         
-        if (keccak256(bytes(params.attestation.operation)) != keccak256("TRANSFER")) revert InvalidAttestation();
+        if (keccak256(bytes(params.attestation.operation)) != keccak256("TRANSFER")) {
+            revert InvalidAttestation();
+        }
         
-        // Usar función centralizada para calcular dataHash
+        // Verificar dataHash
         bytes32 expectedDataHash = calculateTransferDataHash(params, msg.sender);
-        
         if (params.attestation.dataHash != expectedDataHash) revert InvalidAttestation();
         
         // Ejecutar transferencia
@@ -666,7 +301,6 @@ contract UTXOVault is ReentrancyGuard, Ownable {
             inputUTXOId
         );
         
-        // Emitir evento
         emit PrivateTransfer(
             _hashCommitment(params.inputCommitment),
             _hashCommitment(params.outputCommitment),
@@ -679,7 +313,7 @@ contract UTXOVault is ReentrancyGuard, Ownable {
     }
     
     // ========================
-    // RETIRO - BACKEND VERIFICÓ TODO
+    // RETIRO
     // ========================
     
     /**
@@ -688,7 +322,7 @@ contract UTXOVault is ReentrancyGuard, Ownable {
     function withdrawFromPrivateUTXO(
         WithdrawParams calldata params
     ) external nonReentrant {
-        // Solo validaciones básicas
+        // Validaciones básicas
         if (nullifiers[params.nullifierHash]) revert NullifierAlreadyUsed();
         if (params.revealedAmount == 0) revert InvalidAmount();
         
@@ -701,11 +335,12 @@ contract UTXOVault is ReentrancyGuard, Ownable {
         // Verificar attestation del backend
         if (!_verifyAttestation(params.attestation)) revert InvalidAttestation();
         
-        if (keccak256(bytes(params.attestation.operation)) != keccak256("WITHDRAW")) revert InvalidAttestation();
+        if (keccak256(bytes(params.attestation.operation)) != keccak256("WITHDRAW")) {
+            revert InvalidAttestation();
+        }
         
-        // Usar función centralizada para calcular dataHash
+        // Verificar dataHash
         bytes32 expectedDataHash = calculateWithdrawDataHash(params, msg.sender);
-        
         if (params.attestation.dataHash != expectedDataHash) revert InvalidAttestation();
         
         // Ejecutar retiro
@@ -727,7 +362,6 @@ contract UTXOVault is ReentrancyGuard, Ownable {
         address tokenAddress = utxos[utxoId].tokenAddress;
         IERC20(tokenAddress).transfer(msg.sender, params.revealedAmount);
         
-        // Emitir evento
         emit PrivateWithdrawal(
             _hashCommitment(params.commitment),
             params.nullifierHash,
@@ -738,7 +372,7 @@ contract UTXOVault is ReentrancyGuard, Ownable {
     }
     
     // ========================
-    // FUNCIONES AUXILIARES SIMPLES
+    // FUNCIONES AUXILIARES INTERNAS
     // ========================
     
     /**
@@ -755,7 +389,8 @@ contract UTXOVault is ReentrancyGuard, Ownable {
         bytes32 utxoId = keccak256(abi.encodePacked(
             nextUTXOId++,
             nullifierHash,
-            block.timestamp
+            block.timestamp,
+            blockhash(block.number - 1)
         ));
         
         // Hash del commitment
@@ -777,7 +412,12 @@ contract UTXOVault is ReentrancyGuard, Ownable {
         commitmentHashToUTXO[commitmentHash] = utxoId;
         nullifiers[nullifierHash] = true;
         
-        // Emitir evento
+        // Tracking de usuarios para recuperación eficiente
+        address user = msg.sender;
+        userUTXOs[user].push(commitmentHash);
+        userUTXOCount[user]++;
+        utxoToUser[commitmentHash] = user;
+        
         emit PrivateUTXOCreated(
             utxoId,
             commitmentHash,
@@ -788,13 +428,6 @@ contract UTXOVault is ReentrancyGuard, Ownable {
         );
         
         return utxoId;
-    }
-    
-    /**
-     * @dev Hash de commitment
-     */
-    function _hashCommitment(CommitmentPoint memory commitment) internal pure returns (bytes32) {
-        return keccak256(abi.encodePacked(commitment.x, commitment.y));
     }
     
     /**
@@ -810,139 +443,58 @@ contract UTXOVault is ReentrancyGuard, Ownable {
     }
     
     // ========================
-    // FUNCIONES DE CONSULTA
+    // FUNCIONES DE EMERGENCIA
     // ========================
     
-    function getRegisteredTokens() external view returns (address[] memory) {
-        return allRegisteredTokens;
+    /**
+     * @dev Pausar/despausar operaciones en caso de emergencia
+     */
+    bool public emergencyPaused = false;
+    
+    modifier whenNotPaused() {
+        require(!emergencyPaused, "Contract is paused");
+        _;
     }
     
-    function isTokenRegistered(address tokenAddress) external view returns (bool) {
-        return registeredTokens[tokenAddress];
+    function setEmergencyPause(bool paused) external onlyOwner {
+        emergencyPaused = paused;
     }
     
-    function isNullifierUsed(bytes32 nullifier) external view returns (bool) {
-        return nullifiers[nullifier];
+    /**
+     * @dev Recuperar tokens en caso de emergencia (solo owner)
+     */
+    function emergencyWithdraw(address token, uint256 amount) external onlyOwner {
+        require(emergencyPaused, "Must be paused for emergency withdrawal");
+        IERC20(token).transfer(owner(), amount);
     }
     
-    function getUTXOInfo(bytes32 utxoId) external view returns (
-        bool exists,
-        bytes32 commitmentHash,
-        address tokenAddress,
-        uint256 timestamp,
-        bool isSpent,
-        bytes32 parentUTXO,
-        UTXOType utxoType,
-        uint256 blockNumber
+    // ========================
+    // FUNCIONES DE UTILIDAD ADICIONALES
+    // ========================
+    
+    /**
+     * @dev Obtener estadísticas generales del contrato
+     */
+    function getContractStats() external view returns (
+        uint256 totalUTXOs,
+        uint256 totalTokens,
+        uint256 currentNonce,
+        address backend,
+        bool isPaused
     ) {
-        PrivateUTXO storage utxo = utxos[utxoId];
         return (
-            utxo.exists,
-            utxo.commitmentHash,
-            utxo.tokenAddress,
-            utxo.timestamp,
-            utxo.isSpent,
-            utxo.parentUTXO,
-            utxo.utxoType,
-            utxo.blockNumber
+            nextUTXOId - 1,
+            allRegisteredTokens.length,
+            lastNonce,
+            authorizedBackend,
+            emergencyPaused
         );
     }
     
-    function doesCommitmentExist(CommitmentPoint calldata commitment) external view returns (bool) {
-        bytes32 commitmentHash = _hashCommitment(commitment);
-        bytes32 utxoId = commitmentHashToUTXO[commitmentHash];
-        return utxoId != bytes32(0) && utxos[utxoId].exists;
-    }
-    
-    function getUTXOByCommitment(CommitmentPoint calldata commitment) external view returns (bytes32) {
-        bytes32 commitmentHash = _hashCommitment(commitment);
-        return commitmentHashToUTXO[commitmentHash];
-    }
-    
-    function getCurrentNonce() external view returns (uint256) {
-        return lastNonce;
-    }
-    
-    // ========================
-    // FUNCIONES DE CÁLCULO DE HASH CENTRALIZADAS
-    // ========================
-    
     /**
-     * @dev Calcular dataHash para depósito
+     * @dev Verificar balance total de un token en el contrato
      */
-    function calculateDepositDataHash(
-        DepositParams calldata params,
-        address sender
-    ) public pure returns (bytes32) {
-        return keccak256(abi.encodePacked(
-            params.tokenAddress,
-            params.commitment.x,
-            params.commitment.y,
-            params.nullifierHash,
-            params.amount,
-            sender
-        ));
-    }
-    
-    /**
-     * @dev Calcular dataHash para split
-     */
-    function calculateSplitDataHash(
-        SplitParams calldata params,
-        address sender
-    ) public pure returns (bytes32) {
-        bytes memory commitmentData = abi.encodePacked(
-            params.inputCommitment.x,
-            params.inputCommitment.y,
-            params.inputNullifier
-        );
-        
-        for (uint256 i = 0; i < params.outputCommitments.length; i++) {
-            commitmentData = abi.encodePacked(
-                commitmentData,
-                params.outputCommitments[i].x,
-                params.outputCommitments[i].y,
-                params.outputNullifiers[i]
-            );
-        }
-        
-        return keccak256(abi.encodePacked(
-            commitmentData,
-            sender
-        ));
-    }
-    
-    /**
-     * @dev Calcular dataHash para transfer
-     */
-    function calculateTransferDataHash(
-        TransferParams calldata params,
-        address sender
-    ) public pure returns (bytes32) {
-        return keccak256(abi.encodePacked(
-            params.inputCommitment.x,
-            params.inputCommitment.y,
-            params.inputNullifier,
-            params.outputCommitment.x,
-            params.outputCommitment.y,
-            params.outputNullifier,
-            sender
-        ));
-    }
-    
-    /**
-     * @dev Calcular dataHash para withdraw
-     */
-    function calculateWithdrawDataHash(
-        WithdrawParams calldata params,
-        address sender
-    ) public pure returns (bytes32) {
-        return keccak256(abi.encodePacked(
-            params.commitment.x,
-            params.commitment.y,
-            params.nullifierHash,
-            params.revealedAmount,
-            sender
-        ));
+    function getTokenBalance(address token) external view returns (uint256) {
+        return IERC20(token).balanceOf(address(this));
     }
 }
