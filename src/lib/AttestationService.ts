@@ -458,4 +458,98 @@ export class AttestationService {
   isReady(): boolean {
     return this.authorizedSigner !== null;
   }
+
+  /**
+   * Simple provider function for creating attestations with just operation and dataHash
+   * Compatible with existing service interfaces
+   */
+  async createSimpleAttestation(
+    operation: OperationType,
+    dataHash: string,
+    customNonce?: bigint
+  ): Promise<{
+    operation: string;
+    dataHash: string;
+    nonce: bigint;
+    timestamp: bigint;
+    signature: string;
+  }> {
+    if (!this.authorizedSigner) {
+      throw new Error('❌ Attestation service not initialized');
+    }
+
+    const currentTime = Math.floor(Date.now() / 1000);
+    const nonce = customNonce || BigInt(Math.floor(Math.random() * 1000000));
+    
+    // Create attestation data structure
+    const attestationData = {
+      operation,
+      dataHash,
+      nonce,
+      timestamp: BigInt(currentTime)
+    };
+    
+    // Create message hash exactly as the contract expects
+    const messageHash = ethers.keccak256(ethers.solidityPacked(
+      ['string', 'bytes32', 'uint256', 'uint256'],
+      [
+        attestationData.operation,
+        attestationData.dataHash,
+        attestationData.nonce,
+        attestationData.timestamp
+      ]
+    ));
+    
+    // Sign the message hash using Ethereum's standard format
+    const signature = await this.authorizedSigner.signMessage(ethers.getBytes(messageHash));
+    
+    console.log(`✅ Simple attestation created for ${operation}:`, {
+      messageHash: messageHash.substring(0, 20) + '...',
+      signerAddress: this.authorizedSigner.address,
+      signature: signature.substring(0, 20) + '...',
+      nonce: nonce.toString(),
+      timestamp: attestationData.timestamp.toString()
+    });
+    
+    return {
+      ...attestationData,
+      signature
+    };
+  }
+
+  /**
+   * Provider function for SPLIT operations - compatible with SplitPrivateUTXO
+   */
+  getSplitAttestationProvider() {
+    return async (dataHash: string) => {
+      return this.createSimpleAttestation('SPLIT', dataHash);
+    };
+  }
+
+  /**
+   * Provider function for TRANSFER operations
+   */
+  getTransferAttestationProvider() {
+    return async (dataHash: string) => {
+      return this.createSimpleAttestation('TRANSFER', dataHash);
+    };
+  }
+
+  /**
+   * Provider function for WITHDRAW operations
+   */
+  getWithdrawAttestationProvider() {
+    return async (dataHash: string) => {
+      return this.createSimpleAttestation('WITHDRAW', dataHash);
+    };
+  }
+
+  /**
+   * Generic provider function for any operation
+   */
+  getGenericAttestationProvider(operation: OperationType) {
+    return async (dataHash: string) => {
+      return this.createSimpleAttestation(operation, dataHash);
+    };
+  }
 }

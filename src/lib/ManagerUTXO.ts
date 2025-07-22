@@ -6,6 +6,7 @@
 import { ethers, toBigInt, type BigNumberish } from 'ethers';
 import { depositAsPrivateUTXOSimplified } from './DepositAsPrivateUTXO';
 import { SplitPrivateUTXO, type SplitOperationResult, type SplitUTXOData } from './SplitPrivateUTXO';
+import { AttestationService } from './AttestationService';
 import { CryptoHelpers as ZenroomHelpers } from '../utils/crypto.helpers.js';
 import { EthereumHelpers } from './../utils/ethereum.helpers';
 import { gasManager } from './GasManager';
@@ -100,6 +101,7 @@ export interface PrivateUTXO extends ExtendedUTXOData {
 export class PrivateUTXOManager extends EventEmitter {
   // Servicios de operaciones específicas
   private splitService: SplitPrivateUTXO | null = null;
+  private attestationService: AttestationService | null = null;
   
   // Core components
   protected contract: UTXOVaultContract | null = null;
@@ -159,6 +161,10 @@ export class PrivateUTXOManager extends EventEmitter {
 
       // Initialize services with contract and signer
       this.splitService = new SplitPrivateUTXO(this.contract, signer);
+      
+      // Initialize attestation service with contract
+      this.attestationService = new AttestationService(this.contract as any);
+      console.log('✅ Attestation service initialized');
 
       // Configure CryptoHelpers with the contract
       const { CryptoHelpers } = await import('../utils/crypto.helpers');
@@ -411,17 +417,16 @@ export class PrivateUTXOManager extends EventEmitter {
       let transactionSuccessful = false;
       
       try {
-        // Use the split service with a dummy backend attestation provider
-        console.log('🚀 Executing split operation on blockchain...');
+        // Verify attestation service is ready
+        if (!this.attestationService || !this.attestationService.isReady()) {
+          throw new Error('❌ Attestation service not ready. Cannot create split attestation.');
+        }
+
+        // Use the split service with REAL backend attestation provider
+        console.log('🚀 Executing split operation with REAL attestation...');
         const result = await this.splitService.executeSplit(
           splitData,
-          async (dataHash: string) => ({
-            operation: 'SPLIT',
-            dataHash: dataHash,
-            nonce: BigInt(Math.floor(Math.random() * 1000000)),
-            timestamp: BigInt(Math.floor(Date.now() / 1000)),
-            signature: '0x' + '0'.repeat(128), // Dummy signature
-          })
+          this.attestationService.getSplitAttestationProvider()
         );
         
         // Convert SplitOperationResult to UTXOOperationResult
