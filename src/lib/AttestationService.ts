@@ -1,0 +1,461 @@
+/**
+ * @fileoverview AttestationService - Manejo de attestations firmadas para UTXOVault
+ * @description Backend autorizado que firma attestations que Solidity confía
+ */
+
+import { ethers } from 'ethers';
+import { calculateAndValidateDepositHash, logAttestationData } from './HashCalculator';
+import type { Contract } from 'ethers';
+import { EthereumHelpers } from '../utils/ethereum.helpers';
+
+export type OperationType = 'DEPOSIT' | 'SPLIT' | 'TRANSFER' | 'WITHDRAW';
+
+export interface AttestationData {
+  operation: OperationType;
+  dataHash: string;
+  nonce: bigint;
+  timestamp: bigint;
+}
+
+export interface SignedAttestation extends AttestationData {
+  signature: string;
+  signer: string;
+}
+
+export interface DepositData {
+  tokenAddress: string;
+  commitmentX: bigint;
+  commitmentY: bigint;
+  nullifier: string;
+  amount: bigint;
+  userAddress: string;
+}
+
+export interface TransferData {
+  inputNullifier: string;
+  outputCommitmentX: bigint;
+  outputCommitmentY: bigint;
+  amount: bigint;
+  fromAddress: string;
+  toAddress: string;
+}
+
+export interface SplitData {
+  inputNullifier: string;
+  outputCommitment1X: bigint;
+  outputCommitment1Y: bigint;
+  outputCommitment2X: bigint;
+  outputCommitment2Y: bigint;
+  amount1: bigint;
+  amount2: bigint;
+  userAddress: string;
+}
+
+export interface WithdrawData {
+  nullifier: string;
+  amount: bigint;
+  tokenAddress: string;
+  recipientAddress: string;
+}
+
+/**
+ * Servicio de attestations firmadas para operaciones UTXO
+ * ADVERTENCIA: Esta implementación expone claves privadas en el cliente
+ * En producción, debe implementarse como servicio backend seguro
+ */
+export class AttestationService {
+  private authorizedSigner: ethers.Wallet | null = null;
+  private nonces: Map<string, bigint> = new Map();
+  private contract: Contract | null = null;
+
+  constructor(contract?: Contract) {
+    console.log('🔐 Initializing AttestationService...');
+    
+    // Store contract reference for hash validation
+    this.contract = contract || null;
+    
+    // Only initialize in browser context
+    if (typeof window !== 'undefined') {
+      this.initializeSigner();
+    } else {
+      console.log('📱 Skipping signer initialization in SSR context');
+    }
+  }
+
+  /**
+   * Inicializar el signer autorizado desde variables de entorno
+   * NOTA: En producción, las attestations deberían firmarse en el servidor, no en el cliente
+   */
+  private initializeSigner(): void {
+    try {
+      // Verificar que estamos en contexto del navegador
+      if (typeof window === 'undefined' || typeof import.meta === 'undefined') {
+        console.warn('⚠️ Not in browser context - skipping signer initialization');
+        return;
+      }
+
+      // Solo usar import.meta.env en el contexto del navegador
+      // ADVERTENCIA: Las variables VITE_ son públicas y visibles en el cliente
+      const privateKey = import.meta.env.VITE_PRIVATE_KEY_ADMIN;
+      
+      if (!privateKey) {
+        console.warn('⚠️ No admin private key found - attestations will not be available');
+        console.warn('💡 For production: Move attestation signing to a secure server');
+        return;
+      }
+
+      console.warn('🔐 SECURITY WARNING: Private key is exposed in client bundle!');
+      console.warn('🏭 For production: Implement server-side attestation signing');
+
+      // Validar formato de clave privada
+      if (!privateKey.startsWith('0x')) {
+        throw new Error('Private key must start with 0x');
+      }
+
+      if (privateKey.length !== 66) {
+        throw new Error('Private key must be 64 hex characters (32 bytes) plus 0x prefix');
+      }
+
+      // Crear wallet desde la clave privada
+      this.authorizedSigner = new ethers.Wallet(privateKey);
+      
+      console.log('✅ Attestation signer initialized');
+      console.log('📮 Signer address:', this.authorizedSigner.address);
+      console.log('🔑 Expected address: 0x86DF4B738D592c31F4A9A657D6c8d6D05DC1D462');
+      
+      // Verificar que la dirección coincide con la esperada
+      const expectedAddress = '0x86DF4B738D592c31F4A9A657D6c8d6D05DC1D462';
+      if (this.authorizedSigner.address.toLowerCase() !== expectedAddress.toLowerCase()) {
+        console.error('❌ Signer address mismatch!');
+        console.error('Expected:', expectedAddress);
+        console.error('Actual:', this.authorizedSigner.address);
+        throw new Error('Signer address does not match expected admin address');
+      }
+      
+      console.log('✅ Signer address verified successfully');
+      
+    } catch (error: any) {
+      console.error('❌ Failed to initialize attestation signer:', error);
+      this.authorizedSigner = null;
+      throw error;
+    }
+  }
+
+  /**
+   * Set contract instance for hash validation
+   */
+  public setContract(contract: Contract): void {
+    this.contract = contract;
+    console.log('🏛️ Contract instance set for hash validation');
+  }
+
+  /**
+   * Get next nonce for user
+   */
+  private getNextNonce(userAddress: string): bigint {
+    const currentNonce = this.nonces.get(userAddress.toLowerCase()) || BigInt(0);
+    const nextNonce = currentNonce + BigInt(1);
+    this.nonces.set(userAddress.toLowerCase(), nextNonce);
+    return nextNonce;
+  }
+
+  /**
+   * Create hash for deposit data using CENTRALIZED function with validation
+   */
+  private async createDepositDataHash(data: DepositData): Promise<string> {
+    console.log('🔐 AttestationService calculating deposit hash...');
+    
+    try {
+      // Use the centralized hash calculator with contract validation
+      const hash = calculateAndValidateDepositHash(
+        data.tokenAddress,
+        data.commitmentX,
+        data.commitmentY,
+        data.nullifier,
+        data.amount,
+        data.userAddress
+      );
+      
+      console.log('✅ Hash calculated and validated by AttestationService:', hash);
+      return hash;
+    } catch (error) {
+      console.error('❌ CRITICAL: AttestationService hash calculation failed:', error);
+      // STOP THE ENTIRE FLOW - this is a critical error
+      throw new Error(`AttestationService hash validation failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /**
+   * Create hash for transfer data
+   */
+  private createTransferDataHash(data: TransferData): string {
+    return ethers.keccak256(
+      ethers.solidityPacked(
+        ['bytes32', 'uint256', 'uint256', 'uint256', 'address', 'address'],
+        [data.inputNullifier, data.outputCommitmentX, data.outputCommitmentY, data.amount, data.fromAddress, data.toAddress]
+      )
+    );
+  }
+
+  /**
+   * Create hash for split data
+   */
+  private createSplitDataHash(data: SplitData): string {
+    return ethers.keccak256(
+      ethers.solidityPacked(
+        ['bytes32', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256', 'address'],
+        [data.inputNullifier, data.outputCommitment1X, data.outputCommitment1Y, data.outputCommitment2X, data.outputCommitment2Y, data.amount1, data.amount2, data.userAddress]
+      )
+    );
+  }
+
+  /**
+   * Create hash for withdraw data
+   */
+  private createWithdrawDataHash(data: WithdrawData): string {
+    return ethers.keccak256(
+      ethers.solidityPacked(
+        ['bytes32', 'uint256', 'address', 'address'],
+        [data.nullifier, data.amount, data.tokenAddress, data.recipientAddress]
+      )
+    );
+  }
+
+  /**
+   * Create and sign deposit attestation
+   */
+  async createDepositAttestation(data: DepositData): Promise<SignedAttestation> {
+    if (!this.authorizedSigner) {
+      throw new Error('Attestation service not properly initialized');
+    }
+
+    const userAddress = data.userAddress;
+    const nonce = this.getNextNonce(userAddress);
+    const timestamp = BigInt(Math.floor(Date.now() / 1000));
+    const dataHash = await this.createDepositDataHash(data);
+
+    const attestationData: AttestationData = {
+      operation: 'DEPOSIT',
+      dataHash,
+      nonce,
+      timestamp
+    };
+
+    // Create EIP-712 structured data
+    const domain = {
+      name: 'UTXOVault',
+      version: '1',
+      chainId: (await this.authorizedSigner.provider?.getNetwork())?.chainId || 1,
+      verifyingContract: '0x0000000000000000000000000000000000000000' // Will be set by contract
+    };
+
+    const types = {
+      Attestation: [
+        { name: 'operation', type: 'string' },
+        { name: 'dataHash', type: 'bytes32' },
+        { name: 'nonce', type: 'uint256' },
+        { name: 'timestamp', type: 'uint256' }
+      ]
+    };
+
+    const value = {
+      operation: attestationData.operation,
+      dataHash: attestationData.dataHash,
+      nonce: attestationData.nonce.toString(),
+      timestamp: attestationData.timestamp.toString()
+    };
+
+    const signature = await this.authorizedSigner.signTypedData(domain, types, value);
+
+    const signedAttestation = {
+      ...attestationData,
+      signature,
+      signer: this.authorizedSigner.address
+    };
+
+    // 🚨 LOGGING CRÍTICO PARA DEBUGGING
+    console.log('🚨 === CREATING DEPOSIT ATTESTATION ===');
+    logAttestationData({
+      operation: signedAttestation.operation,
+      dataHash: signedAttestation.dataHash,
+      nonce: signedAttestation.nonce.toString(),
+      timestamp: signedAttestation.timestamp.toString(),
+      signature: signedAttestation.signature
+    }, 'DEPOSIT');
+
+    return signedAttestation;
+  }
+
+  /**
+   * Create and sign transfer attestation
+   */
+  async createTransferAttestation(data: TransferData): Promise<SignedAttestation> {
+    if (!this.authorizedSigner) {
+      throw new Error('Attestation service not properly initialized');
+    }
+
+    const userAddress = data.fromAddress;
+    const nonce = this.getNextNonce(userAddress);
+    const timestamp = BigInt(Math.floor(Date.now() / 1000));
+    const dataHash = this.createTransferDataHash(data);
+
+    const attestationData: AttestationData = {
+      operation: 'TRANSFER',
+      dataHash,
+      nonce,
+      timestamp
+    };
+
+    // Create EIP-712 structured data (similar to deposit)
+    const domain = {
+      name: 'UTXOVault',
+      version: '1',
+      chainId: (await this.authorizedSigner.provider?.getNetwork())?.chainId || 1,
+      verifyingContract: '0x0000000000000000000000000000000000000000'
+    };
+
+    const types = {
+      Attestation: [
+        { name: 'operation', type: 'string' },
+        { name: 'dataHash', type: 'bytes32' },
+        { name: 'nonce', type: 'uint256' },
+        { name: 'timestamp', type: 'uint256' }
+      ]
+    };
+
+    const value = {
+      operation: attestationData.operation,
+      dataHash: attestationData.dataHash,
+      nonce: attestationData.nonce.toString(),
+      timestamp: attestationData.timestamp.toString()
+    };
+
+    const signature = await this.authorizedSigner.signTypedData(domain, types, value);
+
+    return {
+      ...attestationData,
+      signature,
+      signer: this.authorizedSigner.address
+    };
+  }
+
+  /**
+   * Create and sign split attestation
+   */
+  async createSplitAttestation(data: SplitData): Promise<SignedAttestation> {
+    if (!this.authorizedSigner) {
+      throw new Error('Attestation service not properly initialized');
+    }
+
+    const userAddress = data.userAddress;
+    const nonce = this.getNextNonce(userAddress);
+    const timestamp = BigInt(Math.floor(Date.now() / 1000));
+    const dataHash = this.createSplitDataHash(data);
+
+    const attestationData: AttestationData = {
+      operation: 'SPLIT',
+      dataHash,
+      nonce,
+      timestamp
+    };
+
+    // Create EIP-712 structured data
+    const domain = {
+      name: 'UTXOVault',
+      version: '1',
+      chainId: (await this.authorizedSigner.provider?.getNetwork())?.chainId || 1,
+      verifyingContract: '0x0000000000000000000000000000000000000000'
+    };
+
+    const types = {
+      Attestation: [
+        { name: 'operation', type: 'string' },
+        { name: 'dataHash', type: 'bytes32' },
+        { name: 'nonce', type: 'uint256' },
+        { name: 'timestamp', type: 'uint256' }
+      ]
+    };
+
+    const value = {
+      operation: attestationData.operation,
+      dataHash: attestationData.dataHash,
+      nonce: attestationData.nonce.toString(),
+      timestamp: attestationData.timestamp.toString()
+    };
+
+    const signature = await this.authorizedSigner.signTypedData(domain, types, value);
+
+    return {
+      ...attestationData,
+      signature,
+      signer: this.authorizedSigner.address
+    };
+  }
+
+  /**
+   * Create and sign withdraw attestation
+   */
+  async createWithdrawAttestation(data: WithdrawData): Promise<SignedAttestation> {
+    if (!this.authorizedSigner) {
+      throw new Error('Attestation service not properly initialized');
+    }
+
+    const userAddress = data.recipientAddress;
+    const nonce = this.getNextNonce(userAddress);
+    const timestamp = BigInt(Math.floor(Date.now() / 1000));
+    const dataHash = this.createWithdrawDataHash(data);
+
+    const attestationData: AttestationData = {
+      operation: 'WITHDRAW',
+      dataHash,
+      nonce,
+      timestamp
+    };
+
+    // Create EIP-712 structured data
+    const domain = {
+      name: 'UTXOVault',
+      version: '1',
+      chainId: (await this.authorizedSigner.provider?.getNetwork())?.chainId || 1,
+      verifyingContract: '0x0000000000000000000000000000000000000000'
+    };
+
+    const types = {
+      Attestation: [
+        { name: 'operation', type: 'string' },
+        { name: 'dataHash', type: 'bytes32' },
+        { name: 'nonce', type: 'uint256' },
+        { name: 'timestamp', type: 'uint256' }
+      ]
+    };
+
+    const value = {
+      operation: attestationData.operation,
+      dataHash: attestationData.dataHash,
+      nonce: attestationData.nonce.toString(),
+      timestamp: attestationData.timestamp.toString()
+    };
+
+    const signature = await this.authorizedSigner.signTypedData(domain, types, value);
+
+    return {
+      ...attestationData,
+      signature,
+      signer: this.authorizedSigner.address
+    };
+  }
+
+  /**
+   * Get signer address
+   */
+  getSignerAddress(): string | null {
+    return this.authorizedSigner?.address || null;
+  }
+
+  /**
+   * Check if service is ready
+   */
+  isReady(): boolean {
+    return this.authorizedSigner !== null;
+  }
+}
