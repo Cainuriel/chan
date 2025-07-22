@@ -1,6 +1,6 @@
 <!-- src/lib/components/TransactionHistory.svelte -->
 <script lang="ts">
-  import type { PrivateUTXO } from '../PrivateUTXOManager';
+  import type { PrivateUTXO } from '../../types/utxo.types';
   import type { ERC20TokenData } from '../../types/ethereum.types';
   import { EthereumHelpers } from '../../utils/ethereum.helpers';
 

@@ -1,9 +1,12 @@
 <!-- src/lib/components/WalletConnection.svelte -->
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
-  import type { PrivateUTXOManager } from '../PrivateUTXOManager';
   import type { EOAData } from '../../types/ethereum.types';
   import { WalletProviderType } from '../../types/ethereum.types';
+
+  // Import using default import only and infer type
+  import privateUTXOManager  from '$lib/ManagerUTXO';
+  type PrivateUTXOManager = typeof privateUTXOManager;
 
   // Props
   export let utxoManager: PrivateUTXOManager;
@@ -33,21 +36,9 @@
         dispatch('initialize');
       } else {
         const result = await utxoManager.connectWallet(WalletProviderType.METAMASK);
-        if (!result.success) {
-          console.error('Connection failed:', result.error);
-          
-          // Mostrar mensajes específicos para diferentes errores
-          if (result.error?.includes('not detected')) {
-            alert('MetaMask no está instalado o hay problemas con la conexión.');
-          } else if (result.error?.includes('unlock')) {
-            alert('MetaMask está bloqueado. Por favor desbloquea MetaMask introduciendo tu contraseña e intenta de nuevo.');
-          } else if (result.error?.includes('rejected')) {
-            alert('Conexión rechazada por el usuario.');
-          } else if (result.error?.includes('pending')) {
-            alert('Hay una solicitud pendiente en MetaMask. Por favor abre MetaMask y completa la solicitud.');
-          } else {
-            alert(`Error de conexión: ${result.error}`);
-          }
+        if (!result) {
+          console.error('Connection failed');
+          alert('Error de conexión: No se pudo conectar con MetaMask.');
         }
       }
     } catch (error) {

@@ -1,7 +1,7 @@
 <!-- src/lib/components/UTXOBalance.svelte -->
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
-  import type { PrivateUTXO } from '../PrivateUTXOManager';
+  import type { PrivateUTXO } from '../../types/utxo.types';
   import type { ERC20TokenData } from '../../types/ethereum.types';
   import { EthereumHelpers } from '../../utils/ethereum.helpers';
 

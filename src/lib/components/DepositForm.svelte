@@ -1,8 +1,11 @@
 <!-- src/lib/components/DepositForm.svelte -->
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
-  import type { PrivateUTXOManager } from '../PrivateUTXOManager';
   import type { ERC20TokenData } from '../../types/ethereum.types';
+
+  // Import using default import only and infer type
+  import privateUTXOManager from '$lib/ManagerUTXO';
+  type PrivateUTXOManager = typeof privateUTXOManager;
 
   // Props
   export let utxoManager: PrivateUTXOManager;
@@ -58,18 +61,18 @@
     tokenError = '';
 
     try {
-      const currentAccount = utxoManager.currentAccount;
+      const currentAccount = utxoManager.getCurrentAccount();
       if (!currentAccount) {
         throw new Error('No account connected');
       }
 
       // Get token info from ethereum helpers
-      tokenData = await utxoManager['ethereum'].getERC20TokenInfo(
+      tokenData = await utxoManager.getERC20TokenInfo(
         tokenAddress, 
         currentAccount.address
       );
       
-      if (!tokenData.verified) {
+      if (tokenData && !tokenData.verified) {
         tokenError = 'Token not verified - proceed with caution';
       }
     } catch (error) {
@@ -82,8 +85,9 @@
   }
 
 async function handleDeposit() {
-    if (!tokenData || !amount || !utxoManager.currentAccount) {
-      console.log('❌ Missing required data:', { tokenData: !!tokenData, amount, account: !!utxoManager.currentAccount });
+    const currentAccount = utxoManager.getCurrentAccount();
+    if (!tokenData || !amount || !currentAccount) {
+      console.log('❌ Missing required data:', { tokenData: !!tokenData, amount, account: !!currentAccount });
       return;
     }
 
@@ -96,7 +100,7 @@ async function handleDeposit() {
         amount,
         tokenAddress,
         tokenSymbol: tokenData.symbol,
-        accountAddress: utxoManager.currentAccount.address
+        accountAddress: currentAccount.address
       });
 
       // Parse amount with token decimals - safer conversion
@@ -124,7 +128,7 @@ async function handleDeposit() {
       const depositParams = {
         amount: amountBigInt,
         tokenAddress: tokenAddress,
-        owner: utxoManager.currentAccount.address,
+        owner: currentAccount.address,
         blindingFactor: useCustomBlinding && customBlindingFactor ? 
           customBlindingFactor : undefined
       };
@@ -149,8 +153,8 @@ async function handleDeposit() {
           const createdUTXOId = result.createdUTXOIds[0];
           
           // Check if UTXO exists in localStorage
-          const storedUTXOs = utxoManager.getPrivateUTXOsByOwner(utxoManager.currentAccount.address);
-          const foundUTXO = storedUTXOs.find(u => u.id === createdUTXOId);
+          const storedUTXOs = utxoManager.getPrivateUTXOsByOwner(currentAccount.address);
+          const foundUTXO = storedUTXOs.find((u: any) => u.id === createdUTXOId);
           
           if (!foundUTXO) {
             console.warn('⚠️ UTXO was created on blockchain but not saved locally!');

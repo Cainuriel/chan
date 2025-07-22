@@ -1,8 +1,12 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
-  import type { PrivateUTXOManager, PrivateUTXO } from '../../lib/PrivateUTXOManager';
   import type { ERC20TokenData } from '../../types/ethereum.types';
+  import type { PrivateUTXO } from '../../types/utxo.types';
   import { EthereumHelpers } from '../../utils/ethereum.helpers';
+
+  // Import using default import only and infer type
+  import privateUTXOManager  from '$lib/ManagerUTXO';
+  type PrivateUTXOManager = typeof privateUTXOManager;
 
   // Props - Solo private UTXOs
   export let utxoManager: PrivateUTXOManager;
@@ -233,13 +237,15 @@
   }
 
   // Initialize with current account as default owner
-  $: if (utxoManager.currentAccount) {
-    const address = utxoManager.currentAccount.address;
-    splitOutputs = splitOutputs.map(output => ({
-      ...output,
-      owner: output.owner || address
-    }));
-    withdrawRecipient = withdrawRecipient || address;
+  $: if (utxoManager.getCurrentAccount()) {
+    const address = utxoManager.getCurrentAccount()?.address;
+    if (address) {
+      splitOutputs = splitOutputs.map(output => ({
+        ...output,
+        owner: output.owner || address
+      }));
+      withdrawRecipient = withdrawRecipient || address;
+    }
   }
 
   // Reactive split validation - only when data is loaded
@@ -407,7 +413,7 @@
   function addSplitOutput() {
     splitOutputs = [...splitOutputs, { 
       amount: '', 
-      owner: utxoManager.currentAccount?.address || '' 
+      owner: utxoManager.getCurrentAccount()?.address || '' 
     }];
   }
 
@@ -487,7 +493,8 @@
 
   // Reactive calculation of split remainder - updates automatically when inputs change
   $: splitRemainder = (() => {
-    if (!selectedUTXOData.split || !utxoManager.currentAccount || !isFullyLoaded) return { 
+    const currentAccount = utxoManager.getCurrentAccount();
+    if (!selectedUTXOData.split || !currentAccount || !isFullyLoaded) return { 
       remainder: '0', 
       formatted: '0',
       outputToOthers: BigInt(0),
@@ -503,7 +510,7 @@
     const tokenData = getTokenMetadata(utxo.tokenAddress);
     const decimals = tokenData.decimals;
     const totalInput = utxo.value;
-    const currentUserAddress = utxoManager.currentAccount.address.toLowerCase();
+    const currentUserAddress = currentAccount.address.toLowerCase();
     
     let totalOutput = BigInt(0);
     let outputToOthers = BigInt(0);
@@ -576,13 +583,18 @@
       console.log('🔍 Executing split with detailed info:', {
         selectedUTXOId: splitSelectedUTXO,
         selectedUTXOData: utxo,
-        currentAccount: utxoManager.currentAccount?.address,
+        currentAccount: utxoManager.getCurrentAccount()?.address,
         allAvailableUTXOs: availableUTXOs.map(u => ({ id: u.id, owner: u.owner, value: u.value.toString() })),
         allPrivateUTXOs: privateUTXOs.map(u => ({ id: u.id, owner: u.owner, isSpent: u.isSpent, value: u.value.toString() }))
       });
 
       // Verify UTXO exists in manager
-      const managerPrivateUTXOs = utxoManager.getPrivateUTXOsByOwner(utxoManager.currentAccount!.address);
+      const currentAccount = utxoManager.getCurrentAccount();
+      if (!currentAccount) {
+        throw new Error('No current account available');
+      }
+      
+      const managerPrivateUTXOs = utxoManager.getPrivateUTXOsByOwner(currentAccount.address);
       const foundInManager = managerPrivateUTXOs.find(u => u.id === splitSelectedUTXO);
       
       console.log('🔍 UTXO verification:', {
@@ -602,26 +614,32 @@
           isSpent: u.isSpent,
           owner: u.owner
         })),
-        exactMatch: managerPrivateUTXOs.some(u => u.id === splitSelectedUTXO),
-        idComparisons: managerPrivateUTXOs.map(u => ({
-          managerId: u.id,
-          selectedId: splitSelectedUTXO,
-          equal: u.id === splitSelectedUTXO,
-          lengthMatch: u.id.length === splitSelectedUTXO.length
-        }))
+        exactMatch: managerPrivateUTXOs.some((u) => (u as import('../../types/utxo.types').PrivateUTXO).id === splitSelectedUTXO),
+        idComparisons: managerPrivateUTXOs.map((u) => {
+          const utxoTyped = u as import('../../types/utxo.types').PrivateUTXO;
+          return {
+            managerId: utxoTyped.id,
+            selectedId: splitSelectedUTXO,
+            equal: utxoTyped.id === splitSelectedUTXO,
+            lengthMatch: utxoTyped.id.length === splitSelectedUTXO.length
+          };
+        })
       });
 
       // Additional debug: Check internal manager state
       console.log('� Detailed manager state:', {
-        hasCurrentAccount: !!utxoManager.currentAccount,
-        currentAccountAddress: utxoManager.currentAccount?.address,
-        managerPrivateUTXOsInternal: managerPrivateUTXOs.map(u => ({
-          id: u.id,
-          owner: u.owner,
-          isSpent: u.isSpent,
-          value: u.value.toString(),
-          tokenAddress: u.tokenAddress
-        }))
+        hasCurrentAccount: !!currentAccount,
+        currentAccountAddress: currentAccount?.address,
+        managerPrivateUTXOsInternal: managerPrivateUTXOs.map(u => {
+          const utxoTyped = u as import('../../types/utxo.types').PrivateUTXO;
+          return {
+            id: utxoTyped.id,
+            owner: utxoTyped.owner,
+            isSpent: utxoTyped.isSpent,
+            value: utxoTyped.value.toString(),
+            tokenAddress: utxoTyped.tokenAddress
+          };
+        })
       });
 
       // Check if the UTXO we found is exactly the same object or a copy
@@ -659,8 +677,8 @@
         // Reset form
         splitSelectedUTXO = '';
         splitOutputs = [
-          { amount: '', owner: utxoManager.currentAccount?.address || '' },
-          { amount: '', owner: utxoManager.currentAccount?.address || '' }
+          { amount: '', owner: utxoManager.getCurrentAccount()?.address || '' },
+          { amount: '', owner: utxoManager.getCurrentAccount()?.address || '' }
         ];
         
         dispatch('operation', { type: 'split', result });
@@ -689,7 +707,7 @@
       if (result.success) {
         // Reset form
         withdrawSelectedUTXO = '';
-        withdrawRecipient = utxoManager.currentAccount?.address || '';
+        withdrawRecipient = utxoManager.getCurrentAccount()?.address || '';
         
         dispatch('operation', { type: 'withdraw', result });
       } else {

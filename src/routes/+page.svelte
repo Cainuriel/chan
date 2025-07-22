@@ -1,16 +1,15 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { ethers } from 'ethers';
-  import { privateUTXOManager } from '$lib/PrivateUTXOManager';
-  import type { PrivateUTXO } from '$lib/PrivateUTXOManager'; 
+  import privateUTXOManager  from '$lib/ManagerUTXO';
+  import type { PrivateUTXO } from '../types/utxo.types';
   import { PrivateUTXOStorage } from '$lib/PrivateUTXOStorage';
-  import { UTXORecoveryService } from '$lib/UTXORecoveryService';
-  import type { UTXORecoveryResult } from '$lib/UTXORecoveryService';
+  import { calculateDepositDataHash } from '$lib/HashCalculator';
+
   import { EthereumHelpers } from '../utils/ethereum.helpers';
   import { WalletProviderType } from '../types/ethereum.types';
   import type { UTXOManagerStats, UTXOManagerConfig } from '../types/utxo.types';
   import type { EOAData } from '../types/ethereum.types';
-  import { calculateDepositDataHash } from '$lib/HashCalculator';
   
   // Types for networks
   type NetworkConfig = {
@@ -452,9 +451,9 @@
         // El estado se actualiza automáticamente en el evento 'wallet:connected'
         // isWalletConnected = true;
         // currentStep = 2;
-        const account = privateUTXOManager.currentAccount;
-        if (account) {
-          currentAccount = account;
+        const account = privateUTXOManager.getCurrentAccount();
+        if (account && currentAccount) {
+          currentAccount.address = account.address;
         }
         addNotification('success', '✅ Step 1 complete: Wallet connected!');
         console.log('✅ Step 1 complete: Wallet connected');
@@ -540,7 +539,7 @@
     stats = null;
     
     // Disconnect wallet if connected
-    if (privateUTXOManager.currentAccount) {
+    if (privateUTXOManager.getCurrentAccount()) {
       privateUTXOManager.disconnect();
     }
     
@@ -584,10 +583,10 @@
       if (success) {
         // NO setear isInitialized aquí - se hace en step3_initializeLibrary
         // isInitialized = true;
-        const account = privateUTXOManager.currentAccount;
-        if (account) {
-          currentAccount = account;
-          // NO llamar refreshData aquí - se hace después de marcar como completamente inicializado
+        const account = privateUTXOManager.getCurrentAccount();
+          if (account && currentAccount) {
+          currentAccount.address = account.address;
+          // no llamar refresh data aqui
         }
         console.log('✅ Library initialization completed successfully');
         addNotification('success', `Library initialized successfully on ${NETWORKS[selectedNetwork].name}`);
@@ -633,7 +632,11 @@
       console.log('🔄 Sync result:', syncSuccess);
       
       // Get private UTXOs (from localStorage)
-      privateUTXOs = privateUTXOManager.getPrivateUTXOsByOwner(currentAccount.address);
+      privateUTXOs = privateUTXOManager.getPrivateUTXOsByOwner(currentAccount.address)
+        .map(utxo => ({
+          ...utxo,
+          cryptographyType: "BN254"
+        }));
       console.log('🔒 Private UTXOs after refresh:', {
         total: privateUTXOs.length,
         unspent: privateUTXOs.filter(u => !u.isSpent).length,
@@ -904,7 +907,7 @@
       // All accounts in system
       const allAccounts = PrivateUTXOStorage.getAllStoredAccounts();
       console.log(`\n👥 All accounts with data (${allAccounts.length}):`);
-      allAccounts.forEach((account, i) => {
+      allAccounts.forEach((account: string, i: number) => {
         console.log(`${i + 1}. ${account}`);
         const stats = PrivateUTXOStorage.getEnhancedUserStats(account);
         console.log(`   - Owned: ${stats.ownedCount} UTXOs, Received: ${stats.receivedCount} UTXOs`);
