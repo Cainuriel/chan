@@ -431,6 +431,7 @@ export class UTXOLibrary extends EventEmitter {
         params,
         this.contract,
         this.currentEOA,
+        this.ethereum,
         this.utxos,
         this.savePrivateUTXOToLocal.bind(this),
         this.emit.bind(this)
