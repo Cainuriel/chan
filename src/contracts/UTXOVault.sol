@@ -217,6 +217,49 @@ contract UTXOVault is UTXOVaultBase, ReentrancyGuard {
     }
 
     /**
+     * @dev Versión memory de preValidateSplit para uso interno
+     */
+    function _preValidateSplitMemory(
+        bytes32 sourceCommitment,
+        bytes32[] memory outputCommitments,
+        bytes32 sourceNullifier
+    ) internal view returns (bool isValid, uint8 errorCode) {
+        
+        // 1. Verificar que UTXO source existe y no está gastado
+        bytes32 utxoId = commitmentHashToUTXO[sourceCommitment];
+        if (utxoId == bytes32(0) || !utxos[utxoId].exists) {
+            return (false, 1); // UTXO no existe
+        }
+        if (utxos[utxoId].isSpent) {
+            return (false, 2); // UTXO ya gastado
+        }
+
+        // 2. Verificar que hay outputs
+        if (outputCommitments.length == 0) {
+            return (false, 3); // No hay outputs
+        }
+
+        // 3. Verificar que commitments no están vacíos
+        for (uint256 i = 0; i < outputCommitments.length; i++) {
+            if (outputCommitments[i] == bytes32(0)) {
+                return (false, 4); // Commitment vacío
+            }
+        }
+
+        // 4. Verificar nullifier correcto
+        if (sourceNullifier == bytes32(0)) {
+            return (false, 6); // Nullifier inválido
+        }
+
+        // 5. Verificar que nullifier no ha sido usado
+        if (nullifiers[sourceNullifier]) {
+            return (false, 7); // Nullifier ya usado
+        }
+
+        return (true, 0);
+    }
+
+    /**
      * @dev Mapear código de error de preValidateSplit a custom error
      */
     function _revertWithSplitError(uint8 errorCode) internal pure {

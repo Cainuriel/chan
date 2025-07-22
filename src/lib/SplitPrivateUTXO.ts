@@ -56,7 +56,6 @@ export interface SplitOperationResult {
   transactionHash?: string;
   outputCommitmentHashes?: string[];  // Hashes criptográficos REALES
   outputNullifiers?: string[];        // Nullifiers criptográficos REALES
-  gasUsed?: bigint;
   error?: string;
   outputUTXOIds?: string[];
 }
@@ -72,7 +71,7 @@ export class SplitPrivateUTXO {
   ) {}
 
   /**
-   * @notice Ejecuta split de UTXO con criptografía BN254 REAL
+   * @notice Ejecuta split de UTXO con criptografía BN254 REAL y pre-validación
    */
   async executeSplit(
     splitData: SplitUTXOData,
@@ -89,9 +88,9 @@ export class SplitPrivateUTXO {
       console.log('🔐 Generando commitments Pedersen REALES en BN254...');
       const outputs = await this._generateRealCryptographicOutputs(splitData);
 
-      // 3. Pre-validación usando el contrato (con hashes criptográficos REALES)
-      console.log('🔍 Pre-validando con hashes criptográficos REALES...');
-      await this._preValidateWithRealCrypto(
+      // 3. PRE-VALIDACIÓN USANDO EL CONTRATO (ANTES DE ENVIAR TRANSACCIÓN)
+      console.log('🔍 Pre-validando con contrato usando preValidateSplit...');
+      await this._preValidateWithContract(
         splitData.sourceCommitment,
         outputs.commitments,
         splitData.sourceNullifier
@@ -105,16 +104,9 @@ export class SplitPrivateUTXO {
         backendAttestationProvider
       );
 
-      // 5. Estimar gas para operación criptográfica REAL
-      console.log('⛽ Estimando gas para operación criptográfica...');
-      const gasEstimate = await this.contract.splitPrivateUTXO.estimateGas(splitParams);
-      const gasLimit = gasEstimate * 120n / 100n;
-
-      console.log(`📊 Gas estimado para criptografía REAL: ${gasEstimate}`);
-
-      // 6. Ejecutar split con criptografía REAL en blockchain
-      console.log('📤 Ejecutando split con criptografía BN254 REAL...');
-      const tx = await this.contract.splitPrivateUTXO(splitParams, { gasLimit });
+      // 5. Ejecutar split en Alastria (sin estimación de gas)
+      console.log('📤 Ejecutando split con criptografía BN254 REAL en Alastria...');
+      const tx = await this.contract.splitPrivateUTXO(splitParams);
       
       console.log(`⏳ Transacción criptográfica enviada: ${tx.hash}`);
       const receipt = await tx.wait();
@@ -128,7 +120,7 @@ export class SplitPrivateUTXO {
 
       console.log(`✅ Split criptográfico REAL completado en bloque ${receipt.blockNumber}`);
 
-      // 7. Extraer UTXOIds REALES de los eventos
+      // 6. Extraer UTXOIds REALES de los eventos
       const outputUTXOIds = await this._extractRealUTXOIds(receipt);
 
       return {
@@ -136,8 +128,7 @@ export class SplitPrivateUTXO {
         transactionHash: receipt.hash,
         outputCommitmentHashes: outputs.commitmentHashes,  // Hashes REALES
         outputNullifiers: outputs.nullifiers,              // Nullifiers REALES
-        outputUTXOIds,
-        gasUsed: receipt.gasUsed
+        outputUTXOIds
       };
 
     } catch (error: any) {
@@ -165,9 +156,10 @@ export class SplitPrivateUTXO {
   }
 
   /**
-   * @notice Pre-validación usando hashes criptográficos REALES
+   * @notice PRE-VALIDACIÓN usando la función pública preValidateSplit del contrato
+   * @dev Esto se ejecuta ANTES de enviar la transacción para asegurar que será aceptada
    */
-  private async _preValidateWithRealCrypto(
+  private async _preValidateWithContract(
     sourceCommitment: CommitmentPoint,
     outputCommitments: CommitmentPoint[],
     sourceNullifier: string
@@ -179,9 +171,9 @@ export class SplitPrivateUTXO {
         outputCommitments.map(c => this._calculateRealCommitmentHash(c))
       );
 
-      console.log(`🔍 Validando con hashes REALES: Input ${sourceCommitmentHash.substring(0, 10)}...`);
+      console.log(`🔍 Pre-validando con contrato: Input ${sourceCommitmentHash.substring(0, 10)}...`);
 
-      // Llamar preValidateSplit del contrato con hashes REALES
+      // LLAMAR A LA FUNCIÓN PÚBLICA preValidateSplit DEL CONTRATO
       const [isValid, errorCode] = await this.contract.preValidateSplit(
         sourceCommitmentHash,
         outputCommitmentHashes,
@@ -191,21 +183,21 @@ export class SplitPrivateUTXO {
       if (!isValid) {
         const errorMessage = this._getValidationErrorMessage(errorCode);
         throw new SplitValidationError(
-          `Pre-validación criptográfica falló: ${errorMessage}`,
+          `Pre-validación del contrato falló: ${errorMessage}`,
           errorCode
         );
       }
 
-      console.log('✅ Pre-validación criptográfica REAL exitosa');
+      console.log('✅ Pre-validación del contrato exitosa - Split será aceptado');
 
     } catch (error) {
       if (error instanceof SplitValidationError) {
         throw error;
       }
       
-      console.error('❌ Error en pre-validación criptográfica:', error);
+      console.error('❌ Error en pre-validación del contrato:', error);
       throw new SplitValidationError(
-        'Error en pre-validación criptográfica REAL'
+        'Error en pre-validación del contrato'
       );
     }
   }
@@ -427,10 +419,10 @@ export class SplitPrivateUTXO {
       const utxoDetails = await this.contract.getUTXODetails(commitmentHash);
       
       return {
-        exists: utxoDetails.utxoData.exists,
-        isSpent: utxoDetails.utxoData.isSpent,
-        tokenAddress: utxoDetails.utxoData.tokenAddress,
-        canSplit: utxoDetails.utxoData.exists && !utxoDetails.utxoData.isSpent,
+        exists: utxoDetails.exists,
+        isSpent: utxoDetails.isSpent,
+        tokenAddress: utxoDetails.tokenAddress,
+        canSplit: utxoDetails.exists && !utxoDetails.isSpent,
         details: utxoDetails
       };
     } catch (error) {
@@ -445,16 +437,49 @@ export class SplitPrivateUTXO {
   }
 
   /**
-   * @notice Mensajes de error criptográficos
+   * @notice Validar split antes de ejecutar (sin gastar gas) - FUNCIÓN PÚBLICA
+   */
+  async validateSplitOperation(
+    sourceCommitmentHash: string,
+    outputCommitmentHashes: string[],
+    sourceNullifier: string
+  ): Promise<{
+    isValid: boolean;
+    errorCode?: number;
+    errorMessage?: string;
+  }> {
+    try {
+      const [isValid, errorCode] = await this.contract.preValidateSplit(
+        sourceCommitmentHash,
+        outputCommitmentHashes,
+        sourceNullifier
+      );
+
+      return {
+        isValid,
+        errorCode: isValid ? undefined : errorCode,
+        errorMessage: isValid ? undefined : this._getValidationErrorMessage(errorCode)
+      };
+    } catch (error) {
+      return {
+        isValid: false,
+        errorMessage: `Error durante validación: ${error instanceof Error ? error.message : error}`
+      };
+    }
+  }
+
+  /**
+   * @notice Mensajes de error criptográficos basados en los códigos del contrato
    */
   private _getValidationErrorMessage(errorCode: number): string {
     const errorMessages: { [key: number]: string } = {
       0: 'Validación criptográfica exitosa',
       1: 'UTXO criptográfico no encontrado',
       2: 'UTXO criptográfico ya gastado',
-      3: 'Nullifier criptográfico ya usado',
-      4: 'Arrays criptográficos inválidos',
-      5: 'Error de validación criptográfica'
+      3: 'No hay outputs para split',
+      4: 'Commitment criptográfico vacío', 
+      6: 'Nullifier criptográfico inválido',
+      7: 'Nullifier criptográfico ya usado'
     };
 
     return errorMessages[errorCode] || `Error criptográfico código: ${errorCode}`;
@@ -515,535 +540,6 @@ export function generateRealCryptographicBlindingFactors(count: number): string[
   
   for (let i = 0; i < count; i++) {
     // Generar blinding factor criptográfico REAL usando ZenroomHelpers
-    const factor = ZenroomHelpers.generateSecureBlindingFactor();
-    factors.push(factor);
-  }
-  
-  return factors;
-}
-
-/**
- * Datos necesarios para ejecutar un split de UTXO
- */
-export interface SplitUTXOData {
-  // UTXO de entrada
-  sourceCommitment: CommitmentPoint;
-  sourceValue: bigint;
-  sourceBlindingFactor: string;
-  sourceNullifier: string;
-  
-  // UTXOs de salida  
-  outputValues: bigint[];
-  outputBlindingFactors: string[];
-  
-  // Metadatos
-  tokenAddress: string;
-  sourceUTXOId?: string; // Para tracking opcional
-}
-
-/**
- * Resultado de la operación de split
- */
-export interface SplitOperationResult {
-  success: boolean;
-  transactionHash?: string;
-  outputCommitmentHashes?: string[];
-  outputNullifiers?: string[];
-  gasUsed?: bigint;
-  error?: string;
-  outputUTXOIds?: string[];
-}
-
-/**
- * @title SplitPrivateUTXO - Split de UTXO Privado con Validación Pre-Gas
- * @notice Divide un UTXO en múltiples UTXOs más pequeños manteniendo privacidad
- */
-export class SplitPrivateUTXO {
-  constructor(
-    private contract: UTXOVaultContract,
-    private signer: ethers.Signer
-  ) {}
-
-  /**
-   * @notice Ejecuta split de UTXO privado con validación pre-gas
-   */
-  async executeSplit(
-    splitData: SplitUTXOData,
-    backendAttestationProvider: (dataHash: string) => Promise<BackendAttestation>
-  ): Promise<SplitOperationResult> {
-    try {
-      console.log('🔄 Iniciando split de UTXO privado...');
-      console.log(`📊 Split: 1 UTXO (${splitData.sourceValue}) → ${splitData.outputValues.length} UTXOs`);
-
-      // 1. Validar datos de entrada
-      this._validateSplitData(splitData);
-
-      // 2. Generar commitments y nullifiers de salida
-      console.log('🔐 Generando commitments y nullifiers de salida...');
-      const outputs = await this._generateOutputCommitments(splitData);
-
-      // 3. Validación pre-gas usando preValidateSplit
-      console.log('🔍 Validando operación antes de ejecutar...');
-      await this._preValidateOperation(
-        splitData.sourceCommitment,
-        outputs.commitments,
-        splitData.sourceNullifier
-      );
-
-      // 4. Construir parámetros para el contrato
-      console.log('📋 Construyendo parámetros del contrato...');
-      const splitParams = await this._buildSplitParams(
-        splitData,
-        outputs,
-        backendAttestationProvider
-      );
-
-      // 5. Estimar gas
-      console.log('⛽ Estimando gas para split...');
-      const gasEstimate = await this.contract.splitPrivateUTXO.estimateGas(splitParams);
-      const gasLimit = gasEstimate * 120n / 100n; // +20% margen de seguridad
-
-      console.log(`📊 Gas estimado: ${gasEstimate}, límite: ${gasLimit}`);
-
-      // 6. Ejecutar transacción
-      console.log('📤 Ejecutando split en blockchain...');
-      const tx = await this.contract.splitPrivateUTXO(splitParams, { gasLimit });
-      
-      console.log(`⏳ Transacción enviada: ${tx.hash}`);
-      const receipt = await tx.wait();
-
-      if (!receipt) {
-        throw new UTXOOperationError(
-          'Transaction receipt not available',
-          'executeSplit'
-        );
-      }
-
-      console.log(`✅ Split completado en bloque ${receipt.blockNumber}`);
-
-      // 7. Extraer información de los eventos para obtener los UTXOIds
-      const outputUTXOIds = await this._extractOutputUTXOIds(receipt);
-
-      return {
-        success: true,
-        transactionHash: receipt.hash,
-        outputCommitmentHashes: outputs.commitmentHashes,
-        outputNullifiers: outputs.nullifiers,
-        outputUTXOIds,
-        gasUsed: receipt.gasUsed
-      };
-
-    } catch (error: any) {
-      console.error('❌ Error en split:', error);
-      
-      if (error instanceof SplitValidationError) {
-        return {
-          success: false,
-          error: `Validación falló: ${error.message}`
-        };
-      }
-      
-      if (error instanceof UTXOOperationError) {
-        return {
-          success: false,
-          error: `Operación falló: ${error.message}`
-        };
-      }
-      
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Error desconocido durante split'
-      };
-    }
-  }
-
-  /**
-   * @notice Validación pre-gas usando preValidateSplit del contrato
-   */
-  private async _preValidateOperation(
-    sourceCommitment: CommitmentPoint,
-    outputCommitments: CommitmentPoint[],
-    sourceNullifier: string
-  ): Promise<void> {
-    try {
-      // Calcular commitment hashes
-      const sourceCommitmentHash = await this._hashCommitment(sourceCommitment);
-      const outputCommitmentHashes = await Promise.all(
-        outputCommitments.map(c => this._hashCommitment(c))
-      );
-
-      console.log(`🔍 Validando: Input ${sourceCommitmentHash.substring(0, 10)}... → ${outputCommitmentHashes.length} outputs`);
-
-      // Llamar a preValidateSplit del contrato
-      const [isValid, errorCode] = await this.contract.preValidateSplit(
-        sourceCommitmentHash,
-        outputCommitmentHashes,
-        sourceNullifier
-      );
-
-      if (!isValid) {
-        const errorMessage = this._getValidationErrorMessage(errorCode);
-        throw new SplitValidationError(
-          `Pre-validación falló: ${errorMessage}`,
-          errorCode
-        );
-      }
-
-      console.log('✅ Pre-validación exitosa - UTXO válido para split');
-
-    } catch (error) {
-      if (error instanceof SplitValidationError) {
-        throw error;
-      }
-      
-      console.error('❌ Error durante pre-validación:', error);
-      throw new SplitValidationError(
-        'Error durante pre-validación del contrato'
-      );
-    }
-  }
-
-  /**
-   * @notice Generar commitments y nullifiers de salida
-   */
-  private async _generateOutputCommitments(splitData: SplitUTXOData): Promise<{
-    commitments: CommitmentPoint[];
-    commitmentHashes: string[];
-    nullifiers: string[];
-  }> {
-    const commitments: CommitmentPoint[] = [];
-    const commitmentHashes: string[] = [];
-    const nullifiers: string[] = [];
-
-    const signerAddress = await this.signer.getAddress();
-
-    for (let i = 0; i < splitData.outputValues.length; i++) {
-      const value = splitData.outputValues[i];
-      const blindingFactor = splitData.outputBlindingFactors[i];
-
-      console.log(`🔐 Generando output ${i + 1}/${splitData.outputValues.length}: valor ${value}`);
-
-      // Generar commitment usando ZenroomHelpers
-      const commitment = await ZenroomHelpers.createPedersenCommitment(
-        value.toString(), 
-        blindingFactor
-      );
-      
-      // Convertir a formato del contrato
-      const commitmentPoint: CommitmentPoint = {
-        x: commitment.x,
-        y: commitment.y
-      };
-      
-      const commitmentHash = await this._hashCommitment(commitmentPoint);
-      
-      // Generar nullifier único para cada output
-      const nullifier = await ZenroomHelpers.generateNullifierHash(
-        commitmentHash,
-        signerAddress,
-        `${Date.now()}_${i}` // Seed único por output
-      );
-
-      commitments.push(commitmentPoint);
-      commitmentHashes.push(commitmentHash);
-      nullifiers.push(nullifier);
-
-      console.log(`   ✅ Output ${i + 1}: commitment ${commitmentHash.substring(0, 10)}...`);
-    }
-
-    console.log(`✅ Generados ${commitments.length} commitments y nullifiers de salida`);
-    return { commitments, commitmentHashes, nullifiers };
-  }
-
-  /**
-   * @notice Construir parámetros para splitPrivateUTXO
-   */
-  private async _buildSplitParams(
-    splitData: SplitUTXOData,
-    outputs: { commitments: CommitmentPoint[]; nullifiers: string[] },
-    backendAttestationProvider: (dataHash: string) => Promise<BackendAttestation>
-  ): Promise<SplitParams> {
-    // Crear parámetros base para calcular dataHash
-    const baseParams: SplitParams = {
-      inputCommitment: splitData.sourceCommitment,
-      outputCommitments: outputs.commitments,
-      inputNullifier: splitData.sourceNullifier,
-      outputNullifiers: outputs.nullifiers,
-      attestation: {
-        operation: "SPLIT",
-        dataHash: ethers.ZeroHash,
-        nonce: 0,
-        timestamp: 0,
-        signature: "0x"
-      }
-    };
-
-    // Calcular dataHash usando el contrato
-    console.log('🔢 Calculando dataHash...');
-    const dataHash = await this.contract.calculateSplitDataHash(
-      baseParams,
-      await this.signer.getAddress()
-    );
-
-    console.log(`📋 DataHash calculado: ${dataHash}`);
-
-    // Obtener attestation del backend
-    console.log('🏛️ Obteniendo attestation del backend...');
-    const attestation = await backendAttestationProvider(dataHash);
-
-    console.log(`✅ Attestation obtenida - nonce: ${attestation.nonce}`);
-
-    return {
-      inputCommitment: splitData.sourceCommitment,
-      outputCommitments: outputs.commitments,
-      inputNullifier: splitData.sourceNullifier,
-      outputNullifiers: outputs.nullifiers,
-      attestation
-    };
-  }
-
-  /**
-   * @notice Validar datos de entrada para split
-   */
-  private _validateSplitData(splitData: SplitUTXOData): void {
-    // Validar que hay outputs
-    if (splitData.outputValues.length === 0) {
-      throw new UTXOValidationError(
-        'Debe haber al menos un UTXO de salida',
-        ValidationErrorCodes.INVALID_PARAMETERS
-      );
-    }
-
-    // Validar límite máximo de outputs (para evitar gas limits)
-    if (splitData.outputValues.length > 10) {
-      throw new UTXOValidationError(
-        'Máximo 10 UTXOs de salida permitidos por split',
-        ValidationErrorCodes.INVALID_PARAMETERS
-      );
-    }
-
-    // Validar arrays del mismo tamaño
-    if (splitData.outputValues.length !== splitData.outputBlindingFactors.length) {
-      throw new UTXOValidationError(
-        'Arrays de valores y blinding factors deben tener el mismo tamaño',
-        ValidationErrorCodes.INVALID_PARAMETERS
-      );
-    }
-
-    // Validar conservación de valor
-    const totalOutput = splitData.outputValues.reduce((sum, val) => sum + val, 0n);
-    if (totalOutput !== splitData.sourceValue) {
-      throw new UTXOValidationError(
-        `Conservación de valor falló: entrada=${splitData.sourceValue}, salida=${totalOutput}`,
-        ValidationErrorCodes.VALUE_CONSERVATION_FAILED,
-        { sourceValue: splitData.sourceValue, totalOutput }
-      );
-    }
-
-    // Validar valores positivos
-    for (let i = 0; i < splitData.outputValues.length; i++) {
-      if (splitData.outputValues[i] <= 0n) {
-        throw new UTXOValidationError(
-          `Valor de salida ${i} debe ser positivo: ${splitData.outputValues[i]}`,
-          ValidationErrorCodes.INVALID_AMOUNT
-        );
-      }
-    }
-
-    // Validar direcciones y hashes
-    if (!ethers.isAddress(splitData.tokenAddress)) {
-      throw new UTXOValidationError(
-        'Dirección de token inválida',
-        ValidationErrorCodes.INVALID_TOKEN
-      );
-    }
-
-    if (!splitData.sourceNullifier || splitData.sourceNullifier.length !== 66) {
-      throw new UTXOValidationError(
-        'Nullifier de entrada inválido',
-        ValidationErrorCodes.INVALID_NULLIFIER
-      );
-    }
-
-    console.log(`✅ Validación local exitosa: ${splitData.outputValues.length} outputs, conservación verificada`);
-    console.log(`   📊 Total input: ${splitData.sourceValue}, total output: ${totalOutput}`);
-  }
-
-  /**
-   * @notice Calcular hash de commitment (compatible con contrato)
-   */
-  private async _hashCommitment(commitment: CommitmentPoint): Promise<string> {
-    return ethers.keccak256(
-      ethers.solidityPacked(['uint256', 'uint256'], [commitment.x, commitment.y])
-    );
-  }
-
-  /**
-   * @notice Extraer UTXOIds de salida desde los eventos del receipt
-   */
-  private async _extractOutputUTXOIds(receipt: ethers.ContractTransactionReceipt): Promise<string[]> {
-    try {
-      const outputUTXOIds: string[] = [];
-      
-      // Buscar eventos PrivateUTXOCreated en el receipt
-      for (const log of receipt.logs) {
-        try {
-          const parsedLog = this.contract.interface.parseLog({
-            topics: log.topics,
-            data: log.data
-          });
-          
-          if (parsedLog && parsedLog.name === 'PrivateUTXOCreated') {
-            const utxoId = parsedLog.args[0]; // Primer argumento es el utxoId
-            outputUTXOIds.push(utxoId);
-          }
-        } catch (parseError) {
-          // Ignorar logs que no podemos parsear
-          continue;
-        }
-      }
-      
-      console.log(`📋 Extraídos ${outputUTXOIds.length} UTXOIds de los eventos`);
-      return outputUTXOIds;
-      
-    } catch (error) {
-      console.warn('⚠️ No se pudieron extraer UTXOIds de los eventos:', error);
-      return [];
-    }
-  }
-
-  /**
-   * @notice Obtener mensaje de error según código de validación
-   */
-  private _getValidationErrorMessage(errorCode: number): string {
-    const errorMessages: { [key: number]: string } = {
-      0: 'Operación válida',
-      1: 'UTXO de entrada no encontrado',
-      2: 'UTXO de entrada ya gastado',
-      3: 'Nullifier ya usado',
-      4: 'Longitud de arrays inválida',
-      5: 'Error de validación general'
-    };
-
-    return errorMessages[errorCode] || `Código de error desconocido: ${errorCode}`;
-  }
-
-  /**
-   * @notice Obtener información de un UTXO para split
-   */
-  async getUTXOForSplit(commitmentHash: string): Promise<{
-    exists: boolean;
-    isSpent: boolean;
-    tokenAddress: string;
-    canSplit: boolean;
-    details?: any;
-  }> {
-    try {
-      const utxoDetails = await this.contract.getUTXODetails(commitmentHash);
-      
-      return {
-        exists: utxoDetails.utxoData.exists,
-        isSpent: utxoDetails.utxoData.isSpent,
-        tokenAddress: utxoDetails.utxoData.tokenAddress,
-        canSplit: utxoDetails.utxoData.exists && !utxoDetails.utxoData.isSpent,
-        details: utxoDetails
-      };
-    } catch (error) {
-      console.error('Error obteniendo información del UTXO:', error);
-      return {
-        exists: false,
-        isSpent: true,
-        tokenAddress: ethers.ZeroAddress,
-        canSplit: false
-      };
-    }
-  }
-
-  /**
-   * @notice Validar split antes de ejecutar (sin gastar gas)
-   */
-  async validateSplitOperation(
-    sourceCommitmentHash: string,
-    outputCommitmentHashes: string[],
-    sourceNullifier: string
-  ): Promise<{
-    isValid: boolean;
-    errorCode?: number;
-    errorMessage?: string;
-  }> {
-    try {
-      const [isValid, errorCode] = await this.contract.preValidateSplit(
-        sourceCommitmentHash,
-        outputCommitmentHashes,
-        sourceNullifier
-      );
-
-      return {
-        isValid,
-        errorCode: isValid ? undefined : errorCode,
-        errorMessage: isValid ? undefined : this._getValidationErrorMessage(errorCode)
-      };
-    } catch (error) {
-      return {
-        isValid: false,
-        errorMessage: `Error durante validación: ${error instanceof Error ? error.message : error}`
-      };
-    }
-  }
-}
-
-/**
- * @notice Factory function para crear instancia de SplitPrivateUTXO
- */
-export function createSplitPrivateUTXO(
-  contract: UTXOVaultContract,
-  signer: ethers.Signer
-): SplitPrivateUTXO {
-  return new SplitPrivateUTXO(contract, signer);
-}
-
-/**
- * @notice Utilidad para calcular split óptimo
- */
-export function calculateOptimalSplit(
-  totalAmount: bigint,
-  numberOfOutputs: number
-): bigint[] {
-  if (numberOfOutputs <= 0) {
-    throw new Error('Número de outputs debe ser positivo');
-  }
-
-  if (numberOfOutputs > 10) {
-    throw new Error('Máximo 10 outputs permitidos');
-  }
-
-  const baseAmount = totalAmount / BigInt(numberOfOutputs);
-  const remainder = totalAmount % BigInt(numberOfOutputs);
-  
-  const outputs: bigint[] = [];
-  
-  for (let i = 0; i < numberOfOutputs; i++) {
-    // Distribuir el remainder en los primeros UTXOs
-    const amount = baseAmount + (i < Number(remainder) ? 1n : 0n);
-    outputs.push(amount);
-  }
-
-  // Verificar conservación de valor
-  const total = outputs.reduce((sum, val) => sum + val, 0n);
-  if (total !== totalAmount) {
-    throw new Error(`Error en cálculo: ${total} !== ${totalAmount}`);
-  }
-
-  return outputs;
-}
-
-/**
- * @notice Utilidad para generar blinding factors únicos para split
- */
-export function generateSplitBlindingFactors(count: number): string[] {
-  const factors: string[] = [];
-  
-  for (let i = 0; i < count; i++) {
     const factor = ZenroomHelpers.generateSecureBlindingFactor();
     factors.push(factor);
   }
