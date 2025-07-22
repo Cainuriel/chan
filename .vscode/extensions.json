@@ -1,0 +1,39 @@
+{
+  "recommendations": [
+    "github.copilot",
+    "github.copilot-chat",
+    "juanblanco.solidity",
+    "nomicfoundation.hardhat-solidity",
+    "svelte.svelte-vscode",
+    "esbenp.prettier-vscode",
+    "dbaeumer.vscode-eslint",
+    "bradlc.vscode-tailwindcss",
+    "pkief.material-icon-theme",
+    "usernamehw.errorlens"
+  ],
+  "unwantedRecommendations": [
+    "dart-code.dart-code",
+    "dart-code.flutter",
+    "alexisvt.flutter-snippets",
+    "felixangelov.bloc",
+    "jeroen-meijer.pubspec-assist",
+    "nash.awesome-flutter-snippets",
+    "robert-brunhage.flutter-riverpod-snippets",
+    "docker.docker",
+    "ms-azuretools.vscode-docker",
+    "ms-azuretools.vscode-containers",
+    "ms-vscode-remote.remote-containers",
+    "ms-vscode-remote.remote-wsl",
+    "ms-vscode.remote-explorer",
+    "ms-vscode.remote-server",
+    "ms-vsliveshare.vsliveshare",
+    "octref.vetur",
+    "rangav.vscode-thunder-client",
+    "ritwickdey.liveserver",
+    "ms-playwright.playwright",
+    "tintinweb.vscode-ethover",
+    "tintinweb.vscode-inline-bookmarks",
+    "tintinweb.vscode-solidity-flattener",
+    "tintinweb.vscode-solidity-language"
+  ]
+}

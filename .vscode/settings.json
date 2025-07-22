@@ -8,5 +8,21 @@
     "solidity.packageDefaultDependenciesContractsDirectory": "",
     "files.associations": {
         "*.sol": "solidity"
-    }
+    },
+    // Deshabilitar extensiones problemáticas para este workspace
+    "extensions.ignoreRecommendations": false,
+    // Configuración específica para optimizar rendimiento
+    "dart.flutterSdkPath": null,
+    "dart.sdkPath": null,
+    "docker.enableDockerComposeLanguageService": false,
+    "remote.SSH.connectTimeout": 0,
+    "liveshare.featureSet": "insiders",
+    "liveshare.allowGuestDebugControl": false,
+    "liveshare.allowGuestTaskControl": false,
+    // Deshabilitar servicios innecesarios
+    "typescript.disableAutomaticTypeAcquisition": true,
+    "npm.autoDetect": "off",
+    "grunt.autoDetect": "off",
+    "gulp.autoDetect": "off",
+    "jake.autoDetect": "off"
 }
