@@ -293,7 +293,7 @@ export async function depositAsPrivateUTXOSimplified(
       owner: currentEOA.address,
       timestamp: BigInt(Date.now()),
       isSpent: false,
-      commitment: ethers.keccak256(ethers.solidityPacked(['uint256', 'uint256'], [commitment.x, commitment.y])), // ✅ FIXED: Hash of coordinates (compatible with PrivateUTXO type)
+      commitment: JSON.stringify({ x: commitment.x.toString(), y: commitment.y.toString() }), // ✅ FIXED: Store coordinates as JSON
       parentUTXO: '',
       utxoType: UTXOType.DEPOSIT,
       blindingFactor: blindingFactor, // ✅ REAL secp256k1 blinding factor
@@ -303,7 +303,8 @@ export async function depositAsPrivateUTXOSimplified(
       blockNumber: receipt.blockNumber,
       nullifierHash: nullifierHash, // ✅ REAL nullifier hash
       cryptographyType: 'BN254', // ✅ Using REAL secp256k1 cryptography (labeled as BN254 for compatibility)
-      notes: JSON.stringify({ // ✅ Store original coordinates in notes for future crypto operations
+      notes: JSON.stringify({ // ✅ Store hash and additional metadata in notes for reference
+        commitmentHash: ethers.keccak256(ethers.solidityPacked(['uint256', 'uint256'], [commitment.x, commitment.y])),
         commitmentX: commitment.x.toString(),
         commitmentY: commitment.y.toString(),
         cryptographyType: 'secp256k1'

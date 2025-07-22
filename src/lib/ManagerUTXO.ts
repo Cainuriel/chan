@@ -144,8 +144,8 @@ export class PrivateUTXOManager extends EventEmitter {
       const signer = await provider.getSigner();
       this.currentAccount = { address: await signer.getAddress() };
 
-      // Initialize contract with provider  
-      this.contract = await createUTXOVaultContract(contractAddressOrProvider, provider);
+      // Initialize contract with SIGNER (not provider) to support transactions
+      this.contract = await createUTXOVaultContract(contractAddressOrProvider, signer);
       if (!this.contract) {
         throw new Error('Failed to create contract instance');
       }
@@ -164,6 +164,9 @@ export class PrivateUTXOManager extends EventEmitter {
       const { CryptoHelpers } = await import('../utils/crypto.helpers');
       CryptoHelpers.setContract(this.contract as any);
       
+      // Load existing UTXOs from localStorage for the current user
+      await this.loadUTXOsFromStorage();
+      
       this.isInitialized = true;
       console.log('✅ PrivateUTXOManager (refactored) initialized successfully');
       
@@ -171,6 +174,31 @@ export class PrivateUTXOManager extends EventEmitter {
     } catch (error) {
       console.error('❌ Failed to initialize PrivateUTXOManager:', error);
       return false;
+    }
+  }
+
+  /**
+   * Load UTXOs from localStorage for the current user
+   */
+  private async loadUTXOsFromStorage(): Promise<void> {
+    if (!this.currentAccount) {
+      console.log('⚠️ No account connected - cannot load UTXOs from storage');
+      return;
+    }
+
+    try {
+      const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
+      const storedUTXOs = PrivateUTXOStorage.getPrivateUTXOs(this.currentAccount.address);
+      
+      console.log(`💾 Loading ${storedUTXOs.length} UTXOs from localStorage for user ${this.currentAccount.address}`);
+      
+      storedUTXOs.forEach(utxo => {
+        this.privateUTXOs.set(utxo.id, utxo);
+      });
+      
+      console.log(`✅ Loaded ${storedUTXOs.length} UTXOs into manager from localStorage`);
+    } catch (error) {
+      console.error('❌ Failed to load UTXOs from localStorage:', error);
     }
   }
 
@@ -192,7 +220,18 @@ export class PrivateUTXOManager extends EventEmitter {
         this.currentAccount,
         EthereumHelpers,
         this.utxos,
-        (utxo: any) => this.privateUTXOs.set(utxo.id, utxo),
+        async (userAddress: string, utxo: any) => {
+          console.log('💾 Saving UTXO to manager:', utxo.id);
+          
+          // Save to internal collection
+          this.privateUTXOs.set(utxo.id, utxo);
+          console.log('✅ UTXO saved to manager internal collection');
+          
+          // ALSO save to localStorage using PrivateUTXOStorage
+          const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
+          PrivateUTXOStorage.savePrivateUTXO(userAddress, utxo);
+          console.log('✅ UTXO also saved to localStorage');
+        },
         (event: string, data: any) => this.emit(event, data)
       );
       
@@ -214,18 +253,150 @@ export class PrivateUTXOManager extends EventEmitter {
     try {
       console.log('🔄 Splitting private UTXO...');
       
-      // Get the input UTXO
-      const inputUTXO = this.privateUTXOs.get(params.inputUTXOId);
+      // Initialize crypto system if not already done
+      const { CryptoHelpers } = await import('../utils/crypto.helpers');
+      const isInitialized = await CryptoHelpers.initialize();
+      if (!isInitialized) {
+        throw new UTXOOperationError('Failed to initialize crypto system', 'splitPrivateUTXO');
+      }
+      console.log('✅ Crypto system initialized for split operation');
+      console.log('🔍 Looking for UTXO ID:', params.inputUTXOId);
+      
+      // First, try to get from internal collection
+      let inputUTXO = this.privateUTXOs.get(params.inputUTXOId);
+      
       if (!inputUTXO) {
+        // If not found in internal collection, try to load from localStorage
+        console.log('⚠️ UTXO not found in internal collection, checking localStorage...');
+        
+        if (this.currentAccount) {
+          const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
+          const allStoredUTXOs = PrivateUTXOStorage.getAllUserUTXOs(this.currentAccount.address);
+          
+          const foundUTXO = allStoredUTXOs.all.find(utxo => utxo.id === params.inputUTXOId);
+          
+          if (foundUTXO) {
+            console.log('✅ Found UTXO in localStorage, adding to internal collection');
+            
+            // Convert and add to internal collection
+            const convertedUTXO: PrivateUTXO = {
+              ...foundUTXO,
+              blindingFactor: foundUTXO.blindingFactor || '',
+              commitment: foundUTXO.commitment || '',
+              nullifierHash: foundUTXO.nullifierHash || '',
+              isPrivate: true as const,
+              recovered: foundUTXO.recovered,
+              recoveryReason: foundUTXO.recoveryReason,
+              usable: foundUTXO.usable !== false
+            };
+            
+            this.privateUTXOs.set(params.inputUTXOId, convertedUTXO);
+            inputUTXO = convertedUTXO;
+            
+            console.log('🔄 UTXO synchronized from localStorage to manager');
+          }
+        }
+      }
+      
+      if (!inputUTXO) {
+        console.error('❌ UTXO not found in manager or localStorage');
+        console.error('Available UTXOs in manager:', Array.from(this.privateUTXOs.keys()));
         throw new UTXONotFoundError(params.inputUTXOId);
       }
+      
+      // Check if UTXO is already spent
+      if (inputUTXO.isSpent) {
+        throw new UTXOAlreadySpentError(params.inputUTXOId);
+      }
+      
+      console.log('✅ Found UTXO for split:', {
+        id: inputUTXO.id,
+        value: inputUTXO.value.toString(),
+        isSpent: inputUTXO.isSpent,
+        owner: inputUTXO.owner
+      });
 
       // Convert to SplitUTXOData format
+      console.log('🔄 Converting UTXO data for split operation...');
+      
+      // Validate required cryptographic data
+      if (!inputUTXO.commitment || !inputUTXO.blindingFactor || !inputUTXO.nullifierHash) {
+        throw new UTXOOperationError(
+          'UTXO missing required cryptographic data (commitment, blindingFactor, or nullifierHash)',
+          'splitPrivateUTXO'
+        );
+      }
+      
+      // Parse commitment coordinates
+      let sourceCommitment;
+      try {
+        if (inputUTXO.commitment.startsWith('0x')) {
+          // Handle hex string format (legacy or specific format)
+          const commitmentHex = inputUTXO.commitment.slice(2);
+          if (commitmentHex.length === 128) { // 64 chars for x + 64 chars for y
+            sourceCommitment = {
+              x: BigInt('0x' + commitmentHex.slice(0, 64)),
+              y: BigInt('0x' + commitmentHex.slice(64))
+            };
+          } else if (commitmentHex.length === 64) {
+            // This is a hash, try to get coordinates from notes
+            console.log('🔍 Detected commitment hash, looking for coordinates in notes...');
+            if (inputUTXO.notes) {
+              try {
+                const notes = JSON.parse(inputUTXO.notes);
+                if (notes.commitmentX && notes.commitmentY) {
+                  sourceCommitment = {
+                    x: BigInt(notes.commitmentX),
+                    y: BigInt(notes.commitmentY)
+                  };
+                  console.log('✅ Found coordinates in notes');
+                } else {
+                  throw new Error('Commitment coordinates not found in notes');
+                }
+              } catch (notesError) {
+                throw new Error('Cannot parse coordinates from notes and commitment is a hash');
+              }
+            } else {
+              throw new Error('Commitment is a hash but no notes available with coordinates');
+            }
+          } else {
+            throw new Error(`Invalid hex commitment format: unexpected length ${commitmentHex.length}`);
+          }
+        } else if (inputUTXO.commitment.startsWith('{')) {
+          // Handle JSON format (new format)
+          const parsedCommitment = JSON.parse(inputUTXO.commitment);
+          sourceCommitment = {
+            x: BigInt(parsedCommitment.x),
+            y: BigInt(parsedCommitment.y)
+          };
+        } else {
+          // Try to parse as JSON without curly braces check
+          const parsedCommitment = JSON.parse(inputUTXO.commitment);
+          sourceCommitment = {
+            x: BigInt(parsedCommitment.x),
+            y: BigInt(parsedCommitment.y)
+          };
+        }
+      } catch (error) {
+        console.error('❌ Failed to parse commitment:', inputUTXO.commitment);
+        console.error('❌ Available data:', {
+          commitment: inputUTXO.commitment,
+          hasNotes: !!inputUTXO.notes,
+          notes: inputUTXO.notes
+        });
+        throw new UTXOOperationError(
+          `Invalid commitment format: ${error instanceof Error ? error.message : error}`,
+          'splitPrivateUTXO'
+        );
+      }
+      
+      console.log('🔐 Commitment parsed successfully:', {
+        x: sourceCommitment.x.toString(16),
+        y: sourceCommitment.y.toString(16)
+      });
+      
       const splitData: SplitUTXOData = {
-        sourceCommitment: {
-          x: BigInt(inputUTXO.commitment.slice(0, 66)),
-          y: BigInt('0x' + inputUTXO.commitment.slice(66))
-        },
+        sourceCommitment,
         sourceValue: inputUTXO.value,
         sourceBlindingFactor: inputUTXO.blindingFactor,
         sourceNullifier: inputUTXO.nullifierHash,
@@ -235,69 +406,109 @@ export class PrivateUTXOManager extends EventEmitter {
         sourceUTXOId: params.inputUTXOId
       };
 
-      // Use the split service with a dummy backend attestation provider
-      const result = await this.splitService.executeSplit(
-        splitData,
-        async (dataHash: string) => ({
-          operation: 'SPLIT',
-          dataHash: dataHash,
-          nonce: BigInt(Math.floor(Math.random() * 1000000)),
-          timestamp: BigInt(Math.floor(Date.now() / 1000)),
-          signature: '0x' + '0'.repeat(128), // Dummy signature
-        })
-      );
+      // Store original UTXO state for rollback in case of failure
+      const originalIsSpent = inputUTXO.isSpent;
+      let transactionSuccessful = false;
       
-      // Convert SplitOperationResult to UTXOOperationResult
-      const utxoResult: UTXOOperationResult = {
-        success: result.success,
-        transactionHash: result.transactionHash,
-        createdUTXOIds: result.outputUTXOIds || [],
-        error: result.error
-      };
-
-      // Update UTXOs state if successful
-      if (result.success) {
-        // Mark input UTXO as spent
-        inputUTXO.isSpent = true;
-        this.emit('private:utxo:spent', params.inputUTXOId);
+      try {
+        // Use the split service with a dummy backend attestation provider
+        console.log('🚀 Executing split operation on blockchain...');
+        const result = await this.splitService.executeSplit(
+          splitData,
+          async (dataHash: string) => ({
+            operation: 'SPLIT',
+            dataHash: dataHash,
+            nonce: BigInt(Math.floor(Math.random() * 1000000)),
+            timestamp: BigInt(Math.floor(Date.now() / 1000)),
+            signature: '0x' + '0'.repeat(128), // Dummy signature
+          })
+        );
         
-        // Add output UTXOs
-        if (result.outputUTXOIds) {
-          result.outputUTXOIds.forEach((utxoId, index) => {
-            const outputAmount = params.outputValues[index];
-            const outputUTXO: PrivateUTXO = {
-              id: utxoId,
-              exists: true,
-              value: outputAmount,
-              tokenAddress: inputUTXO.tokenAddress,
-              owner: this.currentAccount?.address || '',
-              timestamp: BigInt(Date.now()),
-              isSpent: false,
-              commitment: result.outputCommitmentHashes?.[index] || '',
-              parentUTXO: params.inputUTXOId,
-              utxoType: UTXOType.SPLIT,
-              localCreatedAt: Date.now(),
-              confirmed: false,
-              nullifierHash: result.outputNullifiers?.[index] || '',
-              blindingFactor: '', // Would need to be provided by the service
-              isPrivate: true,
-              cryptographyType: 'BN254'
-            };
-            
-            this.privateUTXOs.set(utxoId, outputUTXO);
-            this.utxos.set(utxoId, outputUTXO);
-            
-            this.emit('private:utxo:created', outputUTXO);
+        // Convert SplitOperationResult to UTXOOperationResult
+        const utxoResult: UTXOOperationResult = {
+          success: result.success,
+          transactionHash: result.transactionHash,
+          createdUTXOIds: result.outputUTXOIds || [],
+          error: result.error
+        };
+
+        // ONLY update UTXOs state if blockchain transaction was successful
+        if (result.success && result.transactionHash) {
+          console.log('✅ Blockchain transaction confirmed, updating UTXO state...');
+          transactionSuccessful = true;
+          
+          // Mark input UTXO as spent ONLY after confirmed blockchain success
+          console.log(`🔄 Marking UTXO ${params.inputUTXOId} as spent (NOT DELETING)`);
+          inputUTXO.isSpent = true;
+          console.log(`✅ UTXO ${params.inputUTXOId} marked as spent, preserved in memory`);
+          
+          // Update spent UTXO in localStorage too
+          const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
+          PrivateUTXOStorage.savePrivateUTXO(this.currentAccount?.address || '', inputUTXO);
+          console.log(`💾 Updated spent UTXO ${params.inputUTXOId} in localStorage`);
+          
+          this.emit('private:utxo:spent', params.inputUTXOId);
+          
+          // Add output UTXOs
+          if (result.outputUTXOIds) {
+            result.outputUTXOIds.forEach(async (utxoId, index) => {
+              const outputAmount = params.outputValues[index];
+              const outputUTXO: PrivateUTXO = {
+                id: utxoId,
+                exists: true,
+                value: outputAmount,
+                tokenAddress: inputUTXO.tokenAddress,
+                owner: this.currentAccount?.address || '',
+                timestamp: BigInt(Date.now()),
+                isSpent: false,
+                commitment: result.outputCommitmentHashes?.[index] || '',
+                parentUTXO: params.inputUTXOId,
+                utxoType: UTXOType.SPLIT,
+                localCreatedAt: Date.now(),
+                confirmed: true, // Mark as confirmed since blockchain transaction succeeded
+                nullifierHash: result.outputNullifiers?.[index] || '',
+                blindingFactor: '', // Would need to be provided by the service
+                isPrivate: true,
+                cryptographyType: 'BN254'
+              };
+              
+              // Save to internal collections
+              this.privateUTXOs.set(utxoId, outputUTXO);
+              this.utxos.set(utxoId, outputUTXO);
+              
+              // ALSO save to localStorage
+              PrivateUTXOStorage.savePrivateUTXO(this.currentAccount?.address || '', outputUTXO);
+              console.log(`💾 Saved new split UTXO ${utxoId} to localStorage`);
+              
+              this.emit('private:utxo:created', outputUTXO);
+            });
+          }
+          
+          this.emit('private:utxo:split', { 
+            input: params.inputUTXOId, 
+            outputs: result.outputUTXOIds || [] 
           });
+          
+          console.log('🎉 Split operation completed successfully');
+        } else {
+          console.error('❌ Split operation failed:', result.error);
+          throw new UTXOOperationError(
+            result.error || 'Split operation failed without specific error',
+            'splitPrivateUTXO'
+          );
         }
         
-        this.emit('private:utxo:split', { 
-          input: params.inputUTXOId, 
-          outputs: result.outputUTXOIds || [] 
-        });
+        return utxoResult;
+        
+      } catch (splitError) {
+        // Rollback UTXO state if transaction failed
+        if (!transactionSuccessful) {
+          console.log('🔄 Rolling back UTXO state due to failed transaction...');
+          inputUTXO.isSpent = originalIsSpent;
+          console.log('✅ UTXO state rolled back successfully');
+        }
+        throw splitError;
       }
-      
-      return utxoResult;
     } catch (error) {
       console.error('❌ Failed to split private UTXO:', error);
       throw new UTXOOperationError(`Failed to split private UTXO: ${error}`, 'splitPrivateUTXO');
@@ -319,10 +530,100 @@ export class PrivateUTXOManager extends EventEmitter {
   }
 
   /**
-   * Get all private UTXOs
+   * Get all private UTXOs (available - not spent)
    */
   getPrivateUTXOs(): PrivateUTXO[] {
-    return Array.from(this.privateUTXOs.values()).filter(utxo => !utxo.isSpent);
+    return Array.from(this.privateUTXOs.values()).filter(utxo => 
+      !utxo.isSpent && 
+      utxo.owner && 
+      this.currentAccount && 
+      utxo.owner.toLowerCase() === this.currentAccount.address.toLowerCase()
+    );
+  }
+
+  /**
+   * Get spent/historical UTXOs for the current user
+   */
+  getSpentUTXOs(): PrivateUTXO[] {
+    return Array.from(this.privateUTXOs.values()).filter(utxo => 
+      utxo.isSpent && 
+      utxo.owner && 
+      this.currentAccount && 
+      utxo.owner.toLowerCase() === this.currentAccount.address.toLowerCase()
+    );
+  }
+
+  /**
+   * Get all UTXOs (spent + unspent) for the current user
+   */
+  getAllUserUTXOs(): PrivateUTXO[] {
+    return Array.from(this.privateUTXOs.values()).filter(utxo => 
+      utxo.owner && 
+      this.currentAccount && 
+      utxo.owner.toLowerCase() === this.currentAccount.address.toLowerCase()
+    );
+  }
+
+  /**
+   * Recover a UTXO by marking it as unspent (emergency function)
+   */
+  async recoverUTXO(utxoId: string, reason: string = 'Manual recovery'): Promise<boolean> {
+    const utxo = this.privateUTXOs.get(utxoId);
+    if (!utxo) {
+      console.error(`❌ UTXO ${utxoId} not found for recovery`);
+      return false;
+    }
+
+    if (!this.currentAccount || utxo.owner.toLowerCase() !== this.currentAccount.address.toLowerCase()) {
+      console.error(`❌ Cannot recover UTXO ${utxoId}: not owned by current user`);
+      return false;
+    }
+
+    if (!utxo.isSpent) {
+      console.log(`⚠️ UTXO ${utxoId} is already unspent, no recovery needed`);
+      return true;
+    }
+
+    // Mark as unspent and add recovery information
+    utxo.isSpent = false;
+    utxo.recovered = true;
+    utxo.recoveryReason = reason;
+    utxo.usable = true;
+
+    // Update in localStorage too
+    const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
+    PrivateUTXOStorage.savePrivateUTXO(this.currentAccount.address, utxo);
+
+    console.log(`✅ UTXO ${utxoId} recovered successfully. Reason: ${reason}`);
+    this.emit('private:utxo:recovered', { utxoId, reason });
+    
+    return true;
+  }
+
+  /**
+   * Batch recover multiple UTXOs
+   */
+  async recoverMultipleUTXOs(utxoIds: string[], reason: string = 'Batch recovery'): Promise<{ recovered: string[], failed: string[] }> {
+    const recovered: string[] = [];
+    const failed: string[] = [];
+
+    for (const utxoId of utxoIds) {
+      try {
+        const success = await this.recoverUTXO(utxoId, reason);
+        if (success) {
+          recovered.push(utxoId);
+        } else {
+          failed.push(utxoId);
+        }
+      } catch (error) {
+        console.error(`❌ Failed to recover UTXO ${utxoId}:`, error);
+        failed.push(utxoId);
+      }
+    }
+
+    console.log(`🔄 Batch recovery completed: ${recovered.length} recovered, ${failed.length} failed`);
+    
+    return { recovered, failed };
   }
 
   /**
@@ -344,7 +645,7 @@ export class PrivateUTXOManager extends EventEmitter {
    */
   getPrivateUTXOsByOwner(ownerAddress: string): PrivateUTXO[] {
     return this.getPrivateUTXOs().filter(utxo => 
-      utxo.owner.toLowerCase() === ownerAddress.toLowerCase()
+      utxo.owner && utxo.owner.toLowerCase() === ownerAddress.toLowerCase()
     );
   }
 
@@ -459,24 +760,30 @@ export class PrivateUTXOManager extends EventEmitter {
    * Get manager statistics
    */
   getStats(): UTXOManagerStats {
-    const allUTXOs = Array.from(this.privateUTXOs.values());
-    const unspentUTXOs = allUTXOs.filter(utxo => !utxo.isSpent);
+    const allUserUTXOs = this.getAllUserUTXOs();
+    const unspentUTXOs = allUserUTXOs.filter(utxo => !utxo.isSpent);
+    const spentUTXOs = allUserUTXOs.filter(utxo => utxo.isSpent);
+    const recoveredUTXOs = allUserUTXOs.filter(utxo => utxo.recovered);
+    
+    // Calculate total balance from unspent UTXOs
+    const totalBalance = unspentUTXOs.reduce((sum, utxo) => sum + utxo.value, BigInt(0));
     
     return {
-      totalUTXOs: allUTXOs.length,
+      totalUTXOs: allUserUTXOs.length,
       unspentUTXOs: unspentUTXOs.length,
-      spentUTXOs: allUTXOs.length - unspentUTXOs.length,
+      spentUTXOs: spentUTXOs.length,
+      recoveredUTXOs: recoveredUTXOs.length,
       uniqueTokens: 0, // TODO: Calculate unique tokens
-      totalBalance: BigInt(0), // TODO: Calculate total balance
-      privateUTXOs: allUTXOs.length,
-      confirmedUTXOs: allUTXOs.filter(utxo => utxo.confirmed).length,
+      totalBalance,
+      privateUTXOs: allUserUTXOs.length,
+      confirmedUTXOs: allUserUTXOs.filter(utxo => utxo.confirmed).length,
       balanceByToken: {}, // TODO: Calculate balance by token
-      averageUTXOValue: BigInt(0), // TODO: Calculate average value
+      averageUTXOValue: unspentUTXOs.length > 0 ? totalBalance / BigInt(unspentUTXOs.length) : BigInt(0),
       creationDistribution: [], // TODO: Calculate creation distribution
-      bn254UTXOs: allUTXOs.length,
+      bn254UTXOs: allUserUTXOs.length,
       bn254Operations: this.bn254OperationCount,
       cryptographyDistribution: {
-        BN254: allUTXOs.length,
+        BN254: allUserUTXOs.length,
         Other: 0
       }
     };
@@ -561,6 +868,54 @@ export class PrivateUTXOManager extends EventEmitter {
    */
   async debugContractInteraction(params: CreateUTXOParams): Promise<void> {
     console.log('🔍 Debugging contract interaction...');
+  }
+
+  /**
+   * Debug UTXO state - show detailed information about all UTXOs
+   */
+  debugUTXOState(): void {
+    if (!this.currentAccount) {
+      console.log('⚠️ No account connected - cannot debug UTXO state');
+      return;
+    }
+
+    const allUserUTXOs = this.getAllUserUTXOs();
+    const unspentUTXOs = this.getPrivateUTXOs();
+    const spentUTXOs = this.getSpentUTXOs();
+
+    console.log('🔍 === UTXO STATE DEBUG ===');
+    console.log(`👤 User: ${this.currentAccount.address}`);
+    console.log(`📊 Total UTXOs: ${allUserUTXOs.length}`);
+    console.log(`✅ Available UTXOs: ${unspentUTXOs.length}`);
+    console.log(`❌ Spent UTXOs: ${spentUTXOs.length}`);
+    
+    console.log('\n📋 Available UTXOs:');
+    unspentUTXOs.forEach(utxo => {
+      console.log(`  - ${utxo.id}: ${utxo.value.toString()} ${utxo.recovered ? '(recovered)' : ''}`);
+    });
+    
+    console.log('\n📋 Spent UTXOs:');
+    spentUTXOs.forEach(utxo => {
+      console.log(`  - ${utxo.id}: ${utxo.value.toString()} (spent) ${utxo.recovered ? '(recovered)' : ''}`);
+    });
+    
+    console.log('🔍 === END DEBUG ===\n');
+  }
+
+  /**
+   * Find UTXO by ID (including spent ones)
+   */
+  findUTXO(utxoId: string): PrivateUTXO | undefined {
+    return this.privateUTXOs.get(utxoId);
+  }
+
+  /**
+   * Check if UTXO belongs to current user
+   */
+  isUserUTXO(utxoId: string): boolean {
+    const utxo = this.findUTXO(utxoId);
+    return !!(utxo && this.currentAccount && 
+      utxo.owner.toLowerCase() === this.currentAccount.address.toLowerCase());
   }
 }
 

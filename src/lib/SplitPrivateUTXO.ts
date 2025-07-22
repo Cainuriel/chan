@@ -216,6 +216,17 @@ export class SplitPrivateUTXO {
 
     const signerAddress = await this.signer.getAddress();
 
+    // Generar blinding factors si no se proporcionaron
+    if (!splitData.outputBlindingFactors || splitData.outputBlindingFactors.length === 0) {
+      console.log('🔐 Generando blinding factors criptográficos automáticamente...');
+      splitData.outputBlindingFactors = [];
+      for (let i = 0; i < splitData.outputValues.length; i++) {
+        const blindingFactor = ZenroomHelpers.generateSecureBlindingFactor();
+        splitData.outputBlindingFactors.push(blindingFactor);
+        console.log(`🔐 Generated blinding factor ${i + 1}: ${blindingFactor.substring(0, 16)}...`);
+      }
+    }
+
     for (let i = 0; i < splitData.outputValues.length; i++) {
       const value = splitData.outputValues[i];
       const blindingFactor = splitData.outputBlindingFactors[i];
@@ -316,9 +327,20 @@ export class SplitPrivateUTXO {
       throw new SplitValidationError('Máximo 10 UTXOs de salida permitidos');
     }
 
-    // Validar arrays consistentes para criptografía
-    if (splitData.outputValues.length !== splitData.outputBlindingFactors.length) {
-      throw new SplitValidationError('Arrays de valores y blinding factors deben ser consistentes');
+    // Validar arrays consistentes para criptografía (si se proporcionaron blinding factors)
+    if (splitData.outputBlindingFactors && splitData.outputBlindingFactors.length > 0) {
+      if (splitData.outputValues.length !== splitData.outputBlindingFactors.length) {
+        throw new SplitValidationError('Arrays de valores y blinding factors deben ser consistentes');
+      }
+      
+      // Validar blinding factors criptográficos REALES (solo si se proporcionaron)
+      for (let i = 0; i < splitData.outputBlindingFactors.length; i++) {
+        if (!splitData.outputBlindingFactors[i] || splitData.outputBlindingFactors[i].length < 32) {
+          throw new SplitValidationError(`Blinding factor criptográfico ${i} inválido`);
+        }
+      }
+    } else {
+      console.log('ℹ️ No se proporcionaron blinding factors - se generarán automáticamente');
     }
 
     // VALIDACIÓN CRÍTICA: Conservación de valor REAL
@@ -344,13 +366,6 @@ export class SplitPrivateUTXO {
     // Validar nullifier criptográfico REAL
     if (!splitData.sourceNullifier || splitData.sourceNullifier.length !== 66) {
       throw new SplitValidationError('Nullifier criptográfico inválido');
-    }
-
-    // Validar blinding factors criptográficos REALES
-    for (let i = 0; i < splitData.outputBlindingFactors.length; i++) {
-      if (!splitData.outputBlindingFactors[i] || splitData.outputBlindingFactors[i].length < 32) {
-        throw new SplitValidationError(`Blinding factor criptográfico ${i} inválido`);
-      }
     }
 
     console.log(`✅ Validación criptográfica REAL exitosa: conservación verificada`);

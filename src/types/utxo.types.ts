@@ -305,6 +305,7 @@ export interface UTXOManagerStats {
   totalBalance: bigint;
   privateUTXOs: number;
   spentUTXOs: number;
+  recoveredUTXOs: number;
   confirmedUTXOs: number;
   balanceByToken: { [tokenAddress: string]: bigint };
   averageUTXOValue: bigint;
