@@ -3,7 +3,7 @@
  * Preserva privacidad total: solo el usuario puede ver sus propios UTXOs
  */
 
-import type { PrivateUTXO } from './PrivateUTXOManager';
+import type { PrivateUTXO } from './ManagerUTXO';
 
 export class PrivateUTXOStorage {
   private static readonly STORAGE_KEY = 'private-utxos';

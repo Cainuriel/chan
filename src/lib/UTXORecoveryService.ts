@@ -4,7 +4,7 @@
  */
 
 import { ethers, type EventLog } from 'ethers';
-import type { PrivateUTXO } from './PrivateUTXOManager';
+import type { PrivateUTXO } from './ManagerUTXO';
 import type { ExtendedUTXOData } from '../types/utxo.types';
 import { UTXOType } from '../types/utxo.types';
 import { PrivateUTXOStorage } from './PrivateUTXOStorage';
