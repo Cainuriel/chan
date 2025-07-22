@@ -173,21 +173,32 @@ contract UTXOVault is UTXOVaultBase, ReentrancyGuard {
     function splitPrivateUTXO(
         SplitParams calldata params
     ) external nonReentrant returns (bytes32[] memory) {
-        // Validaciones básicas
-        if (nullifiers[params.inputNullifier]) revert NullifierAlreadyUsed();
-        if (params.outputCommitments.length == 0) revert InvalidArrayLength();
-        if (params.outputCommitments.length != params.outputNullifiers.length) revert InvalidArrayLength();
+        // Pre-validación para coherencia con frontend
+        bytes32 inputCommitmentHash = _hashCommitment(params.inputCommitment);
+        
+        // Preparar arrays para preValidateSplit
+        bytes32[] memory outputCommitmentHashes = new bytes32[](params.outputCommitments.length);
+        for (uint256 i = 0; i < params.outputCommitments.length; i++) {
+            outputCommitmentHashes[i] = _hashCommitment(params.outputCommitments[i]);
+        }
+        
+        // Validar usando preValidateSplit (coherencia con frontend)
+        // Necesitamos crear una función wrapper que acepte memory arrays
+        (bool isValid, uint8 errorCode) = preValidateSplit(
+            inputCommitmentHash,
+            outputCommitmentHashes,
+            params.inputNullifier
+        );
+
+        if (!isValid) {
+            // Mapear errorCode a custom errors apropiados
+            _revertWithSplitError(errorCode);
+        }
         
         // Verificar nullifiers únicos en outputs
         for (uint256 i = 0; i < params.outputNullifiers.length; i++) {
             if (nullifiers[params.outputNullifiers[i]]) revert NullifierAlreadyUsed();
         }
-        
-        // Verificar que input UTXO existe y no está gastado
-        bytes32 inputCommitmentHash = _hashCommitment(params.inputCommitment);
-        bytes32 inputUTXOId = commitmentHashToUTXO[inputCommitmentHash];
-        if (inputUTXOId == bytes32(0)) revert UTXONotFound();
-        if (utxos[inputUTXOId].isSpent) revert UTXOAlreadySpent();
         
         // Verificar attestation del backend
         if (!_verifyAttestation(params.attestation)) revert InvalidAttestation();
@@ -201,7 +212,29 @@ contract UTXOVault is UTXOVaultBase, ReentrancyGuard {
         if (params.attestation.dataHash != expectedDataHash) revert InvalidAttestation();
         
         // Ejecutar split
+        bytes32 inputUTXOId = commitmentHashToUTXO[inputCommitmentHash];
         return _executeSplit(inputUTXOId, params);
+    }
+
+    /**
+     * @dev Mapear código de error de preValidateSplit a custom error
+     */
+    function _revertWithSplitError(uint8 errorCode) internal pure {
+        if (errorCode == 1) {
+            revert UTXONotFound();
+        } else if (errorCode == 2) {
+            revert UTXOAlreadySpent();
+        } else if (errorCode == 3) {
+            revert InvalidArrayLength(); // No hay outputs
+        } else if (errorCode == 4) {
+            revert InvalidAttestation(); // Commitment vacío
+        } else if (errorCode == 6) {
+            revert InvalidAttestation(); // Nullifier inválido
+        } else if (errorCode == 7) {
+            revert NullifierAlreadyUsed(); // Nullifier ya usado
+        } else {
+            revert InvalidAttestation();
+        }
     }
     
     /**

@@ -378,9 +378,9 @@ abstract contract UTXOVaultBase is Ownable {
      */
     function preValidateSplit(
         bytes32 sourceCommitment,
-        bytes32[] calldata outputCommitments,
+        bytes32[] memory outputCommitments,
         bytes32 sourceNullifier
-    ) external view returns (bool isValid, uint8 errorCode) {
+    ) public view returns (bool isValid, uint8 errorCode) {
         
         // 1. Verificar que UTXO source existe y no está gastado
         bytes32 utxoId = commitmentHashToUTXO[sourceCommitment];
@@ -423,7 +423,7 @@ abstract contract UTXOVaultBase is Ownable {
         bytes32 sourceCommitment,
         bytes32 sourceNullifier,
         bytes32 outputCommitment
-    ) external view returns (bool isValid, uint8 errorCode) {
+    ) public view returns (bool isValid, uint8 errorCode) {
         
         // 1. Verificar source existe y no está gastado
         bytes32 utxoId = commitmentHashToUTXO[sourceCommitment];
@@ -460,7 +460,7 @@ abstract contract UTXOVaultBase is Ownable {
         bytes32 sourceNullifier,
         uint256 amount,
         address recipient
-    ) external view returns (bool isValid, uint8 errorCode) {
+    ) public view returns (bool isValid, uint8 errorCode) {
         
         // 1. Verificar source existe y no está gastado
         bytes32 utxoId = commitmentHashToUTXO[sourceCommitment];
