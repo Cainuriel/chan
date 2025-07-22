@@ -164,13 +164,26 @@ export class AttestationService {
   }
 
   /**
-   * Get next nonce for user
+   * Get next nonce from contract - ensures sequential nonce
    */
-  private getNextNonce(userAddress: string): bigint {
-    const currentNonce = this.nonces.get(userAddress.toLowerCase()) || BigInt(0);
-    const nextNonce = currentNonce + BigInt(1);
-    this.nonces.set(userAddress.toLowerCase(), nextNonce);
-    return nextNonce;
+  private async getNextNonce(userAddress: string): Promise<bigint> {
+    if (!this.contract) {
+      throw new Error('Contract not set - cannot get current nonce');
+    }
+
+    try {
+      // Get contract stats to obtain the current nonce
+      const nonce = await this.contract.lastNonce();
+      const currentNonce = BigInt(nonce);
+      const nextNonce = currentNonce + BigInt(1);
+      
+      console.log(`📊 Contract nonce sync: current=${nonce}, next=${nextNonce}`);
+      
+      return nextNonce;
+    } catch (error) {
+      console.error('❌ Failed to get nonce from contract:', error);
+      throw new Error(`Failed to get sequential nonce: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   /**
@@ -244,7 +257,7 @@ export class AttestationService {
     }
 
     const userAddress = data.userAddress;
-    const nonce = this.getNextNonce(userAddress);
+    const nonce = await this.getNextNonce(userAddress);
     const timestamp = BigInt(Math.floor(Date.now() / 1000));
     const dataHash = await this.createDepositDataHash(data);
 
@@ -309,7 +322,7 @@ export class AttestationService {
     }
 
     const userAddress = data.fromAddress;
-    const nonce = this.getNextNonce(userAddress);
+    const nonce = await this.getNextNonce(userAddress);
     const timestamp = BigInt(Math.floor(Date.now() / 1000));
     const dataHash = this.createTransferDataHash(data);
 
@@ -362,7 +375,7 @@ export class AttestationService {
     }
 
     const userAddress = data.userAddress;
-    const nonce = this.getNextNonce(userAddress);
+    const nonce = await this.getNextNonce(userAddress);
     const timestamp = BigInt(Math.floor(Date.now() / 1000));
     const dataHash = this.createSplitDataHash(data);
 
@@ -415,7 +428,7 @@ export class AttestationService {
     }
 
     const userAddress = data.recipientAddress;
-    const nonce = this.getNextNonce(userAddress);
+    const nonce = await this.getNextNonce(userAddress);
     const timestamp = BigInt(Math.floor(Date.now() / 1000));
     const dataHash = this.createWithdrawDataHash(data);
 
@@ -493,7 +506,7 @@ export class AttestationService {
     }
 
     const currentTime = Math.floor(Date.now() / 1000);
-    const nonce = customNonce || BigInt(Math.floor(Math.random() * 1000000));
+    const nonce = customNonce || await this.getNextNonce('0x0000000000000000000000000000000000000000'); // Use dummy address for contract nonce
     
     // Create attestation data structure
     const attestationData = {
