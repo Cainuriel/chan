@@ -366,6 +366,10 @@ export class PrivateUTXOManager extends EventEmitter {
         if (provider) {
           const signer = await provider.getSigner();
           this.currentAccount = { address: await signer.getAddress() };
+          
+          // Emit wallet:connected event with account data
+          console.log('🔌 Emitting wallet:connected event with account:', this.currentAccount);
+          this.emit('wallet:connected', this.currentAccount);
         }
       }
       return result.success;
@@ -379,8 +383,15 @@ export class PrivateUTXOManager extends EventEmitter {
    * Disconnect wallet
    */
   disconnect(): void {
+    const wasConnected = this.currentAccount !== null;
     this.currentAccount = null;
     EthereumHelpers.disconnectWallet();
+    
+    // Emit wallet:disconnected event if wallet was connected
+    if (wasConnected) {
+      console.log('🔌 Emitting wallet:disconnected event');
+      this.emit('wallet:disconnected');
+    }
   }
 
   /**

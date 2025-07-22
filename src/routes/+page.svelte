@@ -217,6 +217,9 @@
     // Wallet connection events
     privateUTXOManager.on('wallet:connected', (account: EOAData) => {
       console.log('🔌 Wallet connected:', account);
+      console.log('🔍 Current step before update:', currentStep);
+      console.log('🔍 Is wallet connected before update:', isWalletConnected);
+      
       currentAccount = account;
       
       // NO setear isInitialized aquí - solo cuando se complete el flujo completo
@@ -229,6 +232,13 @@
         isWalletConnected = true;
         currentStep = 2;
         console.log('✅ Step 1 complete: Advancing to network selection');
+        console.log('🔍 Updated - currentStep:', currentStep, 'isWalletConnected:', isWalletConnected);
+        
+        // Forzar re-render de Svelte
+        currentStep = currentStep; // Force reactivity
+        
+        // Mostrar notificación de progreso
+        addNotification('info', '🎯 Step 2: Please select a network to continue');
       }
       
       // Solo refrescar datos si ya estamos completamente inicializados
@@ -442,6 +452,12 @@
   // ========================
   
   async function step1_connectWallet() {
+    // Evitar doble ejecución
+    if (isWalletConnected) {
+      console.log('🔌 Wallet already connected, skipping...');
+      return;
+    }
+    
     try {
       console.log('🔌 Step 1: Connecting wallet...');
       addNotification('info', 'Connecting wallet...');
@@ -449,8 +465,7 @@
       const success = await privateUTXOManager.connectWallet(PREFERRED_PROVIDER);
       if (success) {
         // El estado se actualiza automáticamente en el evento 'wallet:connected'
-        // isWalletConnected = true;
-        // currentStep = 2;
+        // NO actualizar manualmente aquí para evitar conflictos
         const account = privateUTXOManager.getCurrentAccount();
         if (account && currentAccount) {
           currentAccount.address = account.address;
@@ -948,7 +963,10 @@
       console.log(`  - Total: ${all.length}`);
       
       // Update the UI with all UTXOs
-      privateUTXOs = all;
+      privateUTXOs = all.map((utxo: any) => ({
+        ...utxo,
+        cryptographyType: "BN254"
+      }));
       
       // Show result
       if (all.length > 0) {
