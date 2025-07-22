@@ -96,7 +96,12 @@ export class AttestationService {
 
       // Solo usar import.meta.env en el contexto del navegador
       // ADVERTENCIA: Las variables VITE_ son públicas y visibles en el cliente
-      const privateKey = import.meta.env.VITE_PRIVATE_KEY_ADMIN;
+      let privateKey = import.meta.env.VITE_PRIVATE_KEY_ADMIN;
+      
+      // Fallback: try accessing via global if import.meta.env is not available
+      if (!privateKey && typeof window !== 'undefined' && (window as any).__VITE_ENV__) {
+        privateKey = (window as any).__VITE_ENV__.VITE_PRIVATE_KEY_ADMIN;
+      }
       
       if (!privateKey) {
         console.warn('⚠️ No admin private key found - attestations will not be available');
@@ -107,17 +112,26 @@ export class AttestationService {
       console.warn('🔐 SECURITY WARNING: Private key is exposed in client bundle!');
       console.warn('🏭 For production: Implement server-side attestation signing');
 
-      // Validar formato de clave privada
-      if (!privateKey.startsWith('0x')) {
-        throw new Error('Private key must start with 0x');
+      // Ensure private key is a string and has proper format
+      const privateKeyStr = String(privateKey).trim();
+      
+      // Always add 0x prefix if not present (expected format from .env)
+      const formattedPrivateKey = privateKeyStr.startsWith('0x') ? 
+        privateKeyStr : '0x' + privateKeyStr;
+
+      // Validate hex format (64 chars + 0x prefix = 66 total)
+      if (formattedPrivateKey.length !== 66) {
+        throw new Error(`Private key must be 64 hex characters (32 bytes). Got length: ${formattedPrivateKey.length - 2}, raw length: ${privateKeyStr.length}`);
       }
 
-      if (privateKey.length !== 66) {
-        throw new Error('Private key must be 64 hex characters (32 bytes) plus 0x prefix');
+      // Validate hex characters
+      const hexPattern = /^0x[0-9a-fA-F]{64}$/;
+      if (!hexPattern.test(formattedPrivateKey)) {
+        throw new Error(`Private key must contain only valid hex characters. Pattern test failed for: ${formattedPrivateKey.substring(0, 10)}...`);
       }
 
       // Crear wallet desde la clave privada
-      this.authorizedSigner = new ethers.Wallet(privateKey);
+      this.authorizedSigner = new ethers.Wallet(formattedPrivateKey);
       
       console.log('✅ Attestation signer initialized');
       console.log('📮 Signer address:', this.authorizedSigner.address);
