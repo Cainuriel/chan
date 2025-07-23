@@ -566,6 +566,26 @@ export class PrivateUTXOManager extends EventEmitter {
   }
 
   /**
+   * Get ALL private UTXOs for owner (including spent ones)
+   */
+  getAllPrivateUTXOsByOwner(ownerAddress: string): PrivateUTXO[] {
+    console.log('🔍 getAllPrivateUTXOsByOwner called with:', ownerAddress);
+    
+    const allUTXOs = Array.from(this.privateUTXOs.values());
+    console.log('🔍 All UTXOs (including spent):', allUTXOs.length);
+    
+    const filteredUTXOs = allUTXOs.filter(utxo => {
+      const hasOwner = utxo.owner;
+      const matches = hasOwner && utxo.owner.toLowerCase() === ownerAddress.toLowerCase();
+      console.log(`🔍 UTXO ${utxo.id.slice(0, 8)}... owner: ${utxo.owner || 'MISSING'} vs ${ownerAddress} spent: ${utxo.isSpent} = ${matches}`);
+      return matches;
+    });
+    
+    console.log('🔍 Filtered UTXOs (all) for owner:', filteredUTXOs.length);
+    return filteredUTXOs;
+  }
+
+  /**
    * Get spent/historical UTXOs for the current user
    */
   getSpentUTXOs(): PrivateUTXO[] {
@@ -668,9 +688,20 @@ export class PrivateUTXOManager extends EventEmitter {
    * Get private UTXOs by owner address
    */
   getPrivateUTXOsByOwner(ownerAddress: string): PrivateUTXO[] {
-    return this.getPrivateUTXOs().filter(utxo => 
-      utxo.owner && utxo.owner.toLowerCase() === ownerAddress.toLowerCase()
-    );
+    console.log('🔍 getPrivateUTXOsByOwner called with:', ownerAddress);
+    
+    const allUTXOs = this.getPrivateUTXOs();
+    console.log('🔍 All available UTXOs (unspent):', allUTXOs.length);
+    
+    const filteredUTXOs = allUTXOs.filter(utxo => {
+      const hasOwner = utxo.owner;
+      const matches = hasOwner && utxo.owner.toLowerCase() === ownerAddress.toLowerCase();
+      console.log(`🔍 UTXO ${utxo.id.slice(0, 8)}... owner: ${utxo.owner || 'MISSING'} vs ${ownerAddress} isSpent: ${utxo.isSpent} = ${matches}`);
+      return matches;
+    });
+    
+    console.log('🔍 Filtered available UTXOs for owner:', filteredUTXOs.length);
+    return filteredUTXOs;
   }
 
   /**

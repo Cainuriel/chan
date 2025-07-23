@@ -56,12 +56,38 @@
     
     for (const tokenAddress of tokenAddresses) {
       if (!tokenMetadataCache[tokenAddress]) {
+        // 🔧 TEMPORARY: Set known token info immediately to avoid decimals issue
+        if (tokenAddress.toLowerCase() === '0xca4d19d712944874f8dd1472c6de5dd8e5c9e5e2' ||
+            tokenAddress.toLowerCase() === '0xb058daded40d0a020a492ce5ed3eb368a78e6497') {
+          tokenMetadataCache[tokenAddress] = {
+            address: tokenAddress,
+            symbol: 'USDT',
+            name: 'Tether USD',
+            decimals: 6, // Correct decimals immediately
+            balance: BigInt(0),
+            allowance: BigInt(0),
+            verified: true
+          };
+          tokenMetadataCache = { ...tokenMetadataCache };
+        }
+        
         try {
           const tokenData = await EthereumHelpers.getERC20TokenInfo(tokenAddress);
           tokenMetadataCache[tokenAddress] = tokenData;
           tokenMetadataCache = { ...tokenMetadataCache };
         } catch (error) {
-          console.error(`Failed to load token metadata for ${tokenAddress}:`, error);
+          // Only use fallback if we don't have the hardcoded data
+          if (!tokenMetadataCache[tokenAddress]) {
+            tokenMetadataCache[tokenAddress] = {
+              address: tokenAddress,
+              symbol: 'Unknown',
+              name: 'Unknown Token',
+              decimals: 18,
+              balance: BigInt(0),
+              allowance: BigInt(0),
+              verified: false
+            };
+          }
         }
       }
     }
@@ -71,11 +97,24 @@
   }
 
   function getTokenMetadata(tokenAddress: string): ERC20TokenData {
-    return tokenMetadataCache[tokenAddress] || {
+    const cached = tokenMetadataCache[tokenAddress];
+    if (cached) {
+      return cached;
+    }
+    
+    // 🔧 TEMPORARY: Hardcode known token decimals
+    let knownDecimals = 18; // Default fallback
+    
+    // Token specific overrides (add more as needed)
+    if (tokenAddress.toLowerCase() === '0xca4d19d712944874f8dd1472c6de5dd8e5c9e5e2') {
+      knownDecimals = 6; // Your token has 6 decimals
+    }
+    
+    return {
       address: tokenAddress,
       symbol: 'Unknown',
       name: 'Unknown Token',
-      decimals: 18,
+      decimals: knownDecimals,
       balance: BigInt(0),
       allowance: BigInt(0),
       verified: false

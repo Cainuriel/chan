@@ -34,7 +34,8 @@
   // State
   let isInitialized = false;
   let currentAccount: EOAData | null = null;
-  let privateUTXOs: PrivateUTXO[] = [];
+  let privateUTXOs: PrivateUTXO[] = []; // Todos los UTXOs (para History)
+  let availableUTXOs: PrivateUTXO[] = []; // Solo UTXOs disponibles (para Balance)
   let stats: UTXOManagerStats | null = null;
   let activeTab = 'balance';
   let notifications: Array<{id: string, type: string, message: string}> = [];
@@ -77,94 +78,49 @@
 
   onMount(async () => {
     try {
-      // Make privateUTXOManager available globally for console access
+  // Make privateUTXOManager available globally for console access
       if (typeof window !== 'undefined') {
         (window as any).privateUTXOManager = privateUTXOManager;
-        (window as any).runMigrationTest = runMigrationTest;
-        (window as any).scanForLostUTXOs = scanForLostUTXOs;
-        (window as any).auditUTXOConsistency = auditUTXOConsistency;
-        (window as any).getRecoveryStats = getRecoveryStats;
         
-        // Add hash comparison debug function
-        (window as any).debugHashCalculation = async (
-          tokenAddress: string,
-          commitmentX: string | bigint,
-          commitmentY: string | bigint,
-          nullifierHash: string,
-          amount: string | bigint,
-          sender: string
-        ) => {
-          console.log('🔍 === DEBUG HASH CALCULATION ===');
+        // Función debug temporal para verificar UTXOs
+        (window as any).debugUTXOOwnership = () => {
+          console.log('🔍 Debug UTXO Ownership Check');
+          const storage = new PrivateUTXOStorage();
           
-          // Ensure consistent types for comparison
-          const normalizedParams = {
-            tokenAddress: tokenAddress,
-            commitmentX: BigInt(commitmentX),
-            commitmentY: BigInt(commitmentY),
-            nullifierHash: nullifierHash,
-            amount: BigInt(amount),
-            sender: sender
-          };
+          // Obtener todas las claves de localStorage que contengan UTXOs
+          const keys = Object.keys(localStorage).filter(key => key.startsWith('private_utxos_'));
+          console.log('🔍 Found UTXO keys in localStorage:', keys);
           
-          console.log('📊 Normalized params:', normalizedParams);
-          
-          // Frontend calculation with explicit types
-          const frontendHash = ethers.keccak256(
-            ethers.solidityPacked(
-              ['address', 'uint256', 'uint256', 'bytes32', 'uint256', 'address'],
-              [
-                normalizedParams.tokenAddress,
-                normalizedParams.commitmentX,
-                normalizedParams.commitmentY,
-                normalizedParams.nullifierHash,
-                normalizedParams.amount,
-                normalizedParams.sender
-              ]
-            )
-          );
-          
-          console.log('📱 Frontend hash (patrón anterior):', frontendHash);
-          
-          // Usar el HashCalculator actualizado con el patrón VERIFICADO
-          const hashResult = calculateDepositDataHash({
-            tokenAddress: normalizedParams.tokenAddress,
-            commitmentX: normalizedParams.commitmentX,
-            commitmentY: normalizedParams.commitmentY,
-            nullifierHash: normalizedParams.nullifierHash,
-            amount: normalizedParams.amount,
-            sender: normalizedParams.sender
-          });
-          
-          if (hashResult.success) {
-            console.log('✅ HashCalculator hash (patrón VERIFICADO):', hashResult.hash);
-            
-            // Comparar con el método anterior
-            const match = frontendHash.toLowerCase() === hashResult.hash.toLowerCase();
-            console.log(match ? '✅ Ambos métodos coinciden!' : '⚠️ Métodos difieren - usar el VERIFICADO');
-            
-            if (!match) {
-              console.log('🔍 Comparación de métodos:');
-              console.log('  Método anterior:', frontendHash);
-              console.log('  Método VERIFICADO:', hashResult.hash);
-              console.log('  🎯 Usar el método VERIFICADO que coincide con el contrato');
+          for (const key of keys) {
+            const data = localStorage.getItem(key);
+            if (data) {
+              try {
+                const utxos = JSON.parse(data, (key, value) => {
+                  if (key === 'value' || key === 'timestamp') {
+                    return BigInt(value);
+                  }
+                  return value;
+                });
+                
+                console.log(`🔍 UTXOs for key ${key}:`, utxos.length);
+                utxos.forEach((utxo: any, index: number) => {
+                  console.log(`  ${index + 1}. UTXO ${utxo.id?.slice(0, 8)}... owner: ${utxo.owner} value: ${utxo.value} isSpent: ${utxo.isSpent}`);
+                });
+              } catch (error) {
+                console.error(`🔍 Error parsing UTXOs for key ${key}:`, error);
+              }
             }
-            
-            return { 
-              frontendHash, 
-              verifiedHash: hashResult.hash, 
-              match,
-              shouldUseVerified: !match
-            };
+          }
+          
+          // También mostrar el currentAccount
+          if (currentAccount) {
+            console.log('🔍 Current connected account:', currentAccount.address);
           } else {
-            console.log('❌ HashCalculator error:', hashResult.error);
-            return { frontendHash, error: hashResult.error };
+            console.log('🔍 No current account connected');
           }
         };
-        
-        console.log('🔍 Hash debug function available: window.debugHashCalculation(tokenAddress, commitmentX, commitmentY, nullifierHash, amount, sender)');
       }
         
-      console.log('🔍 Hash debug function available: window.debugHashCalculation(tokenAddress, commitmentX, commitmentY, nullifierHash, amount, sender)');
       // Setup event listeners - THIS IS CRITICAL for the flow to work
       setupEventListeners();
 
@@ -244,12 +200,6 @@
       // Solo refrescar datos si ya estamos completamente inicializados
       if (isInitialized && isLibraryInitialized) {
         refreshData();
-        
-        // If no private UTXOs loaded, try loading all user UTXOs
-        if (privateUTXOs.length === 0) {
-          console.log('🔄 No UTXOs from sync, trying to load stored UTXOs...');
-          loadAllUserUTXOs();
-        }
       }
     });
     
@@ -262,6 +212,7 @@
       isLibraryInitialized = false;
       currentStep = 1;
       privateUTXOs = [];
+      availableUTXOs = [];
       stats = null;
       addNotification('info', 'Wallet disconnected - Please restart the setup process');
     });
@@ -524,10 +475,6 @@
         
         // Ahora sí podemos cargar datos
         await refreshData();
-        if (privateUTXOs.length === 0) {
-          console.log('🔄 Loading stored UTXOs after initialization...');
-          loadAllUserUTXOs();
-        }
       } else {
         addNotification('error', 'Failed to initialize UTXO Library');
       }
@@ -551,6 +498,7 @@
     // Clear data
     currentAccount = null;
     privateUTXOs = [];
+    availableUTXOs = [];
     stats = null;
     
     // Disconnect wallet if connected
@@ -641,22 +589,40 @@
 
     try {
       console.log('🔄 Starting refreshData...');
+      console.log('🔄 Current account:', currentAccount.address);
       
       // Sync with blockchain and localStorage
       const syncSuccess = await privateUTXOManager.syncWithBlockchain();
       console.log('🔄 Sync result:', syncSuccess);
       
       // Get private UTXOs (from localStorage)
-      privateUTXOs = privateUTXOManager.getPrivateUTXOsByOwner(currentAccount.address)
+      // BALANCE: Solo UTXOs disponibles (no gastados)
+      console.log('🔄 Calling getPrivateUTXOsByOwner for available UTXOs...');
+      const fetchedAvailableUTXOs = privateUTXOManager.getPrivateUTXOsByOwner(currentAccount.address)
         .map(utxo => ({
           ...utxo,
-          cryptographyType: "BN254"
+          cryptographyType: "BN254" as const
         }));
+      
+      // HISTORY: TODOS los UTXOs (incluyendo gastados)
+      console.log('🔄 Calling getAllPrivateUTXOsByOwner for all UTXOs...');
+      const allUTXOs = privateUTXOManager.getAllPrivateUTXOsByOwner(currentAccount.address)
+        .map(utxo => ({
+          ...utxo,
+          cryptographyType: "BN254" as const
+        }));
+      
+      // Para el Balance tab, usar solo disponibles
+      availableUTXOs = fetchedAvailableUTXOs;
+      // Para el History tab, usar todos
+      privateUTXOs = allUTXOs; // Cambiado para incluir gastados en History
+      
       console.log('🔒 Private UTXOs after refresh:', {
-        total: privateUTXOs.length,
-        unspent: privateUTXOs.filter(u => !u.isSpent).length,
-        spent: privateUTXOs.filter(u => u.isSpent).length,
-        details: privateUTXOs.map(u => ({
+        total: allUTXOs.length,
+        available: availableUTXOs.length,
+        unspent: allUTXOs.filter(u => !u.isSpent).length,
+        spent: allUTXOs.filter(u => u.isSpent).length,
+        details: allUTXOs.map(u => ({
           id: u.id.slice(0, 8) + '...',
           value: u.value.toString(),
           isSpent: u.isSpent,
@@ -668,8 +634,9 @@
       stats = privateUTXOManager.getUTXOStats();
       
       console.log('📊 Data refreshed successfully:', {
-        totalPrivateUTXOs: privateUTXOs.length,
-        availableForOperations: privateUTXOs.filter(u => !u.isSpent).length,
+        totalPrivateUTXOs: allUTXOs.length,
+        availableForOperations: availableUTXOs.length,
+        spentUTXOs: allUTXOs.filter(u => u.isSpent).length,
         stats
       });
     } catch (error) {
@@ -815,295 +782,9 @@
     }
   }
 
-  // Clear all local data and start fresh
-  function clearAllLocalData() {
-    if (!currentAccount?.address) {
-      addNotification('error', 'Please connect wallet first');
-      return;
-    }
-
-    const confirmed = confirm('⚠️ This will DELETE ALL local UTXO data for the current account. This action cannot be undone. Are you sure?');
-    if (!confirmed) return;
-
-    try {
-      console.log('🗑️ === CLEARING ALL LOCAL DATA ===');
-      
-      // Clear all localStorage keys related to UTXOs
-      const keysToRemove = [];
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key && (
-          key.startsWith('private_utxo_') ||
-          key.startsWith('utxo_') ||
-          key.startsWith('bbs_keys_') ||
-          key === 'private_utxos' ||
-          key === 'utxo_cache'
-        )) {
-          keysToRemove.push(key);
-        }
-      }
-      
-      keysToRemove.forEach(key => {
-        localStorage.removeItem(key);
-        console.log(`🗑️ Removed: ${key}`);
-      });
-      
-      // Reset local state
-      privateUTXOs = [];
-      stats = null;
-      
-      addNotification('success', `Cleared ${keysToRemove.length} local storage keys. Please refresh data.`);
-      console.log('✅ All local data cleared successfully');
-      
-    } catch (error: any) {
-      console.error('❌ Failed to clear local data:', error);
-      addNotification('error', `Failed to clear data: ${error.message || error}`);
-    }
-  }
-
-  // Debug function to verify UTXO authenticity
-  async function verifyUTXOAuthenticity() {
-    if (!currentAccount?.address || !isInitialized || !privateUTXOManager) {
-      addNotification('error', 'Please connect wallet and initialize first');
-      return;
-    }
-
-    try {
-      console.log('🔍 === UTXO AUTHENTICITY VERIFICATION ===');
-      
-      // Get local UTXOs
-      const localUTXOs = privateUTXOManager.getPrivateUTXOsByOwner(currentAccount.address);
-      console.log('📋 Local UTXOs:', localUTXOs.length);
-      
-      // For each local UTXO, verify blockchain confirmation
-      for (const utxo of localUTXOs) {
-        console.log(`\n🔍 Verifying UTXO: ${utxo.id}`);
-        console.log('UTXO details:', {
-          id: utxo.id,
-          value: utxo.value?.toString(),
-          isSpent: utxo.isSpent,
-          creationTxHash: utxo.creationTxHash,
-          blockNumber: utxo.blockNumber,
-          confirmed: utxo.confirmed,
-          localCreatedAt: utxo.localCreatedAt ? new Date(utxo.localCreatedAt).toISOString() : 'N/A'
-        });
-        
-        // Check if this UTXO has blockchain confirmation
-        if (!utxo.creationTxHash || !utxo.blockNumber) {
-          console.warn('⚠️ UTXO has no blockchain confirmation - may be fake/local-only');
-          continue;
-        }
-        
-        console.log('✅ UTXO appears to have blockchain confirmation');
-      }
-      
-      addNotification('success', `Verified ${localUTXOs.length} UTXOs. Check console for details.`);
-      
-    } catch (error: any) {
-      console.error('❌ UTXO verification failed:', error);
-      addNotification('error', `Verification failed: ${error.message || error}`);
-    }
-  }
-
-  // Debug function for multi-account storage
-  function debugMultiAccountStorage() {
-    if (!currentAccount?.address) {
-      addNotification('error', 'Please connect wallet first');
-      return;
-    }
-
-    try {
-      console.log('🔍 === MULTI-ACCOUNT STORAGE DEBUG ===');
-      
-      // Current account detailed info
-      console.log(`\n👤 Current Account: ${currentAccount.address}`);
-      PrivateUTXOStorage.debugStorage(currentAccount.address);
-      
-      // All accounts in system
-      const allAccounts = PrivateUTXOStorage.getAllStoredAccounts();
-      console.log(`\n👥 All accounts with data (${allAccounts.length}):`);
-      allAccounts.forEach((account: string, i: number) => {
-        console.log(`${i + 1}. ${account}`);
-        const stats = PrivateUTXOStorage.getEnhancedUserStats(account);
-        console.log(`   - Owned: ${stats.ownedCount} UTXOs, Received: ${stats.receivedCount} UTXOs`);
-        console.log(`   - Total Balance: ${stats.totalBalance.toString()}`);
-      });
-      
-      // Enhanced stats for current user
-      const enhancedStats = PrivateUTXOStorage.getEnhancedUserStats(currentAccount.address);
-      console.log(`\n📊 Enhanced Stats for ${currentAccount.address}:`);
-      console.log(`- Owned UTXOs: ${enhancedStats.breakdown.owned.count} (${enhancedStats.breakdown.owned.balance.toString()})`);
-      console.log(`- Received UTXOs: ${enhancedStats.breakdown.received.count} (${enhancedStats.breakdown.received.balance.toString()})`);
-      console.log(`- Total: ${enhancedStats.totalCount} UTXOs (${enhancedStats.totalBalance.toString()})`);
-      
-      addNotification('success', `Debug complete! Found ${allAccounts.length} accounts with data. Check console for details.`);
-      
-    } catch (error: any) {
-      console.error('❌ Multi-account debug failed:', error);
-      addNotification('error', `Debug failed: ${error.message || error}`);
-    }
-  }
-
-  // Load UTXOs with enhanced multi-account support
-  function loadAllUserUTXOs() {
-    if (!currentAccount?.address) {
-      addNotification('error', 'Please connect wallet first');
-      return;
-    }
-
-    try {
-      console.log('🔄 Loading all UTXOs (owned + received)...');
-      
-      // Get all UTXOs for current user
-      const { owned, received, all } = PrivateUTXOStorage.getAllUserUTXOs(currentAccount.address);
-      
-      console.log(`🔄 Found UTXOs:`);
-      console.log(`  - Owned: ${owned.length}`);
-      console.log(`  - Received: ${received.length}`);
-      console.log(`  - Total: ${all.length}`);
-      
-      // Update the UI with all UTXOs
-      privateUTXOs = all.map((utxo: any) => ({
-        ...utxo,
-        cryptographyType: "BN254"
-      }));
-      
-      // Show result
-      if (all.length > 0) {
-        addNotification('success', `Loaded ${all.length} UTXOs (${owned.length} owned + ${received.length} received)`);
-        console.log('🔄 UTXO breakdown:', all.map((u: any) => ({ 
-          id: u.id, 
-          value: u.value, 
-          owner: u.owner,
-          type: typeof u.value,
-          isOwned: u.owner.toLowerCase() === currentAccount?.address.toLowerCase()
-        })));
-      } else {
-        addNotification('info', 'No UTXOs found. Create some deposits first.');
-      }
-      
-    } catch (error: any) {
-      console.error('❌ Failed to load all UTXOs:', error);
-      addNotification('error', `Failed to load UTXOs: ${error.message || error}`);
-    }
-  }
-
-  // Test contract debug function
-  async function testContractDebug() {
-    if (!currentAccount?.address || !isInitialized || !privateUTXOManager) {
-      addNotification('error', 'Please connect wallet and initialize first');
-      return;
-    }
-
-    try {
-      console.log('🔍 === TESTING CONTRACT DEBUG ===');
-      addNotification('info', 'Testing contract interaction...');
-      
-      // Create test parameters
-      const testParams = {
-        amount: 1000000000000000000n, // 1 token (18 decimals)
-        tokenAddress: '0xCA4d19D712944874f8dd1472C6de5Dd8e5C9E5e2', // Test token with correct checksum
-        owner: currentAccount.address
-      };
-      
-      // Call debug function
-      await privateUTXOManager.debugContractInteraction(testParams);
-      
-      addNotification('success', 'Contract debug test completed! Check console for details.');
-      
-    } catch (error: any) {
-      console.error('❌ Contract debug test failed:', error);
-      
-      // Check if it's a network/RPC issue
-      if (error.message?.includes('missing trie node') || error.message?.includes('JSON-RPC error') || error.message?.includes('Network node synchronization')) {
-        addNotification('error', `Network/RPC issue detected. ${error.message}. Try the RPC Test button below.`);
-      } else {
-        addNotification('error', `Contract debug failed: ${error.message || error}`);
-      }
-    }
-  }
-
-  // Test different RPC endpoints
-  async function testRPCEndpoints() {
-    if (!currentAccount?.address) {
-      addNotification('error', 'Please connect wallet first');
-      return;
-    }
-
-    try {
-      console.log('🔍 === TESTING RPC ENDPOINTS ===');
-      addNotification('info', 'Testing RPC endpoints...');
-      
-      // Get RPC endpoints based on selected network
-      let rpcEndpoints: string[] = [];
-      
-      if (selectedNetwork === 'amoy') {
-        rpcEndpoints = [
-          'https://rpc-amoy.polygon.technology/',
-          'https://polygon-amoy.blockpi.network/v1/rpc/public',
-          'https://polygon-amoy-bor-rpc.publicnode.com',
-          'https://rpc.ankr.com/polygon_amoy'
-        ];
-      } else if (selectedNetwork === 'alastria') {
-        rpcEndpoints = [
-          'http://108.142.237.13:8545'
-        ];
-      }
-      
-      for (const rpc of rpcEndpoints) {
-        try {
-          console.log(`🌐 Testing RPC: ${rpc}`);
-          
-          // Create a temporary provider for testing
-          const testProvider = new ethers.JsonRpcProvider(rpc);
-          const blockNumber = await testProvider.getBlockNumber();
-          const network = await testProvider.getNetwork();
-          
-          console.log(`✅ RPC ${rpc} - Block: ${blockNumber}, ChainID: ${network.chainId}`);
-          
-          // If we get here, this RPC is working
-          addNotification('success', `✅ Working RPC found: ${rpc} (Block: ${blockNumber})`);
-          
-        } catch (rpcError: any) {
-          console.warn(`❌ RPC ${rpc} failed:`, rpcError.message);
-        }
-      }
-      
-      console.log('🔍 RPC endpoint testing completed');
-      addNotification('info', 'RPC testing completed. Check console for details.');
-      
-    } catch (error: any) {
-      console.error('❌ RPC testing failed:', error);
-      addNotification('error', `RPC testing failed: ${error.message || error}`);
-    }
-  }
-
-  // Show network and contract information
-  function showNetworkInfo() {
-    try {
-      console.log('🔍 === NETWORK INFORMATION ===');
-      
-      const network = NETWORKS[selectedNetwork];
-      console.log(`\n🌐 Current Network: ${network.name}`);
-      console.log(`- Chain ID: ${network.chainId}`);
-      console.log(`- RPC URL: ${network.rpcUrl}`);
-      console.log(`- Block Explorer: ${network.blockExplorer}`);
-      console.log(`- Native Currency: ${network.nativeCurrency.symbol}`);
-      console.log(`- Contract Address: ${network.contractAddress || 'NOT DEPLOYED'}`);
-      
-      console.log(`\n📋 All Networks:`);
-      Object.entries(NETWORKS).forEach(([key, net]) => {
-        console.log(`${key}: ${net.name} (ChainID: ${net.chainId}) - Contract: ${net.contractAddress || 'NOT DEPLOYED'}`);
-      });
-      
-      const contractStatus = CONTRACT_ADDRESS ? 'deployed' : 'not deployed';
-      addNotification('info', `${network.name} (ChainID: ${network.chainId}) - Contract: ${contractStatus}. Check console for details.`);
-      
-    } catch (error: any) {
-      console.error('❌ Failed to show network info:', error);
-      addNotification('error', `Failed to show network info: ${error.message || error}`);
-    }
-  }
+  // ========================
+  // NOTIFICATION SYSTEM
+  // ========================
 
   // Variable para generar IDs únicos
   let notificationCounter = 0;
@@ -1164,17 +845,6 @@
   function handleOperationCompleted(event: CustomEvent) {
     console.log('Operation completed:', event.detail);
     refreshData();
-  }
-  
-  // Expose debug function to global scope for development (optional)
-  if (typeof window !== 'undefined') {
-    (window as any).debugUTXOStorage = () => {
-      if (currentAccount?.address) {
-        debugMultiAccountStorage();
-      } else {
-        console.warn('No account connected. Connect wallet first.');
-      }
-    };
   }
 </script>
 
@@ -1672,7 +1342,7 @@
               </div>
             {:else}
               <UTXOBalance 
-                {privateUTXOs}
+                privateUTXOs={availableUTXOs}
                 on:refresh={refreshData} 
               />
             {/if}

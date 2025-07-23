@@ -487,6 +487,56 @@ export class PrivateUTXOStorage {
       return [];
     }
   }
+
+  /**
+   * 🔧 TEMPORAL: Obtener TODOS los UTXOs sin filtrar por usuario
+   * Útil para debugging y corrección de datos
+   */
+  static getAllPrivateUTXOs(): PrivateUTXO[] {
+    try {
+      const allAccounts = this.getAllStoredAccounts();
+      const allUTXOs: PrivateUTXO[] = [];
+      
+      allAccounts.forEach(address => {
+        const userUTXOs = this.getPrivateUTXOs(address);
+        allUTXOs.push(...userUTXOs);
+      });
+      
+      // También buscar en claves directas de localStorage por si hay datos mal almacenados
+      const keys = Object.keys(localStorage);
+      keys.forEach(key => {
+        if (key.includes('utxos') && !key.includes(this.STORAGE_KEY)) {
+          try {
+            const data = localStorage.getItem(key);
+            if (data) {
+              const parsed = JSON.parse(data);
+              if (Array.isArray(parsed)) {
+                parsed.forEach(item => {
+                  if (item.id && item.value && item.tokenAddress) {
+                    allUTXOs.push(item);
+                  }
+                });
+              }
+            }
+          } catch (e) {
+            // Ignorar claves que no son JSON válido
+          }
+        }
+      });
+      
+      // Deduplicar por ID
+      const uniqueUTXOs = allUTXOs.filter((utxo, index, arr) => 
+        arr.findIndex(u => u.id === utxo.id) === index
+      );
+      
+      console.log(`🔍 Found ${uniqueUTXOs.length} total UTXOs across all accounts`);
+      return uniqueUTXOs;
+      
+    } catch (error) {
+      console.error('❌ Failed to get all private UTXOs:', error);
+      return [];
+    }
+  }
 }
 
 
