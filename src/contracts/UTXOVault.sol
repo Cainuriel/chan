@@ -404,7 +404,7 @@ contract UTXOVault is UTXOVaultBase, ReentrancyGuard {
     /**
      * @dev Retirar - Backend ya verificó que commitment corresponde a revealedAmount
      */
-    function withdrawFromPrivateUTXO(
+      function withdrawFromPrivateUTXO(
         WithdrawParams calldata params
     ) external nonReentrant {
         // Validaciones básicas
@@ -416,6 +416,19 @@ contract UTXOVault is UTXOVaultBase, ReentrancyGuard {
         bytes32 utxoId = commitmentHashToUTXO[commitmentHash];
         if (utxoId == bytes32(0)) revert UTXONotFound();
         if (utxos[utxoId].isSpent) revert UTXOAlreadySpent();
+        
+      
+        (bool isValid, uint8 errorCode) = preValidateWithdraw(
+            commitmentHash,           // sourceCommitment
+            params.nullifierHash,     // sourceNullifier  
+            params.revealedAmount,    // amount
+            msg.sender                // recipient ← Siempre quien ejecuta
+        );
+
+        if (!isValid) {
+            // Mapear errorCode a custom errors apropiados
+            _revertWithWithdrawError(errorCode);
+        }
         
         // Verificar attestation del backend
         if (!_verifyAttestation(params.attestation)) revert InvalidAttestation();
@@ -430,6 +443,27 @@ contract UTXOVault is UTXOVaultBase, ReentrancyGuard {
         
         // Ejecutar retiro
         _executeWithdrawal(utxoId, params);
+    }
+
+        /**
+     * @dev Mapear código de error de preValidateWithdraw a custom error
+     */
+    function _revertWithWithdrawError(uint8 errorCode) internal pure {
+        if (errorCode == 1) {
+            revert UTXONotFound();
+        } else if (errorCode == 2) {
+            revert UTXOAlreadySpent();
+        } else if (errorCode == 3) {
+            revert InvalidAmount(); // Amount es 0
+        } else if (errorCode == 4) {
+            revert InvalidAttestation(); // Commitment inválido
+        } else if (errorCode == 5) {
+            revert InvalidAttestation(); // Nullifier inválido
+        } else if (errorCode == 6) {
+            revert NullifierAlreadyUsed(); // Nullifier ya usado
+        } else {
+            revert InvalidAttestation();
+        }
     }
     
     /**
