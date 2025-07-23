@@ -196,11 +196,6 @@ contract UTXOVault is UTXOVaultBase, ReentrancyGuard {
             _revertWithSplitError(errorCode);
         }
         
-        // Verificar nullifiers únicos en outputs (no incluido en preValidateSplit)
-        for (uint256 i = 0; i < params.outputNullifiers.length; i++) {
-            _validateBasicNullifiers(params.outputNullifiers[i]);
-        }
-        
         // Verificar attestation del backend
         if (!_verifyAttestation(params.attestation)) revert InvalidAttestation();
         
