@@ -189,6 +189,11 @@
     }));
   }
 
+  // Initialize withdraw recipient when component loads
+  $: if (utxoManager && utxoManager.getCurrentAccount() && !withdrawRecipient) {
+    withdrawRecipient = utxoManager.getCurrentAccount()?.address || '';
+  }
+
   // Withdraw operation state
   let withdrawSelectedUTXO = '';
   let withdrawRecipient = '';

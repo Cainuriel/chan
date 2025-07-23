@@ -6,6 +6,7 @@
 import { ethers, toBigInt, type BigNumberish } from 'ethers';
 import { depositAsPrivateUTXOSimplified } from './DepositAsPrivateUTXO';
 import { SplitPrivateUTXO, type SplitOperationResult, type SplitUTXOData } from './SplitPrivateUTXO';
+import { WithdrawPrivateUTXO, type WithdrawUTXOData } from './WithdrawPrivateUTXO';
 import { AttestationService } from './AttestationService';
 import { CryptoHelpers as ZenroomHelpers } from '../utils/crypto.helpers.js';
 import { EthereumHelpers } from './../utils/ethereum.helpers';
@@ -478,6 +479,16 @@ export class PrivateUTXOManager extends EventEmitter {
             result.outputUTXOIds.forEach(async (utxoId, index) => {
               const outputAmount = params.outputValues[index];
               const ownerAddress = params.outputOwners[index] || this.currentAccount?.address || '';
+              
+              // Crear notas con las coordenadas del commitment para uso posterior en withdraw
+              const commitmentCoords = result.outputCommitments?.[index];
+              const notes = commitmentCoords ? JSON.stringify({
+                commitmentX: commitmentCoords.x.toString(),
+                commitmentY: commitmentCoords.y.toString(),
+                createdBy: 'split',
+                originalUTXO: params.inputUTXOId
+              }) : undefined;
+              
               const outputUTXO: PrivateUTXO = {
                 id: utxoId,
                 exists: true,
@@ -494,7 +505,8 @@ export class PrivateUTXOManager extends EventEmitter {
                 nullifierHash: result.outputNullifiers?.[index] || '',
                 blindingFactor: '', // Would need to be provided by the service
                 isPrivate: true,
-                cryptographyType: 'BN254'
+                cryptographyType: 'BN254',
+                notes: notes // Guardar coordenadas para withdraw posterior
               };
               
               // Save to internal collections
@@ -550,10 +562,215 @@ export class PrivateUTXOManager extends EventEmitter {
   }
 
   /**
-   * Withdraw a private UTXO (placeholder - to be implemented)
+   * Withdraw a private UTXO to public tokens
    */
   async withdrawPrivateUTXO(params: WithdrawUTXOParams): Promise<UTXOOperationResult> {
-    throw new Error('Withdraw operation not yet implemented');
+    console.log('🔄 Starting withdraw operation in ManagerUTXO...');
+    console.log('📋 Withdraw params:', {
+      utxoId: params.utxoId,
+      recipient: params.recipient
+    });
+
+    try {
+      // 1. Validaciones básicas
+      if (!this.currentAccount) {
+        throw new UTXOOperationError('No hay cuenta conectada', 'withdrawPrivateUTXO');
+      }
+
+      if (!this.contract) {
+        throw new UTXOOperationError('Contrato no inicializado', 'withdrawPrivateUTXO');
+      }
+
+      // 2. Buscar el UTXO a retirar
+      const sourceUTXO = this.privateUTXOs.get(params.utxoId);
+      if (!sourceUTXO) {
+        throw new UTXONotFoundError(`UTXO ${params.utxoId} no encontrado`);
+      }
+
+      if (sourceUTXO.isSpent) {
+        throw new UTXOAlreadySpentError(`UTXO ${params.utxoId} ya gastado`);
+      }
+
+      // 3. Verificar ownership
+      if (!sourceUTXO.owner || sourceUTXO.owner.toLowerCase() !== this.currentAccount.address.toLowerCase()) {
+        throw new UTXOOperationError(
+          `UTXO ${params.utxoId} no pertenece a la cuenta actual`, 
+          'withdrawPrivateUTXO'
+        );
+      }
+
+      console.log('🔍 Source UTXO details for withdraw:');
+      console.log('  - id:', sourceUTXO.id);
+      console.log('  - value:', sourceUTXO.value?.toString());
+      console.log('  - owner:', sourceUTXO.owner);
+      console.log('  - isSpent:', sourceUTXO.isSpent);
+      console.log('  - nullifierHash:', sourceUTXO.nullifierHash);
+      console.log('  - commitment:', sourceUTXO.commitment);
+      console.log('  - tokenAddress:', sourceUTXO.tokenAddress);
+
+      console.log('✅ Source UTXO found and validated:', {
+        id: sourceUTXO.id,
+        amount: sourceUTXO.value.toString(),
+        owner: sourceUTXO.owner,
+        tokenAddress: sourceUTXO.tokenAddress
+      });
+
+      // 4. Preparar datos para withdraw criptográfico
+      // Parse commitment coordinates (same logic as split)
+      let sourceCommitment;
+      try {
+        if (sourceUTXO.commitment.startsWith('0x')) {
+          // Handle hex string format (legacy or specific format)
+          const commitmentHex = sourceUTXO.commitment.slice(2);
+          if (commitmentHex.length === 128) { // 64 chars for x + 64 chars for y
+            sourceCommitment = {
+              x: BigInt('0x' + commitmentHex.slice(0, 64)),
+              y: BigInt('0x' + commitmentHex.slice(64))
+            };
+          } else if (commitmentHex.length === 64) {
+            // This is a hash, try to get coordinates from notes
+            console.log('🔍 Detected commitment hash, looking for coordinates in notes...');
+            if (sourceUTXO.notes) {
+              try {
+                const notes = JSON.parse(sourceUTXO.notes);
+                if (notes.commitmentX && notes.commitmentY) {
+                  sourceCommitment = {
+                    x: BigInt(notes.commitmentX),
+                    y: BigInt(notes.commitmentY)
+                  };
+                  console.log('✅ Found coordinates in notes');
+                } else {
+                  throw new Error('Commitment coordinates not found in notes');
+                }
+              } catch (notesError) {
+                throw new Error('Cannot parse coordinates from notes and commitment is a hash');
+              }
+            } else {
+              throw new Error('Commitment is a hash but no notes available with coordinates');
+            }
+          } else {
+            throw new Error(`Invalid hex commitment format: unexpected length ${commitmentHex.length}`);
+          }
+        } else if (sourceUTXO.commitment.startsWith('{')) {
+          // Handle JSON format (new format)
+          const parsedCommitment = JSON.parse(sourceUTXO.commitment);
+          sourceCommitment = {
+            x: BigInt(parsedCommitment.x),
+            y: BigInt(parsedCommitment.y)
+          };
+        } else {
+          // Try to parse as JSON without curly braces check
+          try {
+            const parsedCommitment = JSON.parse(sourceUTXO.commitment);
+            sourceCommitment = {
+              x: BigInt(parsedCommitment.x),
+              y: BigInt(parsedCommitment.y)
+            };
+          } catch (parseError) {
+            throw new Error(`Cannot parse commitment: ${sourceUTXO.commitment}`);
+          }
+        }
+      } catch (error: any) {
+        throw new UTXOOperationError(
+          `Failed to parse source commitment: ${error.message}`, 
+          'withdrawPrivateUTXO'
+        );
+      }
+
+      const withdrawData: WithdrawUTXOData = {
+        sourceCommitment: sourceCommitment,
+        sourceValue: sourceUTXO.value,
+        sourceBlindingFactor: sourceUTXO.blindingFactor,
+        sourceNullifier: sourceUTXO.nullifierHash, // Use nullifierHash (available in PrivateUTXO)
+        revealedAmount: sourceUTXO.value, // Retirar todo el valor
+        recipient: params.recipient,
+        tokenAddress: sourceUTXO.tokenAddress,
+        sourceUTXOId: params.utxoId
+      };
+
+      // DEBUG: Check if this nullifier is already used
+      console.log('🔍 Debugging nullifier usage before withdraw...');
+      console.log('🔍 All UTXOs in localStorage:');
+      this.debugLocalNullifiers();
+      
+      // 5. Crear instancia del servicio withdraw
+      const withdrawService = new WithdrawPrivateUTXO(this.contract, this.currentAccount.signer);
+      
+      // DEBUG: Check nullifier status in contract
+      const isNullifierUsed = await withdrawService.debugCheckNullifier(sourceUTXO.nullifierHash);
+      
+      if (isNullifierUsed) {
+        console.error('🚨 PROBLEM FOUND: Nullifier is already used in contract!');
+        console.error('This means the UTXO was already spent but localStorage is not updated');
+        throw new UTXOOperationError(
+          'UTXO nullifier already used in contract - inconsistent state',
+          'nullifier_already_used'
+        );
+      }
+
+      console.log('✅ Nullifier check passed - UTXO can be withdrawn');
+
+      // 6. Ejecutar withdraw con attestation
+      console.log('🚀 Executing withdraw with real cryptography...');
+      
+      if (!this.attestationService) {
+        throw new UTXOOperationError('Attestation service not initialized', 'withdrawPrivateUTXO');
+      }
+      
+      // Create adapter for AttestationService interface
+      const attestationAdapter = {
+        createWithdrawAttestation: async (withdrawData: WithdrawUTXOData) => {
+          // Convert WithdrawUTXOData to WithdrawData format
+          const attestationData = {
+            nullifier: withdrawData.sourceNullifier,
+            amount: withdrawData.revealedAmount,
+            tokenAddress: withdrawData.tokenAddress,
+            recipientAddress: withdrawData.recipient
+          };
+          return await this.attestationService!.createWithdrawAttestation(attestationData);
+        }
+      };
+      
+      const result = await withdrawService.executeWithdraw(
+        withdrawData,
+        attestationAdapter
+      );
+
+      if (result.success) {
+        // 7. Marcar UTXO como gastado
+        sourceUTXO.isSpent = true;
+        console.log(`✅ UTXO ${params.utxoId} marked as spent`);
+
+        // 8. Emitir evento
+        this.emit('utxoWithdrawn', {
+          utxoId: params.utxoId,
+          recipient: params.recipient,
+          amount: sourceUTXO.value,
+          transactionHash: result.transactionHash
+        });
+
+        console.log('🎉 Withdraw operation completed successfully!');
+      }
+
+      return result;
+
+    } catch (error: any) {
+      console.error('❌ Error in withdrawPrivateUTXO:', error);
+      
+      // Re-throw specific UTXO errors
+      if (error instanceof UTXOOperationError || 
+          error instanceof UTXONotFoundError || 
+          error instanceof UTXOAlreadySpentError) {
+        throw error;
+      }
+      
+      // Wrap other errors
+      throw new UTXOOperationError(
+        `Withdraw failed: ${error.message}`, 
+        'withdrawPrivateUTXO', 
+        error
+      );
+    }
   }
 
   /**
@@ -974,6 +1191,38 @@ export class PrivateUTXOManager extends EventEmitter {
     const utxo = this.findUTXO(utxoId);
     return !!(utxo && this.currentAccount && 
       utxo.owner.toLowerCase() === this.currentAccount.address.toLowerCase());
+  }
+
+  /**
+   * DEBUG: Get all UTXOs and their nullifiers from localStorage
+   */
+  debugLocalNullifiers(): void {
+    try {
+      const allUTXOs = this.getAllPrivateUTXOsByOwner(this.currentAccount?.address || '');
+      console.log('🔍 All UTXOs in localStorage:');
+      allUTXOs.forEach((utxo, index) => {
+        console.log(`  UTXO ${index + 1}:`, {
+          id: utxo.id.slice(0, 12) + '...',
+          nullifierHash: utxo.nullifierHash.slice(0, 12) + '...',
+          isSpent: utxo.isSpent,
+          value: utxo.value?.toString(),
+          utxoType: utxo.utxoType
+        });
+      });
+      
+      // Check for duplicate nullifiers
+      const nullifiers = allUTXOs.map(utxo => utxo.nullifierHash);
+      const uniqueNullifiers = new Set(nullifiers);
+      if (uniqueNullifiers.size !== nullifiers.length) {
+        console.warn('⚠️ DUPLICATE NULLIFIERS FOUND!');
+        const duplicates = nullifiers.filter((item, index) => nullifiers.indexOf(item) !== index);
+        console.warn('Duplicate nullifiers:', duplicates);
+      } else {
+        console.log('✅ All nullifiers are unique in localStorage');
+      }
+    } catch (error) {
+      console.error('❌ Error debugging local nullifiers:', error);
+    }
   }
 }
 

@@ -55,6 +55,7 @@ export interface SplitOperationResult {
   success: boolean;
   transactionHash?: string;
   outputCommitmentHashes?: string[];  // Hashes criptográficos REALES
+  outputCommitments?: CommitmentPoint[]; // Coordenadas completas para withdraw posterior
   outputNullifiers?: string[];        // Nullifiers criptográficos REALES
   error?: string;
   outputUTXOIds?: string[];
@@ -127,6 +128,7 @@ export class SplitPrivateUTXO {
         success: true,
         transactionHash: receipt.hash,
         outputCommitmentHashes: outputs.commitmentHashes,  // Hashes REALES
+        outputCommitments: outputs.commitments,            // Coordenadas completas para withdraw
         outputNullifiers: outputs.nullifiers,              // Nullifiers REALES
         outputUTXOIds
       };
@@ -248,11 +250,13 @@ export class SplitPrivateUTXO {
       // Hash criptográfico REAL del commitment
       const commitmentHash = await this._calculateRealCommitmentHash(commitmentPoint);
       
-      // Generar nullifier hash criptográfico REAL
+      // Generar nullifier hash criptográfico REAL con entropía suficiente
+      const sourceCommitStr = JSON.stringify(splitData.sourceCommitment);
+      const uniqueEntropy = `${splitData.sourceNullifier}_${sourceCommitStr}_${Date.now()}_${i}_${Math.random()}_${BigInt(Date.now() * 1000000 + Math.floor(Math.random() * 1000000))}`;
       const nullifier = await ZenroomHelpers.generateNullifierHash(
         commitmentHash,
         signerAddress,
-        `${Date.now()}_${i}_${Math.random()}` // Seed único criptográfico
+        uniqueEntropy // Seed único criptográfico con múltiples fuentes de entropía
       );
 
       commitments.push(commitmentPoint);

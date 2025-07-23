@@ -169,10 +169,14 @@ export class CryptoHelpers {
   ): Promise<string> {
     await this.ensureInitialized();
     
-    // Crear nullifier hash determinístico usando keccak256
+    // Añadir entropía adicional para garantizar unicidad
+    const additionalEntropy = `${Date.now()}_${Math.random()}_${BigInt(Date.now() * 1000000 + Math.floor(Math.random() * 1000000))}`;
+    const enhancedNonce = `${nonce}_${additionalEntropy}`;
+    
+    // Crear nullifier hash determinístico usando keccak256 con entropía mejorada
     const combined = ethers.solidityPacked(
-      ['string', 'string', 'string'],
-      [commitment, owner, nonce]
+      ['string', 'string', 'string', 'string'],
+      [commitment, owner, enhancedNonce, additionalEntropy]
     );
     
     return ethers.keccak256(combined);
