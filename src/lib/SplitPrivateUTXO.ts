@@ -251,7 +251,10 @@ export class SplitPrivateUTXO {
       const commitmentHash = await this._calculateRealCommitmentHash(commitmentPoint);
       
       // Generar nullifier hash criptográfico REAL con entropía suficiente
-      const sourceCommitStr = JSON.stringify(splitData.sourceCommitment);
+      const sourceCommitStr = JSON.stringify({
+        x: splitData.sourceCommitment.x.toString(),
+        y: splitData.sourceCommitment.y.toString()
+      });
       const uniqueEntropy = `${splitData.sourceNullifier}_${sourceCommitStr}_${Date.now()}_${i}_${Math.random()}_${BigInt(Date.now() * 1000000 + Math.floor(Math.random() * 1000000))}`;
       const nullifier = await ZenroomHelpers.generateNullifierHash(
         commitmentHash,
