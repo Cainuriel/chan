@@ -179,6 +179,15 @@
     { amount: '', owner: '' },
     { amount: '', owner: '' }
   ];
+  
+  // Initialize owner addresses when component loads
+  $: if (utxoManager && utxoManager.getCurrentAccount() && splitOutputs.every(o => !o.owner)) {
+    const currentAddress = utxoManager.getCurrentAccount()?.address || '';
+    splitOutputs = splitOutputs.map(output => ({
+      ...output,
+      owner: output.owner || currentAddress
+    }));
+  }
 
   // Withdraw operation state
   let withdrawSelectedUTXO = '';
@@ -664,6 +673,37 @@
       );
       const outputOwners = splitOutputs.map(output => output.owner);
 
+      // Validar que las direcciones de los owners sean válidas
+      console.log('📧 Validating output owners:', outputOwners);
+      for (let i = 0; i < outputOwners.length; i++) {
+        const ownerAddress = outputOwners[i]?.trim();
+        if (!ownerAddress || !ownerAddress.match(/^0x[a-fA-F0-9]{40}$/)) {
+          throw new Error(`Invalid owner address for output ${i + 1}: "${ownerAddress}". Please provide a valid Ethereum address.`);
+        }
+        console.log(`📧 Output ${i + 1} owner: ${ownerAddress}`);
+      }
+      
+      // Verificar si hay transfers (direcciones diferentes al usuario actual)
+      const currentUserAddress = currentAccount.address.toLowerCase();
+      const transfers = outputOwners.filter(addr => 
+        addr.toLowerCase() !== currentUserAddress
+      );
+      
+      console.log('👥 Owner distribution analysis:', {
+        currentUser: currentUserAddress,
+        output1: { 
+          value: splitOutputs[0].amount,
+          owner: outputOwners[0],
+          isTransfer: outputOwners[0].toLowerCase() !== currentUserAddress
+        },
+        output2: { 
+          value: splitOutputs[1].amount,
+          owner: outputOwners[1],
+          isTransfer: outputOwners[1].toLowerCase() !== currentUserAddress
+        },
+        totalTransfers: transfers.length
+      });
+
       // Execute private UTXO split operation
       const result = await utxoManager.splitPrivateUTXO({
         inputUTXOId: splitSelectedUTXO,
@@ -673,6 +713,27 @@
 
       if (result.success) {
         console.log('✅ Split operation completed successfully:', result);
+        console.log('📦 New UTXOs created:', result);
+        console.log('👥 Final owner distribution:', {
+          output1: { 
+            value: splitOutputs[0].amount,
+            owner: outputOwners[0],
+            isTransfer: outputOwners[0].toLowerCase() !== currentUserAddress
+          },
+          output2: { 
+            value: splitOutputs[1].amount,
+            owner: outputOwners[1],
+            isTransfer: outputOwners[1].toLowerCase() !== currentUserAddress
+          }
+        });
+        
+        // Mostrar notificaciones específicas según el tipo de operación
+        if (transfers.length > 0) {
+          console.log(`🔄 Split completed with ${transfers.length} transfer(s) to other address(es)`);
+          // Note: No podemos usar addNotification aquí, pero se muestra en los logs
+        } else {
+          console.log('✅ Split completed - both UTXOs remain in your account');
+        }
         
         // Reset form
         splitSelectedUTXO = '';

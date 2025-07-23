@@ -1355,7 +1355,7 @@
           {:else if activeTab === 'operations'}
             <OperationsPanel 
               utxoManager={privateUTXOManager} 
-              {privateUTXOs}
+              privateUTXOs={availableUTXOs}
               on:operation={handleOperationCompleted} 
             />
           {:else if activeTab === 'recovery'}

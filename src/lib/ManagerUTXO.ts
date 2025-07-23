@@ -477,12 +477,13 @@ export class PrivateUTXOManager extends EventEmitter {
           if (result.outputUTXOIds) {
             result.outputUTXOIds.forEach(async (utxoId, index) => {
               const outputAmount = params.outputValues[index];
+              const ownerAddress = params.outputOwners[index] || this.currentAccount?.address || '';
               const outputUTXO: PrivateUTXO = {
                 id: utxoId,
                 exists: true,
                 value: outputAmount,
                 tokenAddress: inputUTXO.tokenAddress,
-                owner: this.currentAccount?.address || '',
+                owner: ownerAddress, // Usar el owner específico del parámetro
                 timestamp: BigInt(Date.now()),
                 isSpent: false,
                 commitment: result.outputCommitmentHashes?.[index] || '',
@@ -500,9 +501,11 @@ export class PrivateUTXOManager extends EventEmitter {
               this.privateUTXOs.set(utxoId, outputUTXO);
               this.utxos.set(utxoId, outputUTXO);
               
-              // ALSO save to localStorage
-              PrivateUTXOStorage.savePrivateUTXO(this.currentAccount?.address || '', outputUTXO);
-              console.log(`💾 Saved new split UTXO ${utxoId} to localStorage`);
+              // IMPORTANT: Save to localStorage of the correct owner, not the executor
+              const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
+              PrivateUTXOStorage.savePrivateUTXO(outputUTXO.owner, outputUTXO);
+              console.log(`💾 Saved new split UTXO ${utxoId} to localStorage for owner ${outputUTXO.owner}`);
+              console.log(`✅ UTXO ${utxoId.slice(0, 8)}... assigned to owner: ${outputUTXO.owner}`);
               
               this.emit('private:utxo:created', outputUTXO);
             });
