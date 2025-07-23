@@ -328,16 +328,26 @@ contract UTXOVault is UTXOVaultBase, ReentrancyGuard {
     /**
      * @dev Transferir - Backend ya verificó ownership
      */
-    function transferPrivateUTXO(
+   function transferPrivateUTXO(
         TransferParams calldata params
     ) external nonReentrant whenNotPaused returns (bytes32) {
-        // Validaciones básicas usando funciones comunes
-        _validateBasicNullifiers(params.inputNullifier);
-        _validateBasicNullifiers(params.outputNullifier);
         
-        // Verificar input UTXO existe usando función común
+        // Calcular hashes para prevalidación
         bytes32 inputCommitmentHash = _hashCommitment(params.inputCommitment);
-        bytes32 inputUTXOId = _validateUTXOExists(inputCommitmentHash);
+        bytes32 outputCommitmentHash = _hashCommitment(params.outputCommitment);
+        
+        (bool isValid,) = preValidateTransfer(
+            inputCommitmentHash,
+            outputCommitmentHash,
+            params.outputNullifier
+        );
+
+        if(!isValid) {  
+            revert("Prevalidation was doing?");
+        }
+        
+        // Obtener inputUTXOId (preValidateTransfer ya verificó que existe)
+        bytes32 inputUTXOId = commitmentHashToUTXO[inputCommitmentHash];
         
         // Verificar attestation del backend
         if (!_verifyAttestation(params.attestation)) revert InvalidAttestation();
@@ -398,13 +408,11 @@ contract UTXOVault is UTXOVaultBase, ReentrancyGuard {
       function withdrawFromPrivateUTXO(
         WithdrawParams calldata params
     ) external nonReentrant whenNotPaused {
-        // Validaciones básicas usando funciones comunes
-        _validateBasicNullifiers(params.nullifierHash);
-        if (params.revealedAmount == 0) revert InvalidAmount();
+
         
         // Verificar UTXO existe usando función común
         bytes32 commitmentHash = _hashCommitment(params.commitment);
-        bytes32 utxoId = _validateUTXOExists(commitmentHash);
+
         
         // Pre-validación para coherencia con frontend
         (bool isValid, uint8 errorCode) = preValidateWithdraw(
@@ -429,6 +437,9 @@ contract UTXOVault is UTXOVaultBase, ReentrancyGuard {
         // Verificar dataHash
         bytes32 expectedDataHash = calculateWithdrawDataHash(params, msg.sender);
         if (params.attestation.dataHash != expectedDataHash) revert InvalidAttestation();
+        
+        // Obtener utxoId (preValidateWithdraw ya verificó que existe)
+        bytes32 utxoId = commitmentHashToUTXO[commitmentHash];
         
         // Ejecutar retiro
         _executeWithdrawal(utxoId, params);
