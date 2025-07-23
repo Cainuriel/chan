@@ -111,7 +111,7 @@ contract UTXOVault is UTXOVaultBase, ReentrancyGuard {
      */
     function depositAsPrivateUTXO(
         DepositParams calldata params
-    ) external nonReentrant {
+    ) external nonReentrant whenNotPaused {
         // Usar validación externa para consistencia
         (bool isValid, string memory errorMessage) = this.validateDepositParams(params, msg.sender);
         
@@ -175,18 +175,16 @@ contract UTXOVault is UTXOVaultBase, ReentrancyGuard {
      */
     function splitPrivateUTXO(
         SplitParams calldata params
-    ) external nonReentrant returns (bytes32[] memory) {
-        // Pre-validación para coherencia con frontend
-        bytes32 inputCommitmentHash = _hashCommitment(params.inputCommitment);
+    ) external nonReentrant whenNotPaused returns (bytes32[] memory) {
         
-        // Preparar arrays para preValidateSplit
+        // Pre-validación PRIMERO para coherencia con frontend
+        bytes32 inputCommitmentHash = _hashCommitment(params.inputCommitment);
         bytes32[] memory outputCommitmentHashes = new bytes32[](params.outputCommitments.length);
         for (uint256 i = 0; i < params.outputCommitments.length; i++) {
             outputCommitmentHashes[i] = _hashCommitment(params.outputCommitments[i]);
         }
         
         // Validar usando preValidateSplit (coherencia con frontend)
-        // Necesitamos crear una función wrapper que acepte memory arrays
         (bool isValid, uint8 errorCode) = preValidateSplit(
             inputCommitmentHash,
             outputCommitmentHashes,
@@ -198,9 +196,9 @@ contract UTXOVault is UTXOVaultBase, ReentrancyGuard {
             _revertWithSplitError(errorCode);
         }
         
-        // Verificar nullifiers únicos en outputs
+        // Verificar nullifiers únicos en outputs (no incluido en preValidateSplit)
         for (uint256 i = 0; i < params.outputNullifiers.length; i++) {
-            if (nullifiers[params.outputNullifiers[i]]) revert NullifierAlreadyUsed();
+            _validateBasicNullifiers(params.outputNullifiers[i]);
         }
         
         // Verificar attestation del backend
@@ -214,7 +212,7 @@ contract UTXOVault is UTXOVaultBase, ReentrancyGuard {
         bytes32 expectedDataHash = calculateSplitDataHash(params, msg.sender);
         if (params.attestation.dataHash != expectedDataHash) revert InvalidAttestation();
         
-        // Ejecutar split
+        // Ejecutar split (preValidateSplit ya verificó que el UTXO existe)
         bytes32 inputUTXOId = commitmentHashToUTXO[inputCommitmentHash];
         return _executeSplit(inputUTXOId, params);
     }
@@ -337,16 +335,14 @@ contract UTXOVault is UTXOVaultBase, ReentrancyGuard {
      */
     function transferPrivateUTXO(
         TransferParams calldata params
-    ) external nonReentrant returns (bytes32) {
-        // Validaciones básicas
-        if (nullifiers[params.inputNullifier]) revert NullifierAlreadyUsed();
-        if (nullifiers[params.outputNullifier]) revert NullifierAlreadyUsed();
+    ) external nonReentrant whenNotPaused returns (bytes32) {
+        // Validaciones básicas usando funciones comunes
+        _validateBasicNullifiers(params.inputNullifier);
+        _validateBasicNullifiers(params.outputNullifier);
         
-        // Verificar input UTXO existe
+        // Verificar input UTXO existe usando función común
         bytes32 inputCommitmentHash = _hashCommitment(params.inputCommitment);
-        bytes32 inputUTXOId = commitmentHashToUTXO[inputCommitmentHash];
-        if (inputUTXOId == bytes32(0)) revert UTXONotFound();
-        if (utxos[inputUTXOId].isSpent) revert UTXOAlreadySpent();
+        bytes32 inputUTXOId = _validateUTXOExists(inputCommitmentHash);
         
         // Verificar attestation del backend
         if (!_verifyAttestation(params.attestation)) revert InvalidAttestation();
@@ -406,18 +402,16 @@ contract UTXOVault is UTXOVaultBase, ReentrancyGuard {
      */
       function withdrawFromPrivateUTXO(
         WithdrawParams calldata params
-    ) external nonReentrant {
-        // Validaciones básicas
-        if (nullifiers[params.nullifierHash]) revert NullifierAlreadyUsed();
+    ) external nonReentrant whenNotPaused {
+        // Validaciones básicas usando funciones comunes
+        _validateBasicNullifiers(params.nullifierHash);
         if (params.revealedAmount == 0) revert InvalidAmount();
         
-        // Verificar UTXO existe
+        // Verificar UTXO existe usando función común
         bytes32 commitmentHash = _hashCommitment(params.commitment);
-        bytes32 utxoId = commitmentHashToUTXO[commitmentHash];
-        if (utxoId == bytes32(0)) revert UTXONotFound();
-        if (utxos[utxoId].isSpent) revert UTXOAlreadySpent();
+        bytes32 utxoId = _validateUTXOExists(commitmentHash);
         
-      
+        // Pre-validación para coherencia con frontend
         (bool isValid, uint8 errorCode) = preValidateWithdraw(
             commitmentHash,           // sourceCommitment
             params.nullifierHash,     // sourceNullifier  
@@ -483,7 +477,7 @@ contract UTXOVault is UTXOVaultBase, ReentrancyGuard {
         // Transferir tokens
         address tokenAddress = utxos[utxoId].tokenAddress;
         IERC20(tokenAddress).transfer(msg.sender, params.revealedAmount);
-        
+  
         emit PrivateWithdrawal(
             _hashCommitment(params.commitment),
             params.nullifierHash,
@@ -496,6 +490,28 @@ contract UTXOVault is UTXOVaultBase, ReentrancyGuard {
     // ========================
     // FUNCIONES AUXILIARES INTERNAS
     // ========================
+    
+    /**
+     * @dev Validación común de nullifiers para todas las operaciones
+     * @param nullifierHash El nullifier a verificar
+     * @notice Revierte si el nullifier ya ha sido usado
+     */
+    function _validateBasicNullifiers(bytes32 nullifierHash) internal view {
+        if (nullifiers[nullifierHash]) revert NullifierAlreadyUsed();
+    }
+    
+    /**
+     * @dev Validación común de UTXO existence
+     * @param commitmentHash El hash del commitment a verificar
+     * @return utxoId El ID del UTXO si existe y no está gastado
+     * @notice Revierte si el UTXO no existe o ya está gastado
+     */
+    function _validateUTXOExists(bytes32 commitmentHash) internal view returns (bytes32 utxoId) {
+        utxoId = commitmentHashToUTXO[commitmentHash];
+        if (utxoId == bytes32(0)) revert UTXONotFound();
+        if (utxos[utxoId].isSpent) revert UTXOAlreadySpent();
+        return utxoId;
+    }
     
     /**
      * @dev Crear UTXO
@@ -532,7 +548,7 @@ contract UTXOVault is UTXOVaultBase, ReentrancyGuard {
         
         // Actualizar mappings
         commitmentHashToUTXO[commitmentHash] = utxoId;
-        nullifiers[nullifierHash] = true;
+
         
         // Tracking de usuarios para recuperación eficiente
         address user = msg.sender;
