@@ -105,6 +105,30 @@ export class SplitPrivateUTXO {
         backendAttestationProvider
       );
 
+      // 🔍 DEBUGGING NULLIFIERS ANTES DEL SPLIT
+      console.log('🔍 SPLIT NULLIFIER DEBUGGING:');
+      console.log('📦 Source UTXO from localStorage:', {
+        sourceCommitment: splitData.sourceCommitment,
+        sourceNullifier: splitData.sourceNullifier,
+        sourceValue: splitData.sourceValue
+      });
+      
+      // Verificar si el nullifier está usado ANTES del split
+      const isUsedBefore = await this.contract.isNullifierUsed(splitData.sourceNullifier);
+      console.log('🔍 Source nullifier used BEFORE split?', isUsedBefore);
+      
+      console.log('📤 Split params que se envían al contrato:', {
+        inputNullifier: splitParams.inputNullifier,
+        outputNullifiers: splitParams.outputNullifiers
+      });
+      
+      // Verificar que inputNullifier es el mismo que sourceNullifier
+      console.log('🔍 Nullifiers match?', {
+        fromSplitData: splitData.sourceNullifier,
+        sentToContract: splitParams.inputNullifier,
+        areEqual: splitData.sourceNullifier === splitParams.inputNullifier
+      });
+
       // 5. Ejecutar split en Alastria (sin estimación de gas)
       console.log('📤 Ejecutando split con criptografía BN254 REAL en Alastria...');
       const tx = await this.contract.splitPrivateUTXO(splitParams);
@@ -120,6 +144,16 @@ export class SplitPrivateUTXO {
       }
 
       console.log(`✅ Split criptográfico REAL completado en bloque ${receipt.blockNumber}`);
+
+      // 🔍 DEBUGGING NULLIFIERS DESPUÉS DEL SPLIT
+      console.log('🔍 DESPUÉS DEL SPLIT:');
+      
+      // Verificar si el nullifier del source se marcó como usado
+      const isUsedAfter = await this.contract.isNullifierUsed(splitData.sourceNullifier);
+      console.log('🔍 Source nullifier used AFTER split?', {
+        nullifier: splitData.sourceNullifier,
+        isUsed: isUsedAfter
+      });
 
       // 6. Extraer UTXOIds REALES de los eventos
       const outputUTXOIds = await this._extractRealUTXOIds(receipt);
