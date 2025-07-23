@@ -112,17 +112,22 @@ export class WithdrawPrivateUTXO {
       const attestation = await attestationProvider.createWithdrawAttestation(withdrawData);
       console.log('✅ Backend attestation created');
 
-      // 4. Preparar parámetros para el contrato
+      // 4. Calcular commitmentHash usando el mismo método que la pre-validación
+      const sourceCommitmentHash = await this._calculateRealCommitmentHash(params.sourceCommitment);
+      console.log('🔑 Calculated commitmentHash for contract:', sourceCommitmentHash);
+
+      // 5. Preparar parámetros para el contrato
       const contractParams: WithdrawParams = {
         commitment: params.sourceCommitment,
         nullifierHash: params.sourceNullifier,
+        commitmentHash: sourceCommitmentHash,  // ✅ NUEVO: Hash calculado en frontend
         revealedAmount: params.revealedAmount,
         attestation: attestation
       };
 
       console.log('📡 Calling contract withdrawFromPrivateUTXO...');
       
-      // 5. Ejecutar transacción en el contrato
+      // 6. Ejecutar transacción en el contrato
       const tx = await this.contract.withdrawFromPrivateUTXO(contractParams);
       console.log('📤 Transaction sent:', tx.hash);
 

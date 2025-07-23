@@ -81,9 +81,11 @@ abstract contract UTXOVaultBase is Ownable {
     /**
      * @dev Parámetros para retiro - Backend verificó TODO
      */
+   
     struct WithdrawParams {
         CommitmentPoint commitment;
         bytes32 nullifierHash;
+        bytes32 commitmentHash;
         uint256 revealedAmount;     // Amount verificado por backend
         BackendAttestation attestation;  // Backend dice: "Ownership y amount OK"
     }

@@ -55,6 +55,7 @@ export interface TransferParams {
 export interface WithdrawParams {
   commitment: CommitmentPoint;
   nullifierHash: string; // bytes32
+  commitmentHash: string; // bytes32 - hash calculado en frontend
   revealedAmount: bigint; // uint256
   attestation: BackendAttestation;
 }

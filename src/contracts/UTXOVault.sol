@@ -410,13 +410,11 @@ contract UTXOVault is UTXOVaultBase, ReentrancyGuard {
     ) external nonReentrant whenNotPaused {
 
         
-        // Verificar UTXO existe usando función común
-        bytes32 commitmentHash = _hashCommitment(params.commitment);
 
         
         // Pre-validación para coherencia con frontend
         (bool isValid, uint8 errorCode) = preValidateWithdraw(
-            commitmentHash,           // sourceCommitment
+            params.commitmentHash,           // sourceCommitment
             params.nullifierHash,     // sourceNullifier  
             params.revealedAmount,    // amount
             msg.sender                // recipient ← Siempre quien ejecuta
@@ -439,7 +437,7 @@ contract UTXOVault is UTXOVaultBase, ReentrancyGuard {
         if (params.attestation.dataHash != expectedDataHash) revert InvalidAttestation();
         
         // Obtener utxoId (preValidateWithdraw ya verificó que existe)
-        bytes32 utxoId = commitmentHashToUTXO[commitmentHash];
+        bytes32 utxoId = commitmentHashToUTXO[params.commitmentHash];
         
         // Ejecutar retiro
         _executeWithdrawal(utxoId, params);
@@ -485,7 +483,7 @@ contract UTXOVault is UTXOVaultBase, ReentrancyGuard {
         IERC20(tokenAddress).transfer(msg.sender, params.revealedAmount);
   
         emit PrivateWithdrawal(
-            _hashCommitment(params.commitment),
+            params.commitmentHash,    // ✅ Usar hash calculado en frontend
             params.nullifierHash,
             msg.sender,
             params.revealedAmount,
