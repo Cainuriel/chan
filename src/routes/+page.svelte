@@ -859,7 +859,7 @@
 </script>
 
 <svelte:head>
-  <title>UTXO Manager - secp256k1 Privacy-First Token Management</title>
+  <title>UTXO CHAN - secp256k1 Privacy-First Token Management</title>
   <meta name="description" content="Manage ERC20 tokens with secp256k1 cryptographic privacy using UTXOs" />
 </svelte:head>
 
@@ -898,7 +898,7 @@
             <span class="text-white font-bold text-xl">U</span>
           </div>
           <div>
-            <h1 class="text-2xl font-bold text-white">UTXO Manager</h1>
+            <h1 class="text-2xl font-bold text-white">UTXO CHAN</h1>
             <p class="text-gray-300 text-sm">secp256k1 Privacy-First Token Management</p>
           </div>
         </div>
@@ -1037,7 +1037,7 @@
       <div class="text-center py-12">
         <div class="max-w-4xl mx-auto">
           <h2 class="text-4xl font-bold text-white mb-6">
-            Setup Your UTXO Wallet
+            Setup Your UTXO CHAN
           </h2>
           <p class="text-xl text-gray-300 mb-12">
             Follow these 3 simple steps to start using privacy-preserving UTXOs

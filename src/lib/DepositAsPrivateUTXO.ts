@@ -185,8 +185,17 @@ export async function depositAsPrivateUTXOSimplified(
       signature
     };
 
-    // 6. Prepare deposit parameters (exactly matching contract structure)
+    // 6. Generate unique UTXO ID for the contract
+    console.log('🆔 Generating unique UTXO ID...');
+    const utxoId = ethers.keccak256(ethers.solidityPacked(
+      ['address', 'uint256', 'uint256', 'bytes32', 'uint256'],
+      [currentEOA.address, commitment.x, commitment.y, nullifierHash, attestationTimestamp]
+    ));
+    console.log('✅ UTXO ID generated:', utxoId);
+
+    // 7. Prepare deposit parameters (exactly matching contract structure)
     const depositParams = {
+      utxoId,                // ← ADDED: Unique UTXO identifier required by contract
       tokenAddress,
       commitment: { 
         x: commitment.x,      // REAL secp256k1 commitment X coordinate
@@ -200,6 +209,7 @@ export async function depositAsPrivateUTXOSimplified(
     // 🚨 LOGGING DETALLADO PARA DEBUGGING
     console.log('🚨 === REAL secp256k1 DEPOSIT PARAMS ===');
     console.log('📋 Complete DepositParams with REAL cryptography:');
+    console.log('UTXO ID:', depositParams.utxoId);
     console.log('Token Address:', depositParams.tokenAddress);
     console.log('Commitment X (REAL):', depositParams.commitment.x.toString());
     console.log('Commitment Y (REAL):', depositParams.commitment.y.toString());
@@ -216,7 +226,7 @@ export async function depositAsPrivateUTXOSimplified(
       signature: depositParams.attestation.signature
     }, 'DEPOSIT');
 
-    // 7. Approve token transfer
+    // 8. Approve token transfer
     console.log('🔓 Approving token transfer...');
     const tokenContract = new ethers.Contract(
       tokenAddress,
@@ -228,23 +238,25 @@ export async function depositAsPrivateUTXOSimplified(
     await approveTx.wait();
     console.log('✅ Token approval confirmed');
 
-    // 8. Pre-validate with contract
+    // 9. Pre-validate with contract
     console.log('🔍 Pre-validating with contract...');
     
     try {
-      const [isValid, errorMessage] = await contract.validateDepositParams(
-        depositParams,
-        currentEOA.address
+      const [isValid, errorCode] = await contract.preValidateDeposit(
+        depositParams.nullifierHash,    // bytes32 - nullifier hash
+        depositParams.tokenAddress,     // address - token contract
+        depositParams.amount,           // uint256 - amount to deposit
+        currentEOA.address              // address - depositor
       );
       
       console.log('📊 Contract validation result:', {
         isValid,
-        errorMessage
+        errorCode
       });
       
       if (!isValid) {
-        console.error('❌ Contract validation failed:', errorMessage);
-        throw new Error(`Contract validation failed: ${errorMessage}`);
+        console.error('❌ Contract validation failed:', errorCode);
+        throw new Error(`Contract validation failed with error code: ${errorCode}`);
       }
       
       console.log('✅ Contract pre-validation passed');
@@ -254,7 +266,7 @@ export async function depositAsPrivateUTXOSimplified(
       throw new Error(`Pre-validation failed: ${preValidationError.message}`);
     }
 
-    // 9. Execute contract call
+    // 10. Execute contract call
     console.log('🚀 Executing contract call...');
     
     const tx = await contract.depositAsPrivateUTXO(depositParams);
@@ -268,25 +280,90 @@ export async function depositAsPrivateUTXOSimplified(
     console.log('⏳ Waiting for transaction confirmation...');
     const receipt = await tx.wait();
     
-    if (!receipt || receipt.status === 0) {
-      throw new Error(`Transaction failed: ${receipt?.hash || tx.hash}`);
+    // ✅ MEJORADO: Verificación más robusta del estado de la transacción
+    if (!receipt) {
+      throw new Error('❌ Transaction receipt not received');
     }
     
-    console.log('✅ Transaction confirmed:', {
+    if (receipt.status === 0) {
+      throw new Error('❌ Transaction failed on-chain');
+    }
+    
+    // ✅ MEJORADO: Verificar que el evento ZKDeposit se emitió correctamente
+    console.log('🔍 Verifying ZKDeposit event was emitted...');
+    let depositEventFound = false;
+    let eventUtxoId: string | null = null;
+    
+    try {
+      for (const log of receipt.logs) {
+        try {
+          const parsedLog = contract.interface.parseLog(log);
+          if (parsedLog && parsedLog.name === 'ZKDeposit') {
+            depositEventFound = true;
+            eventUtxoId = parsedLog.args[0]; // First argument should be utxoId
+            console.log('✅ ZKDeposit event found:', {
+              utxoId: eventUtxoId,
+              sender: parsedLog.args[1],
+              tokenAddress: parsedLog.args[2],
+              amount: parsedLog.args[3]?.toString(),
+              nullifierHash: parsedLog.args[4]
+            });
+            break;
+          }
+        } catch (parseError) {
+          // Continue checking other logs
+          continue;
+        }
+      }
+    } catch (eventError) {
+      console.warn('⚠️ Could not parse transaction logs for ZKDeposit event:', eventError);
+    }
+    
+    if (!depositEventFound) {
+      throw new Error('❌ No ZKDeposit event found in transaction receipt - deposit may have failed');
+    }
+    
+    // ✅ VERIFICACIÓN: El utxoId del evento debe coincidir con el que generamos
+    if (eventUtxoId && eventUtxoId !== utxoId) {
+      console.warn('⚠️ UTXO ID mismatch between generated and event:', {
+        generated: utxoId,
+        fromEvent: eventUtxoId
+      });
+    }
+    
+    console.log('✅ Transaction confirmed with ZKDeposit event:', {
       hash: receipt.hash,
       blockNumber: receipt.blockNumber,
-      gasUsed: receipt.gasUsed.toString()
+      gasUsed: receipt.gasUsed.toString(),
+      utxoId: eventUtxoId || utxoId
     });
 
-    // 10. Create local UTXO record with REAL cryptographic data
-    console.log('💾 Creating UTXO record with REAL secp256k1 cryptography...');
-    const utxoId = ethers.keccak256(ethers.solidityPacked(
-      ['address', 'uint256', 'uint256', 'uint256'],
-      [currentEOA.address, commitment.x, commitment.y, receipt.blockNumber]
-    ));
+    // ✅ OPCIONAL: Verificar que el UTXO existe realmente en el contrato
+    console.log('🔍 Verifying UTXO exists in contract...');
+    try {
+      const utxoExists = await contract.utxoExists(utxoId);
+      const nullifierUsed = await contract.nullifiersUsed(nullifierHash);
+      
+      if (!utxoExists) {
+        throw new Error('❌ UTXO not found in contract after transaction');
+      }
+      
+      if (!nullifierUsed) {
+        throw new Error('❌ Nullifier not marked as used in contract after transaction');
+      }
+      
+      console.log('✅ UTXO verified to exist in contract and nullifier marked as used');
+    } catch (verifyError) {
+      console.warn('⚠️ Could not verify UTXO existence in contract:', verifyError);
+      // No lanzamos error aquí porque el receipt y evento ya confirmaron que la tx fue exitosa
+    }
+
+    // 11. Create local UTXO record with REAL cryptographic data
+    console.log('💾 Transaction confirmed on-chain, now creating UTXO record with REAL secp256k1 cryptography...');
+    // Using utxoId already generated above for contract params
 
     const utxo: ExtendedUTXOData = {
-      id: utxoId,
+      id: utxoId,  // ← Use the same utxoId generated for contract
       exists: true,
       value: BigInt(amount),
       tokenAddress,
@@ -323,7 +400,8 @@ export async function depositAsPrivateUTXOSimplified(
       cryptographyType: 'secp256k1' // ✅ REAL crypto type used
     });
 
-    // 11. Store locally with REAL cryptographic data
+    // 12. Store locally with REAL cryptographic data (ONLY after on-chain confirmation)
+    console.log('🔒 SECURITY: Storing UTXO locally ONLY after on-chain confirmation and event verification');
     utxos.set(utxoId, utxo);
     
     console.log('💾 Saving UTXO with REAL cryptographic data to localStorage...');
@@ -334,27 +412,34 @@ export async function depositAsPrivateUTXOSimplified(
       blindingFactorLength: utxo.blindingFactor?.length,
       cryptographyType: utxo.cryptographyType,
       hasCommitment: !!utxo.commitment,
-      commitmentLength: utxo.commitment?.length, // Should be 66 (0x + 64 hex chars for hash)
-      commitmentFormat: 'hash', // ✅ Now storing hash instead of coordinates
+      commitmentLength: utxo.commitment?.length,
+      commitmentFormat: 'coordinates-as-json',
       hasCoordinatesInNotes: !!utxo.notes,
-      owner: currentEOA.address
+      owner: currentEOA.address,
+      confirmed: utxo.confirmed,
+      transactionHash: utxo.creationTxHash
     });
     
     try {
-      await savePrivateUTXOToLocal(currentEOA.address, utxo);  // ✅ FIXED: Pass owner address as first parameter
+      await savePrivateUTXOToLocal(currentEOA.address, utxo);
       console.log('✅ UTXO saved successfully to localStorage with REAL cryptographic data!');
+      console.log('🔐 SECURITY: UTXO was saved ONLY after blockchain confirmation');
     } catch (saveError) {
       console.error('❌ CRITICAL: Failed to save UTXO to localStorage:', saveError);
       console.error('🚨 UTXO that failed to save:', utxo);
+      console.error('⚠️ NOTE: Transaction was successful on-chain but local storage failed');
       throw new Error(`Failed to save UTXO to localStorage: ${saveError}`);
     }
-    console.log('📊 Final UTXO Details:', {
+    console.log('📊 Final UTXO Details (stored ONLY after blockchain confirmation):', {
       id: utxoId.slice(0, 16) + '...',
       amount: formatEther(amount),
       cryptographyType: 'secp256k1', // ✅ REAL crypto type used
       hasRealBlindingFactor: !!blindingFactor && blindingFactor !== '',
       hasRealCommitment: !!(commitment.x && commitment.y),
-      hasRealNullifier: !!nullifierHash && nullifierHash !== ''
+      hasRealNullifier: !!nullifierHash && nullifierHash !== '',
+      confirmed: true,
+      blockNumber: receipt.blockNumber,
+      transactionHash: receipt.hash
     });
     
     emit('utxo:created', utxo);
@@ -366,7 +451,15 @@ export async function depositAsPrivateUTXOSimplified(
       createdUTXOIds: [utxoId]
     };
 
-    console.log('✅ Simplified private UTXO deposit successful:', utxoId);
+    console.log('🎉 Simplified private UTXO deposit successful with verified on-chain confirmation!');
+    console.log('🔐 SECURITY SUMMARY: UTXO created and stored ONLY after blockchain verification');
+    console.log('✅ Final result:', {
+      utxoId: utxoId.slice(0, 16) + '...',
+      txHash: receipt.hash,
+      blockNumber: receipt.blockNumber,
+      gasUsed: receipt.gasUsed.toString()
+    });
+    
     return result;
 
   } catch (error) {
