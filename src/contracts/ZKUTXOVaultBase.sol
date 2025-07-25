@@ -339,7 +339,7 @@ abstract contract ZKUTXOVaultBase is Ownable {
     ) internal returns (bool) {
         
         // 1. Verificar operación correcta
-        if (keccak256(bytes(attestation.operation)) != keccak256(expectedOperation)) {
+        if (keccak256(bytes(attestation.operation)) != keccak256(bytes(expectedOperation))) {
             return false;
         }
         

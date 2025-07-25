@@ -7,6 +7,18 @@ import { ethers } from 'ethers';
 import { calculateAndValidateDepositHash, logAttestationData } from './HashCalculator';
 import type { Contract } from 'ethers';
 import { EthereumHelpers } from '../utils/ethereum.helpers';
+import type { 
+  ZKDepositParams, 
+  ZKSplitParams, 
+  ZKTransferParams, 
+  ZKWithdrawParams,
+  BackendAttestation,
+  ZKAttestationService,
+  ZKDepositData,
+  ZKSplitData,
+  ZKTransferData,
+  ZKWithdrawData
+} from '../contracts/ZKUTXOVault.types';
 
 export type OperationType = 'DEPOSIT' | 'SPLIT' | 'TRANSFER' | 'WITHDRAW';
 
@@ -248,10 +260,64 @@ export class AttestationService {
     );
   }
 
+  // ========================
+  // ZK HASH METHODS - Simplified for new architecture
+  // ========================
+
   /**
-   * Create and sign deposit attestation
+   * Create hash for ZK deposit data (simplificado)
    */
-  async createDepositAttestation(data: DepositData): Promise<SignedAttestation> {
+  private createZKDepositDataHash(data: ZKDepositData): string {
+    return ethers.keccak256(
+      ethers.solidityPacked(
+        ['address', 'uint256', 'uint256', 'uint256', 'bytes32'],
+        [data.tokenAddress, data.amount, data.commitment.x, data.commitment.y, data.nullifierHash]
+      )
+    );
+  }
+
+  /**
+   * Create hash for ZK split data (sin amounts - privacidad total)
+   */
+  private createZKSplitDataHash(data: ZKSplitData): string {
+    // Solo sourceUTXOId y nullifiers - SIN amounts
+    return ethers.keccak256(
+      ethers.solidityPacked(
+        ['bytes32', 'bytes32[]'],
+        [data.sourceUTXOId, data.outputNullifiers]
+      )
+    );
+  }
+
+  /**
+   * Create hash for ZK transfer data (sin amounts - privacidad total)
+   */
+  private createZKTransferDataHash(data: ZKTransferData): string {
+    // Solo IDs y nullifier - SIN amounts
+    return ethers.keccak256(
+      ethers.solidityPacked(
+        ['bytes32', 'address', 'bytes32'],
+        [data.sourceUTXOId, data.recipientAddress, data.outputNullifier]
+      )
+    );
+  }
+
+  /**
+   * Create hash for ZK withdraw data (amount visible en withdraw)
+   */
+  private createZKWithdrawDataHash(data: ZKWithdrawData): string {
+    return ethers.keccak256(
+      ethers.solidityPacked(
+        ['bytes32', 'uint256', 'address', 'bytes32'],
+        [data.sourceUTXOId, data.amount, data.recipient, data.nullifier]
+      )
+    );
+  }
+
+  /**
+   * Create and sign deposit attestation (LEGACY)
+   */
+  async createLegacyDepositAttestation(data: DepositData): Promise<SignedAttestation> {
     if (!this.authorizedSigner) {
       throw new Error('Attestation service not properly initialized');
     }
@@ -314,9 +380,9 @@ export class AttestationService {
   }
 
   /**
-   * Create and sign transfer attestation
+   * Create and sign transfer attestation (LEGACY)
    */
-  async createTransferAttestation(data: TransferData): Promise<SignedAttestation> {
+  async createLegacyTransferAttestation(data: TransferData): Promise<SignedAttestation> {
     if (!this.authorizedSigner) {
       throw new Error('Attestation service not properly initialized');
     }
@@ -367,9 +433,9 @@ export class AttestationService {
   }
 
   /**
-   * Create and sign split attestation
+   * Create and sign split attestation (LEGACY)
    */
-  async createSplitAttestation(data: SplitData): Promise<SignedAttestation> {
+  async createLegacySplitAttestation(data: SplitData): Promise<SignedAttestation> {
     if (!this.authorizedSigner) {
       throw new Error('Attestation service not properly initialized');
     }
@@ -420,9 +486,9 @@ export class AttestationService {
   }
 
   /**
-   * Create and sign withdraw attestation
+   * Create and sign withdraw attestation (LEGACY)
    */
-  async createWithdrawAttestation(data: WithdrawData): Promise<SignedAttestation> {
+  async createLegacyWithdrawAttestation(data: WithdrawData): Promise<SignedAttestation> {
     if (!this.authorizedSigner) {
       throw new Error('Attestation service not properly initialized');
     }
@@ -578,5 +644,184 @@ export class AttestationService {
     return async (dataHash: string) => {
       return this.createSimpleAttestation(operation, dataHash);
     };
+  }
+
+  // ========================
+  // ZK ATTESTATION METHODS - New architecture
+  // ========================
+
+  /**
+   * Create ZK deposit attestation (compatible con ZKDepositParams)
+   */
+  async createZKDepositAttestation(data: ZKDepositData): Promise<BackendAttestation> {
+    if (!this.authorizedSigner) {
+      throw new Error('Attestation service not properly initialized');
+    }
+
+    const nonce = await this.getNextNonce('0x0000000000000000000000000000000000000000'); // Use contract nonce
+    const timestamp = BigInt(Math.floor(Date.now() / 1000));
+    const dataHash = this.createZKDepositDataHash(data);
+
+    const messageHash = ethers.keccak256(ethers.solidityPacked(
+      ['string', 'bytes32', 'uint256', 'uint256'],
+      ['DEPOSIT', dataHash, nonce, timestamp]
+    ));
+
+    const signature = await this.authorizedSigner.signMessage(ethers.getBytes(messageHash));
+
+    console.log('✅ ZK Deposit attestation created:', {
+      token: data.tokenAddress,
+      amount: data.amount.toString(),
+      nullifier: data.nullifierHash.substring(0, 10) + '...'
+    });
+
+    return {
+      operation: 'DEPOSIT',
+      dataHash,
+      nonce,
+      timestamp,
+      signature
+    };
+  }
+
+  /**
+   * Create ZK split attestation (SIN amounts - privacidad total)
+   */
+  async createZKSplitAttestation(data: ZKSplitData): Promise<BackendAttestation> {
+    if (!this.authorizedSigner) {
+      throw new Error('Attestation service not properly initialized');
+    }
+
+    const nonce = await this.getNextNonce('0x0000000000000000000000000000000000000000'); // Use contract nonce
+    const timestamp = BigInt(Math.floor(Date.now() / 1000));
+    const dataHash = this.createZKSplitDataHash(data);
+
+    const messageHash = ethers.keccak256(ethers.solidityPacked(
+      ['string', 'bytes32', 'uint256', 'uint256'],
+      ['SPLIT', dataHash, nonce, timestamp]
+    ));
+
+    const signature = await this.authorizedSigner.signMessage(ethers.getBytes(messageHash));
+
+    console.log('🔐 ZK Split attestation created (amounts hidden):', {
+      sourceUTXO: data.sourceUTXOId.substring(0, 10) + '...',
+      outputCount: data.outputNullifiers.length,
+      // NO amounts logged - privacidad ZK
+    });
+
+    return {
+      operation: 'SPLIT',
+      dataHash,
+      nonce,
+      timestamp,
+      signature
+    };
+  }
+
+  /**
+   * Create ZK transfer attestation (SIN amounts - privacidad total)
+   */
+  async createZKTransferAttestation(data: ZKTransferData): Promise<BackendAttestation> {
+    if (!this.authorizedSigner) {
+      throw new Error('Attestation service not properly initialized');
+    }
+
+    const nonce = await this.getNextNonce('0x0000000000000000000000000000000000000000'); // Use contract nonce
+    const timestamp = BigInt(Math.floor(Date.now() / 1000));
+    const dataHash = this.createZKTransferDataHash(data);
+
+    const messageHash = ethers.keccak256(ethers.solidityPacked(
+      ['string', 'bytes32', 'uint256', 'uint256'],
+      ['TRANSFER', dataHash, nonce, timestamp]
+    ));
+
+    const signature = await this.authorizedSigner.signMessage(ethers.getBytes(messageHash));
+
+    console.log('🔐 ZK Transfer attestation created (amount hidden):', {
+      sourceUTXO: data.sourceUTXOId.substring(0, 10) + '...',
+      recipient: data.recipientAddress,
+      // NO amount logged - privacidad ZK
+    });
+
+    return {
+      operation: 'TRANSFER',
+      dataHash,
+      nonce,
+      timestamp,
+      signature
+    };
+  }
+
+  /**
+   * Create ZK withdraw attestation (amount visible en withdraw)
+   */
+  async createZKWithdrawAttestation(data: ZKWithdrawData): Promise<BackendAttestation> {
+    if (!this.authorizedSigner) {
+      throw new Error('Attestation service not properly initialized');
+    }
+
+    const nonce = await this.getNextNonce('0x0000000000000000000000000000000000000000'); // Use contract nonce
+    const timestamp = BigInt(Math.floor(Date.now() / 1000));
+    const dataHash = this.createZKWithdrawDataHash(data);
+
+    const messageHash = ethers.keccak256(ethers.solidityPacked(
+      ['string', 'bytes32', 'uint256', 'uint256'],
+      ['WITHDRAW', dataHash, nonce, timestamp]
+    ));
+
+    const signature = await this.authorizedSigner.signMessage(ethers.getBytes(messageHash));
+
+    console.log('✅ ZK Withdraw attestation created (amount revealed):', {
+      sourceUTXO: data.sourceUTXOId.substring(0, 10) + '...',
+      amount: data.amount.toString(),
+      recipient: data.recipient,
+      nullifier: data.nullifier.substring(0, 10) + '...'
+    });
+
+    return {
+      operation: 'WITHDRAW',
+      dataHash,
+      nonce,
+      timestamp,
+      signature
+    };
+  }
+
+  // ========================
+  // ZK COMPATIBILITY METHODS
+  // ========================
+
+  /**
+   * Métodos de conveniencia para mantener compatibilidad con interfaz ZKAttestationService
+   */
+  async createDepositAttestation(data: ZKDepositData): Promise<BackendAttestation> {
+    return this.createZKDepositAttestation(data);
+  }
+
+  async createSplitAttestation(data: ZKSplitData): Promise<BackendAttestation> {
+    return this.createZKSplitAttestation(data);
+  }
+
+  async createTransferAttestation(data: ZKTransferData): Promise<BackendAttestation> {
+    return this.createZKTransferAttestation(data);
+  }
+
+  async createWithdrawAttestation(data: ZKWithdrawData): Promise<BackendAttestation> {
+    return this.createZKWithdrawAttestation(data);
+  }
+
+  /**
+   * Factory method para crear instancia compatible con ZKAttestationService
+   */
+  static createZKCompatible(contract?: Contract): ZKAttestationService {
+    const service = new AttestationService(contract);
+    
+    // Implementar interfaz ZKAttestationService
+    return {
+      createDepositAttestation: (data) => service.createZKDepositAttestation(data),
+      createSplitAttestation: (data) => service.createZKSplitAttestation(data),
+      createTransferAttestation: (data) => service.createZKTransferAttestation(data),
+      createWithdrawAttestation: (data) => service.createZKWithdrawAttestation(data),
+    } as ZKAttestationService;
   }
 }

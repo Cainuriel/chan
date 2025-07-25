@@ -327,3 +327,12 @@ export interface ZKUTXOStorage {
   deleteUTXO(userAddress: string, utxoId: string): void;
   clearAllUTXOs(userAddress: string): void;
 }
+
+// ========================
+// CONTRACT ABI EXPORT
+// ========================
+
+// Import del ABI para usar en el frontend
+import ZKUTXOVaultABI from './ZKUTXOVault.abi.json';
+
+export { ZKUTXOVaultABI };
