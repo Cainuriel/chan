@@ -39,7 +39,7 @@ import {
 } from '../types/utxo.types';
 import type { UTXOOperationResult } from '../types/utxo.types';
 import { CryptoHelpers as ZenroomHelpers } from '../utils/crypto.helpers';
-import { ZKCrypto } from './ZKCryptoService';
+import { ZKCryptoServiceImpl } from './ZKCryptoService';
 
 /**
  * Error específico para validación de withdraw
@@ -83,7 +83,7 @@ export class WithdrawPrivateUTXO {
    */
   async initialize(): Promise<void> {
     console.log('🔐 Initializing WithdrawPrivateUTXO with ZK crypto...');
-    await ZKCrypto.initialize();
+    await ZKCryptoServiceImpl.getInstance().initialize();
     console.log('✅ WithdrawPrivateUTXO initialized with ZK support');
   }
 
@@ -268,15 +268,15 @@ export class WithdrawPrivateUTXO {
   private getErrorMessage(errorCode: number): string {
     switch (errorCode) {
       case 1:
-        return 'UTXO not found';
+        return 'UTXO not found in contract';
       case 2:
-        return 'UTXO not found';
+        return 'UTXO commitment mismatch';
       case 3:
         return 'UTXO already spent';
       case 4:
         return 'Invalid nullifier (empty)';
       case 5:
-        return 'Invalid nullifier';
+        return 'Invalid nullifier format';
       case 6:
         return 'Invalid recipient address (zero address)';
       case 7:
@@ -296,7 +296,8 @@ export class WithdrawPrivateUTXO {
   private async _calculateRealCommitmentHash(commitment: CommitmentPoint): Promise<string> {
     // Use ZK crypto for additional validation if available
     try {
-      const generators = await ZKCrypto.getCurveGenerators();
+      const zkService = ZKCryptoServiceImpl.getInstance();
+      const generators = await zkService.getCurveGenerators();
       console.log('🔐 Using ZK-enhanced commitment hash calculation');
     } catch (error) {
       console.log('📋 Using standard commitment hash calculation');
