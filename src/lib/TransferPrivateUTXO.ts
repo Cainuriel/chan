@@ -15,7 +15,7 @@ import { ethers } from 'ethers';
 import { CryptoHelpers } from '../utils/crypto.helpers';
 import { ZKCryptoServiceImpl } from './ZKCryptoService';
 import { ZKCompatibilityAdapter } from './ZKCompatibilityAdapter';
-import type { UTXOVaultContract } from '../contracts/UTXOVault.types';
+import type { ZKUTXOVaultContract } from '../contracts/ZKUTXOVault.types';
 import type { UTXOOperationResult, ExtendedUTXOData, UTXOType } from '../types/utxo.types';
 
 /**
@@ -105,7 +105,7 @@ export class TransferPrivateUTXO {
   private zkAdapter: ZKCompatibilityAdapter | null = null;
 
   constructor(
-    private contract: UTXOVaultContract,
+    private contract: ZKUTXOVaultContract,
     private signer: ethers.Signer
   ) {}
 
@@ -375,7 +375,7 @@ export class TransferPrivateUTXO {
  * Factory function to create TransferPrivateUTXO service
  */
 export function createTransferPrivateUTXO(
-  contract: UTXOVaultContract,
+  contract: ZKUTXOVaultContract,
   signer: ethers.Signer
 ): TransferPrivateUTXO {
   return new TransferPrivateUTXO(contract, signer);

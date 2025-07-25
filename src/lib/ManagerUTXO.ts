@@ -27,13 +27,10 @@ import {
   UTXOType
 } from '../types/utxo.types';
 import {
-  type DepositParams,
-  type ProofParams,
-  type GeneratorParams,
-  type CommitmentPoint,
-  createUTXOVaultContract,
-  type UTXOVaultContract
-} from '../contracts/UTXOVault.types';
+
+  createZKUTXOVaultContract,
+  type ZKUTXOVaultContract
+} from '../contracts/ZKUTXOVault.types';
 
 // Simple EventEmitter implementation
 class EventEmitter {
@@ -105,7 +102,7 @@ export class ZKPrivateUTXOManager extends EventEmitter {
   private attestationService: AttestationService | null = null;
   
   // Core components
-  protected contract: UTXOVaultContract | null = null;
+  protected contract: ZKUTXOVaultContract | null = null;
   protected currentAccount: any | null = null;
   protected utxos: Map<string, ExtendedUTXOData> = new Map();
   
@@ -148,7 +145,7 @@ export class ZKPrivateUTXOManager extends EventEmitter {
       this.currentAccount = { address: await signer.getAddress() };
 
       // Initialize contract with SIGNER (not provider) to support transactions
-      this.contract = await createUTXOVaultContract(contractAddressOrProvider, signer);
+      this.contract = await createZKUTXOVaultContract(contractAddressOrProvider, signer);
       if (!this.contract) {
         throw new Error('Failed to create contract instance');
       }

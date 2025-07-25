@@ -13,12 +13,13 @@ export * from './zenroom.d';
 // UTXOVault contract types - export selectively to avoid conflicts
 export type {
   PrivateUTXOContract,
-  UTXOVaultContract,
+  ZKUTXOVaultContract,
   SplitOperationContract,
   CombineOperationContract,
-  DepositParams,
-  ProofParams,
-  GeneratorParams,
+  ZKDepositParams,
+  ZKSplitParams,
+  ZKTransferParams,
+  ZKWithdrawParams,
   DepositAsPrivateUTXOParams,
   SplitPrivateUTXOParams,
   TransferPrivateUTXOParams,
@@ -26,11 +27,11 @@ export type {
   PrivateUTXOCreatedEvent,
   PrivateTransferEvent,
   PrivateWithdrawalEvent,
-  UTXO_VAULT_ABI,
+  ZKUTXOVaultABI,
   // Utility functions
-  createUTXOVaultContract,
+  createZKUTXOVaultContract,
   isPrivateUTXOContract
-} from '../contracts/UTXOVault.types';
+} from '../contracts/ZKUTXOVault.types';
 
 // Re-export commonly used types for convenience
 export type {

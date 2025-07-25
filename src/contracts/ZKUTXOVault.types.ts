@@ -336,3 +336,79 @@ export interface ZKUTXOStorage {
 import ZKUTXOVaultABI from './ZKUTXOVault.abi.json';
 
 export { ZKUTXOVaultABI };
+
+// ========================
+// CONTRACT FACTORY FUNCTIONS
+// ========================
+
+import { ethers } from 'ethers';
+
+/**
+ * Create a ZKUTXOVault contract instance
+ */
+export function createZKUTXOVaultContract(
+  addressOrProvider: string | ethers.Provider,
+  signerOrProvider?: ethers.Signer | ethers.Provider
+): ZKUTXOVaultContract {
+  if (typeof addressOrProvider === 'string') {
+    // Address provided, need provider
+    const provider = signerOrProvider as ethers.Provider;
+    return new ethers.Contract(addressOrProvider, ZKUTXOVaultABI, provider) as unknown as ZKUTXOVaultContract;
+  } else {
+    // Provider provided
+    throw new Error('Contract address required for ZKUTXOVault creation');
+  }
+}
+
+/**
+ * Check if contract is a valid ZKUTXOVault contract
+ */
+export async function isPrivateUTXOContract(contract: any): Promise<boolean> {
+  try {
+    // Check if it has the required ZK functions
+    return (
+      typeof contract.depositAsPrivateUTXO === 'function' &&
+      typeof contract.splitPrivateUTXO === 'function' &&
+      typeof contract.transferPrivateUTXO === 'function' &&
+      typeof contract.withdrawFromPrivateUTXO === 'function'
+    );
+  } catch {
+    return false;
+  }
+}
+
+// ========================
+// LEGACY TYPE ALIASES (for backward compatibility)
+// ========================
+
+export type UTXOVaultContract = ZKUTXOVaultContract;
+export type DepositParams = ZKDepositParams;
+export type PrivateUTXOCreatedEvent = ZKDepositEvent;
+export type PrivateTransferEvent = ZKTransferEvent;
+export type PrivateWithdrawalEvent = ZKWithdrawEvent;
+
+// Legacy function aliases
+export const createUTXOVaultContract = createZKUTXOVaultContract;
+export const UTXO_VAULT_ABI = ZKUTXOVaultABI;
+
+// Legacy param type aliases
+export interface DepositAsPrivateUTXOParams extends ZKDepositParams {}
+export interface SplitPrivateUTXOParams extends ZKSplitParams {}
+export interface TransferPrivateUTXOParams extends ZKTransferParams {}
+export interface WithdrawFromPrivateUTXOParams extends ZKWithdrawParams {}
+
+// Additional legacy types for compatibility
+export interface SplitOperationContract extends ZKUTXOVaultContract {}
+export interface CombineOperationContract extends ZKUTXOVaultContract {}
+export interface PrivateUTXOContract extends ZKUTXOVaultContract {}
+
+// Legacy proof params (for backward compatibility)
+export interface ProofParams {
+  proof: string;
+  publicSignals: string[];
+}
+
+export interface GeneratorParams {
+  g: { x: string; y: string };
+  h: { x: string; y: string };
+}

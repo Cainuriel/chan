@@ -11,7 +11,7 @@ import type {
   SplitAttestationData,
   WithdrawAttestationData
 } from '../types/zenroom.d';
-import type { BackendAttestation } from '../contracts/UTXOVault.types';
+import type { BackendAttestation } from '../contracts/ZKUTXOVault.types';
 
 /**
  * CryptoHelpers - API compatible con ZenroomHelpers

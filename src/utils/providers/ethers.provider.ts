@@ -2,7 +2,7 @@
 import { ethers } from 'ethers';
 import type { CryptoProvider } from '../crypto.types';
 import type { PedersenCommitment } from '../../types/zenroom.d';
-import type { BackendAttestation } from '../../contracts/UTXOVault.types';
+import type { BackendAttestation } from '../../contracts/ZKUTXOVault.types';
 
 export class EthersCryptoProvider implements CryptoProvider {
   private secp256k1: any;

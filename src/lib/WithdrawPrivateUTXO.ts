@@ -25,19 +25,15 @@
 
 import { ethers } from 'ethers';
 import type { 
-  UTXOVaultContract, 
-  WithdrawParams,
-  CommitmentPoint,
-  BackendAttestation,
-  UTXODetails
-} from '../contracts/UTXOVault.types';
+  ZKUTXOVaultContract, 
+  ZKWithdrawParams,
+  BackendAttestation
+} from '../contracts/ZKUTXOVault.types';
 import {
-  UTXOOperationError,
-  UTXONotFoundError,
-  InsufficientFundsError,
-  UTXOAlreadySpentError
+  UTXOOperationError
 } from '../types/utxo.types';
 import type { UTXOOperationResult } from '../types/utxo.types';
+import type { PedersenCommitment } from '../types/zenroom.d';
 import { CryptoHelpers as ZenroomHelpers } from '../utils/crypto.helpers';
 import { ZKCryptoServiceImpl } from './ZKCryptoService';
 
@@ -56,7 +52,7 @@ export class WithdrawValidationError extends UTXOOperationError {
  */
 export interface WithdrawUTXOData {
   // UTXO de entrada - con criptografía REAL secp256k1 ZK
-  sourceCommitment: CommitmentPoint;  // Commitment Pedersen REAL en secp256k1
+  sourceCommitment: PedersenCommitment;  // Commitment Pedersen REAL en secp256k1
   sourceValue: bigint;
   sourceBlindingFactor: string;       // Blinding factor criptográfico REAL
   sourceNullifier: string;            // Nullifier hash criptográfico REAL
@@ -74,7 +70,7 @@ export interface WithdrawAttestationProvider {
 
 export class WithdrawPrivateUTXO {
   constructor(
-    private contract: UTXOVaultContract,
+    private contract: ZKUTXOVaultContract,
     private signer: ethers.Signer
   ) {}
 
@@ -133,12 +129,11 @@ export class WithdrawPrivateUTXO {
       const sourceCommitmentHash = await this._calculateRealCommitmentHash(params.sourceCommitment);
       console.log('🔑 Calculated commitmentHash for contract:', sourceCommitmentHash);
 
-      // 5. Preparar parámetros para el contrato
-      const contractParams: WithdrawParams = {
-        commitment: params.sourceCommitment,
-        nullifierHash: params.sourceNullifier,
-        commitmentHash: sourceCommitmentHash,  // ✅ NUEVO: Hash calculado en frontend
-        revealedAmount: params.revealedAmount,
+      // 5. Preparar parámetros para el contrato (arquitectura ZK simplificada)
+      const contractParams: ZKWithdrawParams = {
+        nullifier: params.sourceNullifier,
+        token: params.tokenAddress,
+        amount: params.revealedAmount,
         attestation: attestation
       };
 
@@ -183,12 +178,11 @@ export class WithdrawPrivateUTXO {
       console.log('  - revealedAmount:', params.revealedAmount.toString());
       console.log('  - recipient:', params.recipient);
       
-      // Llamar a la función de pre-validación del contrato
+      // Llamar a la función de pre-validación del contrato (arquitectura ZK simplificada)
       const result = await this.contract.preValidateWithdraw(
-        sourceCommitmentHash,       // sourceCommitment como hash
-        params.sourceNullifier,     // sourceNullifier
-        params.revealedAmount,      // amount
-        params.recipient            // recipient
+        params.sourceNullifier,     // nullifier
+        params.tokenAddress,        // token
+        params.revealedAmount       // amount
       );
 
       console.log('🔍 Pre-validation result:', { isValid: result[0], errorCode: result[1] });
@@ -293,7 +287,7 @@ export class WithdrawPrivateUTXO {
   /**
    * Calculate real cryptographic commitment hash with ZK validation
    */
-  private async _calculateRealCommitmentHash(commitment: CommitmentPoint): Promise<string> {
+  private async _calculateRealCommitmentHash(commitment: PedersenCommitment): Promise<string> {
     // Use ZK crypto for additional validation if available
     try {
       const zkService = ZKCryptoServiceImpl.getInstance();

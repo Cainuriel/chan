@@ -1,6 +1,6 @@
 // src/utils/crypto.types.ts
 import type { PedersenCommitment } from '../types/zenroom.d';
-import type { BackendAttestation } from '../contracts/UTXOVault.types';
+import type { BackendAttestation } from '../contracts/ZKUTXOVault.types';
 import type { CryptographyType } from '../types/utxo.types';
 
 export interface CryptoProvider {

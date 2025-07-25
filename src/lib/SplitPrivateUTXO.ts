@@ -5,18 +5,18 @@
 
 import { ethers } from 'ethers';
 import type { 
-  UTXOVaultContract, 
-  SplitParams,
-  CommitmentPoint,
-  BackendAttestation,
-  UTXODetails
-} from '../contracts/UTXOVault.types';
+  ZKUTXOVaultContract, 
+  ZKSplitParams,
+  BackendAttestation
+} from '../contracts/ZKUTXOVault.types';
 import {
   UTXOOperationError,
   UTXONotFoundError,
   InsufficientFundsError,
   UTXOAlreadySpentError
 } from '../types/utxo.types';
+import type { UTXOData } from '../types/utxo.types';
+import type { PedersenCommitment } from '../types/zenroom.d';
 import { CryptoHelpers as ZenroomHelpers } from '../utils/crypto.helpers';
 
 /**
@@ -34,7 +34,7 @@ export class SplitValidationError extends UTXOOperationError {
  */
 export interface SplitUTXOData {
   // UTXO de entrada - con criptografía REAL
-  sourceCommitment: CommitmentPoint;  // Commitment Pedersen REAL en secp256k1
+  sourceCommitment: PedersenCommitment;  // Commitment Pedersen REAL en secp256k1
   sourceValue: bigint;
   sourceBlindingFactor: string;       // Blinding factor criptográfico REAL
   sourceNullifier: string;            // Nullifier hash criptográfico REAL
@@ -55,7 +55,7 @@ export interface SplitOperationResult {
   success: boolean;
   transactionHash?: string;
   outputCommitmentHashes?: string[];  // Hashes criptográficos REALES
-  outputCommitments?: CommitmentPoint[]; // Coordenadas completas para withdraw posterior
+  outputCommitments?: PedersenCommitment[]; // Coordenadas completas para withdraw posterior
   outputNullifiers?: string[];        // Nullifiers criptográficos REALES
   error?: string;
   outputUTXOIds?: string[];
@@ -67,7 +67,7 @@ export interface SplitOperationResult {
  */
 export class SplitPrivateUTXO {
   constructor(
-    private contract: UTXOVaultContract,
+    private contract: ZKUTXOVaultContract,
     private signer: ethers.Signer
   ) {}
 
@@ -196,8 +196,8 @@ export class SplitPrivateUTXO {
    * @dev Esto se ejecuta ANTES de enviar la transacción para asegurar que será aceptada
    */
   private async _preValidateWithContract(
-    sourceCommitment: CommitmentPoint,
-    outputCommitments: CommitmentPoint[],
+    sourceCommitment: PedersenCommitment,
+    outputCommitments: PedersenCommitment[],
     sourceNullifier: string
   ): Promise<void> {
     try {
@@ -209,10 +209,8 @@ export class SplitPrivateUTXO {
 
       console.log(`🔍 Pre-validando con contrato: Input ${sourceCommitmentHash.substring(0, 10)}...`);
 
-      // LLAMAR A LA FUNCIÓN PÚBLICA preValidateSplit DEL CONTRATO
+      // LLAMAR A LA FUNCIÓN PÚBLICA preValidateSplit DEL CONTRATO (solo nullifier en ZK)
       const [isValid, errorCode] = await this.contract.preValidateSplit(
-        sourceCommitmentHash,
-        outputCommitmentHashes,
         sourceNullifier
       );
 
@@ -242,11 +240,11 @@ export class SplitPrivateUTXO {
    * @notice Generar commitments Pedersen REALES y nullifiers criptográficos REALES
    */
   private async _generateRealCryptographicOutputs(splitData: SplitUTXOData): Promise<{
-    commitments: CommitmentPoint[];
+    commitments: PedersenCommitment[];
     commitmentHashes: string[];
     nullifiers: string[];
   }> {
-    const commitments: CommitmentPoint[] = [];
+    const commitments: PedersenCommitment[] = [];
     const commitmentHashes: string[] = [];
     const nullifiers: string[] = [];
 
@@ -275,11 +273,8 @@ export class SplitPrivateUTXO {
         blindingFactor
       );
       
-      // Convertir a formato del contrato manteniendo precisión criptográfica
-      const commitmentPoint: CommitmentPoint = {
-        x: pedersenCommitment.x,  // Coordenada X REAL en secp256k1
-        y: pedersenCommitment.y   // Coordenada Y REAL en secp256k1
-      };
+      // El PedersenCommitment ya viene en el formato correcto
+      const commitmentPoint: PedersenCommitment = pedersenCommitment;
       
       // Hash criptográfico REAL del commitment
       const commitmentHash = await this._calculateRealCommitmentHash(commitmentPoint);
@@ -320,14 +315,13 @@ export class SplitPrivateUTXO {
    */
   private async _buildRealCryptoParams(
     splitData: SplitUTXOData,
-    outputs: { commitments: CommitmentPoint[]; nullifiers: string[] },
+    outputs: { commitments: PedersenCommitment[]; nullifiers: string[] },
     backendAttestationProvider: (dataHash: string) => Promise<BackendAttestation>
-  ): Promise<SplitParams> {
+  ): Promise<ZKSplitParams> {
     // Crear parámetros base para hash criptográfico REAL
-    const baseParams: SplitParams = {
-      inputCommitment: splitData.sourceCommitment,
-      outputCommitments: outputs.commitments,
+    const baseParams: ZKSplitParams = {
       inputNullifier: splitData.sourceNullifier,
+      outputUTXOIds: outputs.nullifiers, // En ZK architecture, usamos nullifiers como IDs
       outputNullifiers: outputs.nullifiers,
       attestation: {
         operation: "SPLIT",
@@ -338,11 +332,18 @@ export class SplitPrivateUTXO {
       }
     };
 
-    // Calcular dataHash criptográfico REAL usando el contrato
+    // Calcular dataHash criptográfico REAL usando ethers directamente
     console.log('🔢 Calculando dataHash criptográfico REAL...');
-    const dataHash = await this.contract.calculateSplitDataHash(
-      baseParams,
-      await this.signer.getAddress()
+    const dataHash = ethers.keccak256(
+      ethers.solidityPacked(
+        ['string', 'bytes32', 'bytes32[]', 'bytes32[]'],
+        [
+          "SPLIT",
+          splitData.sourceNullifier,
+          outputs.nullifiers,
+          outputs.nullifiers // En ZK usamos nullifiers como IDs
+        ]
+      )
     );
 
     console.log(`📋 DataHash criptográfico REAL: ${dataHash}`);
@@ -354,9 +355,8 @@ export class SplitPrivateUTXO {
     console.log(`✅ Attestation criptográfica REAL obtenida - nonce: ${attestation.nonce}`);
 
     return {
-      inputCommitment: splitData.sourceCommitment,
-      outputCommitments: outputs.commitments,
       inputNullifier: splitData.sourceNullifier,
+      outputUTXOIds: outputs.nullifiers, // En ZK usamos nullifiers como IDs
       outputNullifiers: outputs.nullifiers,
       attestation
     };
@@ -424,7 +424,7 @@ export class SplitPrivateUTXO {
   /**
    * @notice Calcular hash criptográfico REAL de commitment (igual que el contrato)
    */
-  private async _calculateRealCommitmentHash(commitment: CommitmentPoint): Promise<string> {
+  private async _calculateRealCommitmentHash(commitment: PedersenCommitment): Promise<string> {
     // Usar keccak256 REAL como el contrato Solidity
     return ethers.keccak256(
       ethers.solidityPacked(['uint256', 'uint256'], [commitment.x, commitment.y])
@@ -477,17 +477,19 @@ export class SplitPrivateUTXO {
     isSpent: boolean;
     tokenAddress: string;
     canSplit: boolean;
-    details?: UTXODetails;
+    details?: UTXOData;
   }> {
     try {
-      const utxoDetails = await this.contract.getUTXODetails(commitmentHash);
+      // En la nueva arquitectura ZK, usamos funciones simplificadas
+      const exists = await this.contract.doesUTXOExist(commitmentHash);
+      const isSpent = await this.contract.isNullifierUsed(commitmentHash);
       
       return {
-        exists: utxoDetails.exists,
-        isSpent: utxoDetails.isSpent,
-        tokenAddress: utxoDetails.tokenAddress,
-        canSplit: utxoDetails.exists && !utxoDetails.isSpent,
-        details: utxoDetails
+        exists,
+        isSpent,
+        tokenAddress: ethers.ZeroAddress, // No disponible en arquitectura ZK
+        canSplit: exists && !isSpent,
+        details: undefined // No disponible en arquitectura ZK simplificada
       };
     } catch (error) {
       console.error('Error obteniendo información criptográfica del UTXO:', error);
@@ -513,9 +515,8 @@ export class SplitPrivateUTXO {
     errorMessage?: string;
   }> {
     try {
+      // En la nueva arquitectura ZK, solo validamos el nullifier
       const [isValid, errorCode] = await this.contract.preValidateSplit(
-        sourceCommitmentHash,
-        outputCommitmentHashes,
         sourceNullifier
       );
 
@@ -554,7 +555,7 @@ export class SplitPrivateUTXO {
  * @notice Factory para crear instancia con criptografía REAL
  */
 export function createSplitPrivateUTXO(
-  contract: UTXOVaultContract,
+  contract: ZKUTXOVaultContract,
   signer: ethers.Signer
 ): SplitPrivateUTXO {
   return new SplitPrivateUTXO(contract, signer);

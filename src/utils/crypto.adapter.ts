@@ -1,7 +1,7 @@
 // src/utils/crypto.adapter.ts
 import type { CryptoProvider, CryptoMode } from './crypto.types';
 import type { PedersenCommitment } from '../types/zenroom.d';
-import type { BackendAttestation } from '../contracts/UTXOVault.types';
+import type { BackendAttestation } from '../contracts/ZKUTXOVault.types';
 import { EthersCryptoProvider } from './providers/ethers.provider.js';
 
 /**
