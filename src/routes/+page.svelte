@@ -149,7 +149,7 @@
 
     privateUTXOManager.on('private:utxo:split', (data: any) => {
       console.log('✂️ Private UTXO split:', data);
-      addNotification('success', `Private UTXO split into ${data.outputUTXOIds.length} outputs`);
+      addNotification('success', `Private UTXO split into ${data.outputs.length} outputs`);
       refreshData();
     });
 
