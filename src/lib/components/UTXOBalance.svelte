@@ -299,9 +299,9 @@
                     </div>
                   </div>
                   <div>
-                    <span class="text-gray-400">Commitment:</span>
+                    <span class="text-gray-400">Nullifier:</span>
                     <div class="text-white font-mono text-xs break-all">
-                      {utxo.commitment.slice(0, 20)}...
+                      {utxo.nullifierHash.slice(0, 20)}...
                     </div>
                   </div>
                 </div>

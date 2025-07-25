@@ -190,14 +190,8 @@
     }));
   }
 
-  // Initialize withdraw recipient when component loads
-  $: if (utxoManager && utxoManager.getCurrentAccount() && !withdrawRecipient) {
-    withdrawRecipient = utxoManager.getCurrentAccount()?.address || '';
-  }
-
-  // Withdraw operation state
+  // Withdraw operation state - no recipient needed (always current account)
   let withdrawSelectedUTXO = '';
-  let withdrawRecipient = '';
 
   // Transfer operation state
   let transferSelectedUTXO = '';
@@ -251,7 +245,7 @@
     });
   }
 
-  // Initialize with current account as default owner
+  // Initialize with current account as default owner for split outputs
   $: if (utxoManager.getCurrentAccount()) {
     const address = utxoManager.getCurrentAccount()?.address;
     if (address) {
@@ -259,7 +253,6 @@
         ...output,
         owner: output.owner || address
       }));
-      withdrawRecipient = withdrawRecipient || address;
     }
   }
 
@@ -811,21 +804,27 @@
   }
 
   async function executeWithdraw() {
-    if (!withdrawSelectedUTXO || !withdrawRecipient) return;
+    if (!withdrawSelectedUTXO) return;
+
+    // Get current account address automatically
+    const currentAccount = utxoManager.getCurrentAccount();
+    if (!currentAccount) {
+      console.error('No current account available for withdraw');
+      return;
+    }
 
     isProcessing = true;
 
     try {
-      // Execute private UTXO withdrawal
+      // Execute private UTXO withdrawal to current account
       const result = await utxoManager.withdrawPrivateUTXO({
         utxoId: withdrawSelectedUTXO,
-        recipient: withdrawRecipient
+        recipient: currentAccount.address // ✅ Always use current account address
       });
 
       if (result.success) {
         // Reset form
         withdrawSelectedUTXO = '';
-        withdrawRecipient = utxoManager.getCurrentAccount()?.address || '';
         
         dispatch('operation', { type: 'withdraw', result });
       } else {
@@ -883,7 +882,7 @@
       case 'split':
         return splitValidation.canSubmit;
       case 'withdraw':
-        return !!(withdrawSelectedUTXO && withdrawRecipient);
+        return !!(withdrawSelectedUTXO && utxoManager.getCurrentAccount()); // ✅ Only need UTXO and current account
       case 'transfer':
         return !!(transferSelectedUTXO && transferRecipient);
       default:
@@ -1218,18 +1217,18 @@
           </div>
 
           <!-- Recipient -->
-          <div>
-            <label for="withdraw-recipient" class="block text-sm font-medium text-white mb-2">
-              Recipient Address
-            </label>
-            <input
-              id="withdraw-recipient"
-              type="text"
-              bind:value={withdrawRecipient}
-              placeholder="0x..."
-              class="w-full bg-white/5 border border-white/20 rounded-lg px-4 py-3 text-white placeholder-gray-400"
-              required
-            />
+          <div class="bg-blue-600/20 border border-blue-600/30 rounded-lg p-4">
+            <div class="flex space-x-3">
+              <div class="text-blue-400 text-xl">ℹ️</div>
+              <div class="text-sm text-blue-200">
+                <div class="font-medium mb-1">Withdrawal Information:</div>
+                <div class="space-y-1 text-blue-300">
+                  <div>🏦 <strong>Recipient:</strong> Your connected account</div>
+                  <div>📍 <strong>Address:</strong> {utxoManager.getCurrentAccount()?.address || 'Loading...'}</div>
+                  <div>💡 All withdrawals are automatically sent to your connected wallet</div>
+                </div>
+              </div>
+            </div>
           </div>
 
           {#if selectedUTXOData.withdraw}

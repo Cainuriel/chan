@@ -844,46 +844,68 @@ export class ZKPrivateUTXOManager extends EventEmitter {
       
       console.log('🚀 Executing withdraw with REAL secp256k1 ZK cryptography...');
       
-      // Create adapter for attestation service
-      const attestationProvider = {
-        createWithdrawAttestation: async (data: any) => {
-          if (!this.attestationService) {
-            throw new Error('Attestation service not available');
-          }
-          
-          const zkWithdrawData = {
-            sourceUTXOId: data.sourceUTXOId || '',
-            nullifier: data.sourceNullifier,
-            amount: data.sourceValue,
-            tokenAddress: data.tokenAddress,
-            recipient: data.recipient
-          };
-          
-          return await this.attestationService.createZKWithdrawAttestation(zkWithdrawData);
+      // ✅ Create backend attestation provider following DepositAsPrivateUTXO pattern
+      const backendAttestationProvider = async (dataHash: string) => {
+        if (!this.attestationService) {
+          throw new Error('Attestation service not available');
         }
+        
+        console.log('🔐 Creating backend attestation for dataHash:', dataHash);
+        
+        const zkWithdrawData = {
+          sourceUTXOId: withdrawData.sourceUTXOId || '',
+          nullifier: withdrawData.sourceNullifier,
+          amount: withdrawData.sourceValue,
+          tokenAddress: withdrawData.tokenAddress,
+          recipient: withdrawData.recipient,
+          dataHash: dataHash // ✅ Include dataHash like DepositAsPrivateUTXO
+        };
+        
+        return await this.attestationService.createZKWithdrawAttestation(zkWithdrawData);
       };
       
-      const result = await withdrawService.executeWithdraw(withdrawData, attestationProvider);
+      const result = await withdrawService.executeWithdraw(withdrawData, backendAttestationProvider);
       
       if (result.success) {
-        // 5. Marcar UTXO como gastado
+        // ✅ 5. Following DepositAsPrivateUTXO pattern: Update local storage state
+        console.log('📝 Updating local UTXO storage following DepositAsPrivateUTXO pattern...');
+        
+        // Mark source UTXO as spent
         sourceUTXO.isSpent = true;
         this.secp256k1OperationCount++; // ✅ INCREMENT secp256k1 operations
         
-        // Update in localStorage
+        // ✅ Update in localStorage following proven pattern
         const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
         await PrivateUTXOStorage.savePrivateUTXO(this.currentAccount.address, sourceUTXO);
         
-        // 6. Emitir evento
-        this.emit('utxoWithdrawn', {
+        // ✅ CRITICAL: Also update the in-memory Map so getAllPrivateUTXOsByOwner() returns updated data
+        this.privateUTXOs.set(params.utxoId, sourceUTXO);
+        
+        console.log('✅ Local storage updated - UTXO marked as spent');
+        console.log('✅ In-memory map updated - UTXO status:', {
+          id: params.utxoId.slice(0, 16) + '...',
+          isSpent: sourceUTXO.isSpent,
+          inMemory: this.privateUTXOs.get(params.utxoId)?.isSpent
+        });
+        
+        // ✅ 6. Emit event with complete information like DepositAsPrivateUTXO
+        this.emit('private:utxo:withdrawn', {
           utxoId: params.utxoId,
           recipient: params.recipient,
           amount: sourceUTXO.value,
           transactionHash: result.transactionHash,
+          blockNumber: result.blockNumber, // ✅ Added following DepositAsPrivateUTXO pattern
+          gasUsed: result.gasUsed,
           cryptographyType: 'secp256k1' // ✅ Real crypto type in event
         });
         
         console.log('🎉 secp256k1 ZK Withdraw operation completed successfully!');
+        console.log('📊 Final withdraw result:', {
+          txHash: result.transactionHash,
+          blockNumber: result.blockNumber,
+          gasUsed: result.gasUsed?.toString(),
+          spentUTXO: params.utxoId.slice(0, 16) + '...'
+        });
       }
       
       return result;
@@ -1096,15 +1118,19 @@ export class ZKPrivateUTXOManager extends EventEmitter {
   }
 
   /**
-   * Sync with blockchain
+   * Sync with blockchain and reload from localStorage
    */
   async syncWithBlockchain(): Promise<boolean> {
     try {
-      // Basic sync implementation - could be expanded
-      console.log('🔄 Syncing with blockchain...');
+      console.log('🔄 Syncing with blockchain and localStorage...');
+      
+      // ✅ CRITICAL: Reload UTXOs from localStorage to sync in-memory state
+      await this.loadUTXOsFromStorage();
+      console.log('✅ UTXOs reloaded from localStorage');
+      
       return true;
     } catch (error) {
-      console.error('Sync failed:', error);
+      console.error('❌ Sync failed:', error);
       return false;
     }
   }

@@ -231,10 +231,14 @@ export interface UTXOOperationResult {
   success: boolean;
   /** Transaction hash */
   transactionHash?: string;
+  /** Block number where transaction was included */
+  blockNumber?: number;
   /** Gas used */
   gasUsed?: bigint;
   /** Created UTXO IDs (for split/combine) */
   createdUTXOIds?: string[];
+  /** Spent UTXO IDs (for withdraw/transfer operations) */
+  spentUTXOIds?: string[];
   /** Error message if failed */
   error?: string;
   /** Detailed error info */

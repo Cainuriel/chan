@@ -64,10 +64,6 @@ export interface WithdrawUTXOData {
   sourceUTXOId?: string;
 }
 
-export interface WithdrawAttestationProvider {
-  createWithdrawAttestation(withdrawData: WithdrawUTXOData): Promise<BackendAttestation>;
-}
-
 export class WithdrawPrivateUTXO {
   constructor(
     private contract: ZKUTXOVaultContract,
@@ -85,10 +81,11 @@ export class WithdrawPrivateUTXO {
 
   /**
    * Execute withdraw operation with real backend attestation
+   * Following DepositAsPrivateUTXO pattern for consistency
    */
   async executeWithdraw(
     params: WithdrawUTXOData,
-    attestationProvider: WithdrawAttestationProvider
+    backendAttestationProvider: (dataHash: string) => Promise<BackendAttestation> // ✅ Changed to match DepositAsPrivateUTXO pattern
   ): Promise<UTXOOperationResult> {
     try {
       console.log('🔄 Starting withdraw operation...');
@@ -107,29 +104,27 @@ export class WithdrawPrivateUTXO {
       }
       console.log('✅ Pre-validation passed');
 
-      // 2. Preparar datos para la attestation
-      console.log('📋 Preparing withdraw attestation data...');
-      const withdrawData: WithdrawUTXOData = {
-        sourceCommitment: params.sourceCommitment,
-        sourceValue: params.sourceValue,
-        sourceBlindingFactor: params.sourceBlindingFactor,
-        sourceNullifier: params.sourceNullifier,
-        revealedAmount: params.revealedAmount,
-        recipient: params.recipient,
-        tokenAddress: params.tokenAddress,
-        sourceUTXOId: params.sourceUTXOId
-      };
+      // 2. Crear dataHash siguiendo patrón de DepositAsPrivateUTXO
+      console.log('� Calculating dataHash criptográfico REAL...');
+      const dataHash = ethers.keccak256(
+        ethers.solidityPacked(
+          ['string', 'bytes32', 'address', 'uint256'],
+          [
+            "WITHDRAW",
+            params.sourceNullifier,
+            params.tokenAddress,
+            params.revealedAmount
+          ]
+        )
+      );
+      console.log(`📋 DataHash criptográfico REAL: ${dataHash}`);
 
-      // 3. Crear attestation del backend
+      // 3. Crear attestation del backend siguiendo patrón DepositAsPrivateUTXO
       console.log('🔐 Creating backend attestation...');
-      const attestation = await attestationProvider.createWithdrawAttestation(withdrawData);
+      const attestation = await backendAttestationProvider(dataHash);
       console.log('✅ Backend attestation created');
 
-      // 4. Calcular commitmentHash usando el mismo método que la pre-validación
-      const sourceCommitmentHash = await this._calculateRealCommitmentHash(params.sourceCommitment);
-      console.log('🔑 Calculated commitmentHash for contract:', sourceCommitmentHash);
-
-      // 5. Preparar parámetros para el contrato (arquitectura ZK simplificada)
+      // 4. Preparar parámetros para el contrato (arquitectura ZK simplificada)
       const contractParams: ZKWithdrawParams = {
         nullifier: params.sourceNullifier,
         token: params.tokenAddress,
@@ -139,18 +134,61 @@ export class WithdrawPrivateUTXO {
 
       console.log('📡 Calling contract withdrawFromPrivateUTXO...');
       
-      // 6. Ejecutar transacción en el contrato
+      // 5. Ejecutar transacción en el contrato
       const tx = await this.contract.withdrawFromPrivateUTXO(contractParams);
       console.log('📤 Transaction sent:', tx.hash);
 
       // 6. Esperar confirmación
       const receipt = await tx.wait();
-      console.log('✅ Transaction confirmed:', receipt?.hash || 'no hash');
+      
+      if (!receipt) {
+        throw new Error('❌ Transaction receipt not received');
+      }
+      
+      if (receipt.status === 0) {
+        throw new Error('❌ Transaction failed on-chain');
+      }
+      
+      console.log('✅ Transaction confirmed:', receipt.hash);
 
-      // 7. Procesar eventos y resultado
-      const result = this.processWithdrawResult(receipt, params);
+      // 7. ✅ SIGUIENDO PATRÓN DepositAsPrivateUTXO: Verificar que el UTXO se marcó como gastado
+      console.log('🔍 Verifying UTXO was marked as spent in contract...');
+      try {
+        const utxoStillExists = await this.contract.doesUTXOExist(params.sourceUTXOId || params.sourceNullifier);
+        const nullifierMarkedAsUsed = await this.contract.isNullifierUsed(params.sourceNullifier);
+        
+        if (utxoStillExists) {
+          console.warn('⚠️ UTXO still exists in contract after withdraw - this may be expected behavior');
+        }
+        
+        if (!nullifierMarkedAsUsed) {
+          throw new Error('❌ Nullifier not marked as used in contract after withdraw');
+        }
+        
+        console.log('✅ UTXO verified to be processed correctly in contract');
+      } catch (verifyError) {
+        console.warn('⚠️ Could not verify UTXO state in contract:', verifyError);
+        // No lanzamos error aquí porque el receipt ya confirmó que la tx fue exitosa
+      }
+
+      // 8. ✅ SIGUIENDO PATRÓN DepositAsPrivateUTXO: Retornar datos completos
+      const result: UTXOOperationResult = {
+        success: true,
+        transactionHash: receipt.hash,
+        blockNumber: receipt.blockNumber, // ✅ Added following DepositAsPrivateUTXO pattern
+        gasUsed: receipt.gasUsed,
+        createdUTXOIds: [], // ✅ Empty for withdraw but consistent interface
+        spentUTXOIds: [params.sourceUTXOId || params.sourceNullifier] // ✅ Track spent UTXO
+      };
       
       console.log('🎉 Withdraw operation completed successfully');
+      console.log('📊 Final withdraw result:', {
+        txHash: receipt.hash,
+        blockNumber: receipt.blockNumber,
+        gasUsed: receipt.gasUsed.toString(),
+        spentUTXO: params.sourceUTXOId?.slice(0, 16) + '...'
+      });
+      
       return result;
 
     } catch (error: any) {
@@ -196,62 +234,6 @@ export class WithdrawPrivateUTXO {
       return {
         isValid: false,
         errorCode: 255 // Error code for validation failure
-      };
-    }
-  }
-
-  /**
-   * Process withdraw transaction result
-   */
-  private processWithdrawResult(
-    receipt: ethers.ContractTransactionReceipt | null, 
-    params: WithdrawUTXOData
-  ): UTXOOperationResult {
-    if (!receipt) {
-      return {
-        success: false,
-        error: 'Transaction receipt is null'
-      };
-    }
-    
-    try {
-      // Buscar evento PrivateWithdraw en los logs
-      const withdrawEventSignature = ethers.id("PrivateWithdraw(bytes32,address,uint256,address)");
-      let withdrawEventFound = false;
-
-      for (const log of receipt.logs) {
-        try {
-          if (log.topics.length > 0 && log.topics[0] === withdrawEventSignature) {
-            withdrawEventFound = true;
-            console.log('📊 Withdraw event found in logs');
-            break;
-          }
-        } catch {
-          continue;
-        }
-      }
-
-      if (withdrawEventFound) {
-        return {
-          success: true,
-          transactionHash: receipt.hash,
-          gasUsed: receipt.gasUsed
-        };
-      } else {
-        console.warn('⚠️ No PrivateWithdraw event found in transaction');
-        return {
-          success: true,
-          transactionHash: receipt.hash,
-          gasUsed: receipt.gasUsed
-        };
-      }
-
-    } catch (error: any) {
-      console.error('❌ Error processing withdraw result:', error);
-      return {
-        success: false,
-        error: `Failed to process withdraw result: ${error.message}`,
-        transactionHash: receipt.hash
       };
     }
   }

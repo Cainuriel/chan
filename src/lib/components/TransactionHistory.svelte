@@ -286,13 +286,7 @@
             </button>
           </div>
 
-          <div class="grid grid-cols-2 gap-4 text-sm">
-            <div>
-              <span class="text-gray-400">Commitment:</span>
-              <div class="text-white font-mono text-xs break-all">
-                {utxo.commitment.slice(0, 20)}...
-              </div>
-            </div>
+          <div class="text-sm">
             <div>
               <span class="text-gray-400">Nullifier:</span>
               <div class="text-white font-mono text-xs break-all">
