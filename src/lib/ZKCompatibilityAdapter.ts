@@ -217,10 +217,15 @@ export class ZKCompatibilityAdapter {
         return false;
       }
 
-      // Verificar nullifier
+      // Verificar nullifier solo si tenemos la private key real
+      if (!utxo.ownerPrivateKey) {
+        console.warn('⚠️ UTXO verification skipped: no private key available');
+        return false;
+      }
+      
       const expectedNullifier = await ZKCrypto.generateNullifier(
         utxo.id,
-        utxo.ownerPrivateKey || '0x' + '0'.repeat(64) // Dummy para verificación
+        utxo.ownerPrivateKey
       );
 
       console.log('✅ UTXO verification passed:', {

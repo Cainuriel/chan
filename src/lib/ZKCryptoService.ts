@@ -123,11 +123,11 @@ export class ZKCryptoServiceImpl implements ZKCryptoService {
     // 2. Crear commitment criptográficamente correcto
     const commitment = await this.generateCommitment(amount, blindingFactor);
 
-    // 3. Generar UTXO ID único
+    // 3. Generar UTXO ID único y determinístico
     const utxoId = ethers.keccak256(
       ethers.solidityPacked(
-        ['address', 'uint256', 'uint256', 'uint256', 'uint256'],
-        [tokenAddress, amount, commitment.x, commitment.y, BigInt(Date.now())]
+        ['address', 'uint256', 'uint256', 'uint256', 'string'],
+        [tokenAddress, amount, commitment.x, commitment.y, 'utxo_id_salt']
       )
     );
 

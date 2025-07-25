@@ -162,11 +162,14 @@ export class ZKPrivateUTXOManager extends EventEmitter {
 
       // Initialize ZK services with contract and signer
       this.zkCryptoService = ZKCryptoServiceImpl.getInstance();
+      await this.zkCryptoService.initialize();
+      
       this.zkAdapter = new ZKCompatibilityAdapter(this.contract as any);
+      await this.zkAdapter.initialize();
       
       // Initialize attestation service with contract
       this.attestationService = new AttestationService(this.contract as any);
-      console.log('✅ ZK Attestation service initialized');
+      console.log('✅ ZK services fully initialized with secure cryptography');
       
       // Load existing UTXOs from localStorage for the current user
       await this.loadUTXOsFromStorage();
@@ -792,9 +795,9 @@ export class ZKPrivateUTXOManager extends EventEmitter {
   }
 
   /**
-   * Generate BN254 UTXO ID using ZK crypto service
+   * Generate secp256k1 ZK UTXO ID using ZK crypto service
    */
-  private async generateBN254UTXOId(amount: bigint, blindingFactor: string, owner: string): Promise<string> {
+  private async generateSecp256k1UTXOId(amount: bigint, blindingFactor: string, owner: string): Promise<string> {
     if (!this.zkCryptoService) {
       throw new Error('ZK Crypto service not initialized');
     }
