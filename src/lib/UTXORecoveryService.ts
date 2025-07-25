@@ -1,5 +1,10 @@
 /**
- * UTXORecoveryService - Sistema de recuperación de UTXOs desde blockchain (Arquitectura Ultra-Simplificada)
+ * UTXORecoveryService - Sistema de recuperación de UTXOs desde blockchain (Arquitectura Ultra-Si          if (localUTXO && localUTXO.isSpent !== isSpent) {
+            console.log(`🔄 Updating spent status for UTXO ${utxoId.substring(0, 8)}... to ${isSpent}`);
+            localUTXO.isSpent = isSpent;
+            await PrivateUTXOStorage.savePrivateUTXO(userAddress, localUTXO);
+            result.syncedFromBlockchain++;
+          }cada)
  * Detecta UTXOIds creados en blockchain y recupera información desde localStorage cifrado
  * NOTA: Los contratos solo almacenan UTXOId + isSpent, toda la información privada está en localStorage
  */
@@ -49,7 +54,7 @@ export class UTXORecoveryService {
 
     try {
       // 1. Obtener UTXOs locales desde localStorage ZK cifrado
-      const localUTXOs = PrivateUTXOStorage.getPrivateUTXOs(userAddress);
+      const localUTXOs = await PrivateUTXOStorage.getPrivateUTXOs(userAddress);
       const localUTXOIds = new Set(localUTXOs.map(u => u.id));
       
       console.log(`📂 Found ${localUTXOs.length} UTXOs in encrypted localStorage`);
@@ -182,7 +187,7 @@ export class UTXORecoveryService {
     console.log(`🔍 Auditing UTXO consistency for ultra-simplified architecture...`);
     console.log(`📋 User: ${userAddress.substring(0, 8)}... (checking UTXOIds + spent status only)`);
 
-    const localUTXOs = PrivateUTXOStorage.getPrivateUTXOs(userAddress);
+    const localUTXOs = await PrivateUTXOStorage.getPrivateUTXOs(userAddress);
     const recovery = await this.scanAndRecoverUTXOs(userAddress);
 
     const localIds = new Set(localUTXOs.map(u => u.id));
@@ -249,15 +254,15 @@ export class UTXORecoveryService {
   /**
    * NUEVA ARQUITECTURA: Obtener estadísticas de UTXOs para arquitectura ultra-simplificada
    */
-  static getRecoveryStats(userAddress: string): {
+  static async getRecoveryStats(userAddress: string): Promise<{
     totalUTXOs: number;
     usableUTXOs: number;
     spentUTXOs: number;
     unspentUTXOs: number;
     privateDataComplete: number;
     missingPrivateData: number;
-  } {
-    const utxos = PrivateUTXOStorage.getPrivateUTXOs(userAddress);
+  }> {
+    const utxos = await PrivateUTXOStorage.getPrivateUTXOs(userAddress);
     
     const spentUTXOs = utxos.filter(u => u.isSpent);
     const unspentUTXOs = utxos.filter(u => !u.isSpent);
@@ -314,7 +319,7 @@ export class UTXORecoveryService {
   }> {
     console.log(`🔄 Syncing spent status from blockchain for ultra-simplified architecture...`);
     
-    const utxos = PrivateUTXOStorage.getPrivateUTXOs(userAddress);
+    const utxos = await PrivateUTXOStorage.getPrivateUTXOs(userAddress);
     let updated = 0;
     let errors = 0;
 
@@ -325,7 +330,7 @@ export class UTXORecoveryService {
         if (utxo.isSpent !== blockchainSpent) {
           console.log(`🔄 Updating spent status for ${utxo.id.substring(0, 8)}...: ${utxo.isSpent} → ${blockchainSpent}`);
           utxo.isSpent = blockchainSpent;
-          PrivateUTXOStorage.savePrivateUTXO(userAddress, utxo);
+          await PrivateUTXOStorage.savePrivateUTXO(userAddress, utxo);
           updated++;
         }
       } catch (error) {

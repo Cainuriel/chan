@@ -1,11 +1,11 @@
 /**
  * PrivateUTXOStorage - ZK-Private UTXO Storage System
  * Ultra-secure local storage with secp256k1 encryption for maximum privacy
- * Zero dummy data, real cryptographic operations only
+ * Uses pure ethers.js + Web Crypto API for browser-native security
  */
 
 import type { PrivateUTXO } from './ManagerUTXO';
-import { createHash } from 'crypto';
+import { ethers } from 'ethers';
 
 export class PrivateUTXOStorage {
   private static readonly STORAGE_KEY = 'zk-private-utxos';
@@ -13,18 +13,19 @@ export class PrivateUTXOStorage {
   private static readonly ENCRYPTION_KEY_ENV = 'VITE_STORAGE_ENCRYPTION_KEY';
 
   /**
-   * Generate ZK-secure user key with secp256k1-based derivation
+   * Generate ZK-secure user key with pure ethers secp256k1 derivation
    */
   private static getZKUserKey(userAddress: string): string {
     const normalizedAddress = userAddress.toLowerCase();
-    const zkSalt = process.env[this.ENCRYPTION_KEY_ENV] || 'fallback-key-only-for-dev';
+    const zkSalt = import.meta.env.VITE_STORAGE_ENCRYPTION_KEY || 'fallback-key-only-for-dev';
     
-    // Create deterministic but secure key derivation
-    const hash = createHash('sha256')
-      .update(`${this.STORAGE_KEY}:${this.USER_PREFIX}${normalizedAddress}:${zkSalt}`)
-      .digest('hex');
+    // Use ethers.solidityPackedKeccak256 for better key derivation
+    const hash = ethers.solidityPackedKeccak256(
+      ['string', 'string', 'string', 'string'],
+      [this.STORAGE_KEY, this.USER_PREFIX, normalizedAddress, zkSalt]
+    );
     
-    return `${this.STORAGE_KEY}:zk:${hash.substring(0, 16)}`;
+    return `${this.STORAGE_KEY}:zk:${hash.substring(2, 20)}`; // Remove '0x' and take 18 chars
   }
 
   /**
@@ -32,47 +33,81 @@ export class PrivateUTXOStorage {
    */
   private static getSecp256k1KeysKey(userAddress: string): string {
     const normalizedAddress = userAddress.toLowerCase();
-    const zkSalt = process.env[this.ENCRYPTION_KEY_ENV] || 'fallback-key-only-for-dev';
+    const zkSalt = import.meta.env.VITE_STORAGE_ENCRYPTION_KEY || 'fallback-key-only-for-dev';
     
-    const hash = createHash('sha256')
-      .update(`${this.STORAGE_KEY}:secp256k1-keys:${normalizedAddress}:${zkSalt}`)
-      .digest('hex');
+    const hash = ethers.solidityPackedKeccak256(
+      ['string', 'string', 'string', 'string'],
+      [this.STORAGE_KEY, 'secp256k1-keys', normalizedAddress, zkSalt]
+    );
     
-    return `${this.STORAGE_KEY}:secp256k1:${hash.substring(0, 16)}`;
+    return `${this.STORAGE_KEY}:secp256k1:${hash.substring(2, 20)}`; // Remove '0x' and take 18 chars
   }
 
   /**
-   * Encrypt UTXO data for ZK-private storage
+   * Encrypt UTXO data using AES-GCM with ethers-derived key (browser-native)
    */
-  private static encryptUTXOData(data: string, userAddress: string): string {
-    // Simple XOR encryption with user-specific key for privacy
-    const key = this.getZKUserKey(userAddress);
-    const keyHash = createHash('sha256').update(key).digest();
-    
-    let encrypted = '';
-    for (let i = 0; i < data.length; i++) {
-      encrypted += String.fromCharCode(data.charCodeAt(i) ^ keyHash[i % keyHash.length]);
-    }
-    
-    return btoa(encrypted); // Base64 encode
-  }
-
-  /**
-   * Decrypt UTXO data from ZK-private storage
-   */
-  private static decryptUTXOData(encryptedData: string, userAddress: string): string {
+  private static async encryptUTXOData(data: string, userAddress: string): Promise<string> {
     try {
-      const key = this.getZKUserKey(userAddress);
-      const keyHash = createHash('sha256').update(key).digest();
-      const encrypted = atob(encryptedData);
+      const keyMaterial = ethers.keccak256(ethers.toUtf8Bytes(this.getZKUserKey(userAddress)));
       
-      let decrypted = '';
-      for (let i = 0; i < encrypted.length; i++) {
-        decrypted += String.fromCharCode(encrypted.charCodeAt(i) ^ keyHash[i % keyHash.length]);
-      }
+      // Use Web Crypto API (browser native) with ethers-derived key
+      const key = await crypto.subtle.importKey(
+        'raw',
+        ethers.getBytes(keyMaterial.slice(0, 66)), // Take first 32 bytes (remove 0x and take 64 hex chars = 32 bytes)
+        { name: 'AES-GCM', length: 256 },
+        false,
+        ['encrypt']
+      );
       
-      return decrypted;
+      const iv = crypto.getRandomValues(new Uint8Array(12)); // 96-bit IV for GCM
+      const encodedData = new TextEncoder().encode(data);
+      
+      const encrypted = await crypto.subtle.encrypt(
+        { name: 'AES-GCM', iv: iv },
+        key,
+        encodedData
+      );
+      
+      // Combine IV + encrypted data
+      const combined = new Uint8Array(iv.length + encrypted.byteLength);
+      combined.set(iv);
+      combined.set(new Uint8Array(encrypted), iv.length);
+      
+      return ethers.hexlify(combined);
     } catch (error) {
+      console.error('🔐 ZK Encryption failed:', error);
+      throw new Error('ZK encryption failed');
+    }
+  }
+
+  /**
+   * Decrypt UTXO data using AES-GCM with ethers-derived key (browser-native)
+   */
+  private static async decryptUTXOData(encryptedData: string, userAddress: string): Promise<string> {
+    try {
+      const keyMaterial = ethers.keccak256(ethers.toUtf8Bytes(this.getZKUserKey(userAddress)));
+      
+      const key = await crypto.subtle.importKey(
+        'raw',
+        ethers.getBytes(keyMaterial.slice(0, 66)), // Take first 32 bytes
+        { name: 'AES-GCM', length: 256 },
+        false,
+        ['decrypt']
+      );
+      
+      const combined = ethers.getBytes(encryptedData);
+      const iv = combined.slice(0, 12); // First 12 bytes are IV
+      const encrypted = combined.slice(12); // Rest is encrypted data
+      
+      const decrypted = await crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv: iv },
+        key,
+        encrypted
+      );
+      
+      return new TextDecoder().decode(decrypted);
+    } catch (error) {
+      console.error('🔐 ZK Decryption failed:', error);
       throw new Error('ZK decryption failed - data may be corrupted');
     }
   }
@@ -80,7 +115,7 @@ export class PrivateUTXOStorage {
   /**
    * Guardar UTXO privado del usuario con cifrado ZK
    */
-  static savePrivateUTXO(userAddress: string, utxo: PrivateUTXO): void {
+  static async savePrivateUTXO(userAddress: string, utxo: PrivateUTXO): Promise<void> {
     try {
       // Validar estructura mínima
       if (!utxo.id || !utxo.tokenAddress || !utxo.owner || typeof utxo.value === 'undefined') {
@@ -96,7 +131,7 @@ export class PrivateUTXOStorage {
         owner: utxo.owner,
         isSpent: utxo.isSpent
       });
-      const existingUTXOs = this.getPrivateUTXOs(userAddress);
+      const existingUTXOs = await this.getPrivateUTXOs(userAddress);
       console.log(`💾 Existing UTXOs count: ${existingUTXOs.length}`);
       // Actualizar o añadir UTXO (por id y owner)
       const utxoIndex = existingUTXOs.findIndex(u => u.id === utxo.id && u.owner.toLowerCase() === utxo.owner.toLowerCase());
@@ -113,8 +148,8 @@ export class PrivateUTXOStorage {
         return value;
       });
       
-      // Cifrar datos antes de guardar
-      const encryptedData = this.encryptUTXOData(serializedData, userAddress);
+      // Cifrar datos antes de guardar (ahora async)
+      const encryptedData = await this.encryptUTXOData(serializedData, userAddress);
       localStorage.setItem(userKey, encryptedData);
       console.log(`💾 Saved encrypted to localStorage. Data length: ${encryptedData.length}`);
       // Verificar que se guardó correctamente
@@ -129,7 +164,7 @@ export class PrivateUTXOStorage {
   /**
    * Obtener todos los UTXOs privados del usuario (con descifrado ZK)
    */
-  static getPrivateUTXOs(userAddress: string): PrivateUTXO[] {
+  static async getPrivateUTXOs(userAddress: string): Promise<PrivateUTXO[]> {
     try {
       const userKey = this.getZKUserKey(userAddress);
       const encryptedData = localStorage.getItem(userKey);
@@ -138,8 +173,8 @@ export class PrivateUTXOStorage {
         return [];
       }
 
-      // Descifrar datos
-      const serializedData = this.decryptUTXOData(encryptedData, userAddress);
+      // Descifrar datos (ahora async)
+      const serializedData = await this.decryptUTXOData(encryptedData, userAddress);
       const utxos = JSON.parse(serializedData) as PrivateUTXO[];
       
       // Convertir todos los campos bigint relevantes de vuelta a bigint
@@ -165,10 +200,10 @@ export class PrivateUTXOStorage {
   /**
    * Marcar UTXO como gastado (con cifrado ZK)
    */
-  static markUTXOAsSpent(userAddress: string, utxoId: string): void {
+  static async markUTXOAsSpent(userAddress: string, utxoId: string): Promise<void> {
     try {
-      const utxos = this.getPrivateUTXOs(userAddress);
-      const utxoIndex = utxos.findIndex(u => u.id === utxoId);
+      const utxos = await this.getPrivateUTXOs(userAddress);
+      const utxoIndex = utxos.findIndex((u: PrivateUTXO) => u.id === utxoId);
       
       if (utxoIndex >= 0) {
         utxos[utxoIndex].isSpent = true;
@@ -177,7 +212,7 @@ export class PrivateUTXOStorage {
           if (typeof value === 'bigint') return value.toString();
           return value;
         });
-        const encryptedData = this.encryptUTXOData(serializedData, userAddress);
+        const encryptedData = await this.encryptUTXOData(serializedData, userAddress);
         localStorage.setItem(userKey, encryptedData);
         console.log(`⛔ UTXO ${utxoId.substring(0, 8)}... marked as spent`);
       }
@@ -189,35 +224,36 @@ export class PrivateUTXOStorage {
   /**
    * Obtener UTXOs no gastados del usuario
    */
-  static getUnspentUTXOs(userAddress: string): PrivateUTXO[] {
-    return this.getPrivateUTXOs(userAddress).filter(utxo => !utxo.isSpent);
+  static async getUnspentUTXOs(userAddress: string): Promise<PrivateUTXO[]> {
+    const allUTXOs = await this.getPrivateUTXOs(userAddress);
+    return allUTXOs.filter((utxo: PrivateUTXO) => !utxo.isSpent);
   }
 
   /**
    * Obtener balance total del usuario para un token específico
    */
-  static getBalance(userAddress: string, tokenAddress?: string): bigint {
-    const unspentUTXOs = this.getUnspentUTXOs(userAddress);
+  static async getBalance(userAddress: string, tokenAddress?: string): Promise<bigint> {
+    const unspentUTXOs = await this.getUnspentUTXOs(userAddress);
     
     return unspentUTXOs
-      .filter(utxo => !tokenAddress || utxo.tokenAddress.toLowerCase() === tokenAddress.toLowerCase())
-      .reduce((total, utxo) => total + utxo.value, BigInt(0));
+      .filter((utxo: PrivateUTXO) => !tokenAddress || utxo.tokenAddress.toLowerCase() === tokenAddress.toLowerCase())
+      .reduce((total: bigint, utxo: PrivateUTXO) => total + utxo.value, BigInt(0));
   }
 
   /**
    * Obtener estadísticas del usuario
    */
-  static getUserStats(userAddress: string): {
+  static async getUserStats(userAddress: string): Promise<{
     totalUTXOs: number;
     unspentUTXOs: number;
     spentUTXOs: number;
     uniqueTokens: number;
     totalBalance: bigint;
-  } {
-    const allUTXOs = this.getPrivateUTXOs(userAddress);
-    const unspentUTXOs = allUTXOs.filter(utxo => !utxo.isSpent);
-    const uniqueTokens = new Set(allUTXOs.map(utxo => utxo.tokenAddress.toLowerCase())).size;
-    const totalBalance = unspentUTXOs.reduce((total, utxo) => total + utxo.value, BigInt(0));
+  }> {
+    const allUTXOs = await this.getPrivateUTXOs(userAddress);
+    const unspentUTXOs = allUTXOs.filter((utxo: PrivateUTXO) => !utxo.isSpent);
+    const uniqueTokens = new Set(allUTXOs.map((utxo: PrivateUTXO) => utxo.tokenAddress.toLowerCase())).size;
+    const totalBalance = unspentUTXOs.reduce((total: bigint, utxo: PrivateUTXO) => total + utxo.value, BigInt(0));
 
     return {
       totalUTXOs: allUTXOs.length,
@@ -282,14 +318,14 @@ export class PrivateUTXOStorage {
   /**
    * Exportar datos del usuario (para backup) - descifrado para transferencia
    */
-  static exportUserData(userAddress: string): string | null {
+  static async exportUserData(userAddress: string): Promise<string | null> {
     try {
       const userKey = this.getZKUserKey(userAddress);
       const encryptedData = localStorage.getItem(userKey);
       if (!encryptedData) return null;
       
       // Exportar datos descifrados para que puedan ser importados
-      return this.decryptUTXOData(encryptedData, userAddress);
+      return await this.decryptUTXOData(encryptedData, userAddress);
     } catch (error) {
       console.error('❌ Failed to export user data:', error);
       return null;
@@ -299,7 +335,7 @@ export class PrivateUTXOStorage {
   /**
    * Importar datos del usuario (desde backup) con cifrado ZK
    */
-  static importUserData(userAddress: string, data: string): boolean {
+  static async importUserData(userAddress: string, data: string): Promise<boolean> {
     try {
       // Validar que los datos son JSON válido
       const parsedData = JSON.parse(data);
@@ -309,7 +345,7 @@ export class PrivateUTXOStorage {
 
       const userKey = this.getZKUserKey(userAddress);
       // Cifrar datos antes de guardar
-      const encryptedData = this.encryptUTXOData(data, userAddress);
+      const encryptedData = await this.encryptUTXOData(data, userAddress);
       localStorage.setItem(userKey, encryptedData);
       console.log(`📥 Private UTXO data imported for user ${userAddress.substring(0, 8)}...`);
       return true;
@@ -322,21 +358,21 @@ export class PrivateUTXOStorage {
   /**
    * Guardar claves secp256k1 ZK del usuario (para operaciones criptográficas ZK)
    */
-  static saveSecp256k1Keys(userAddress: string, tokenAddress: string, keys: {
+  static async saveSecp256k1Keys(userAddress: string, tokenAddress: string, keys: {
     privateKey: string;
     publicKey: string;
     blindingFactor: string;
     commitmentKey: string;
-  }): void {
+  }): Promise<void> {
     try {
       const keysKey = this.getSecp256k1KeysKey(userAddress);
-      const existingKeys = this.getSecp256k1Keys(userAddress);
+      const existingKeys = await this.getSecp256k1Keys(userAddress);
       
       existingKeys[tokenAddress.toLowerCase()] = keys;
       
       // Cifrar las claves sensibles
       const serializedKeys = JSON.stringify(existingKeys);
-      const encryptedKeys = this.encryptUTXOData(serializedKeys, userAddress);
+      const encryptedKeys = await this.encryptUTXOData(serializedKeys, userAddress);
       localStorage.setItem(keysKey, encryptedKeys);
       console.log(`🔑 secp256k1 ZK keys saved for token ${tokenAddress.substring(0, 8)}...`);
     } catch (error) {
@@ -347,12 +383,12 @@ export class PrivateUTXOStorage {
   /**
    * Obtener claves secp256k1 ZK del usuario
    */
-  static getSecp256k1Keys(userAddress: string): Record<string, {
+  static async getSecp256k1Keys(userAddress: string): Promise<Record<string, {
     privateKey: string;
     publicKey: string;
     blindingFactor: string;
     commitmentKey: string;
-  }> {
+  }>> {
     try {
       const keysKey = this.getSecp256k1KeysKey(userAddress);
       const encryptedData = localStorage.getItem(keysKey);
@@ -361,7 +397,7 @@ export class PrivateUTXOStorage {
         return {};
       }
       
-      const decryptedData = this.decryptUTXOData(encryptedData, userAddress);
+      const decryptedData = await this.decryptUTXOData(encryptedData, userAddress);
       return JSON.parse(decryptedData);
     } catch (error) {
       console.error('❌ Failed to load secp256k1 keys:', error);
@@ -372,8 +408,8 @@ export class PrivateUTXOStorage {
   /**
    * Verificar si existen claves secp256k1 ZK para un token
    */
-  static hasSecp256k1Keys(userAddress: string, tokenAddress: string): boolean {
-    const keys = this.getSecp256k1Keys(userAddress);
+  static async hasSecp256k1Keys(userAddress: string, tokenAddress: string): Promise<boolean> {
+    const keys = await this.getSecp256k1Keys(userAddress);
     return !!(keys[tokenAddress.toLowerCase()]);
   }
 
@@ -393,22 +429,22 @@ export class PrivateUTXOStorage {
   /**
    * Función de depuración: mostrar todo el contenido de localStorage para un usuario (ZK encrypted)
    */
-  static debugStorage(userAddress: string): void {
+  static async debugStorage(userAddress: string): Promise<void> {
     try {
       console.log(`🔍 DEBUG: ZK encrypted localStorage content for user ${userAddress}`);
       
       // UTXOs detallados
-      const { owned, received, all } = this.getAllUserUTXOs(userAddress);
+      const { owned, received, all } = await this.getAllUserUTXOs(userAddress);
       console.log(`📦 Owned UTXOs (${owned.length}):`, owned);
       console.log(`📥 Received UTXOs (${received.length}):`, received);
       console.log(`📊 All UTXOs (${all.length}):`, all);
       
       // secp256k1 ZK Keys
-      const zkKeys = this.getSecp256k1Keys(userAddress);
+      const zkKeys = await this.getSecp256k1Keys(userAddress);
       console.log(`🔑 secp256k1 ZK Keys:`, Object.keys(zkKeys));
       
       // Enhanced Stats
-      const enhancedStats = this.getEnhancedUserStats(userAddress);
+      const enhancedStats = await this.getEnhancedUserStats(userAddress);
       console.log(`📊 Enhanced Stats:`, enhancedStats);
       
       // All stored accounts
@@ -433,16 +469,16 @@ export class PrivateUTXOStorage {
   /**
    * Obtener todos los UTXOs relacionados con un usuario (propios + recibidos) con ZK
    */
-  static getAllUserUTXOs(userAddress: string): {
+  static async getAllUserUTXOs(userAddress: string): Promise<{
     owned: PrivateUTXO[];
     received: PrivateUTXO[];
     all: PrivateUTXO[];
-  } {
+  }> {
     try {
       const normalizedAddress = userAddress.toLowerCase();
       
       // UTXOs donde soy el owner original
-      const ownedUTXOs = this.getPrivateUTXOs(userAddress);
+      const ownedUTXOs = await this.getPrivateUTXOs(userAddress);
       
       // Para ZK privacy, no podemos buscar en otras cuentas cifradas
       // Solo retornamos los UTXOs propios por seguridad
@@ -470,7 +506,7 @@ export class PrivateUTXOStorage {
   /**
    * Obtener estadísticas detalladas incluyendo UTXOs recibidos
    */
-  static getEnhancedUserStats(userAddress: string): {
+  static async getEnhancedUserStats(userAddress: string): Promise<{
     ownedCount: number;
     receivedCount: number;
     totalCount: number;
@@ -481,31 +517,31 @@ export class PrivateUTXOStorage {
       owned: { count: number; balance: bigint };
       received: { count: number; balance: bigint };
     };
-  } {
+  }> {
     try {
-      const { owned, received, all } = this.getAllUserUTXOs(userAddress);
+      const { owned, received, all } = await this.getAllUserUTXOs(userAddress);
       
-      const unspentUTXOs = all.filter(utxo => !utxo.isSpent);
-      const uniqueTokens = [...new Set(all.map(utxo => utxo.tokenAddress))];
+      const unspentUTXOs = all.filter((utxo: PrivateUTXO) => !utxo.isSpent);
+      const uniqueTokens = [...new Set(all.map((utxo: PrivateUTXO) => utxo.tokenAddress))];
       
       const ownedBalance = owned
-        .filter(utxo => !utxo.isSpent)
-        .reduce((sum, utxo) => sum + utxo.value, BigInt(0));
+        .filter((utxo: PrivateUTXO) => !utxo.isSpent)
+        .reduce((sum: bigint, utxo: PrivateUTXO) => sum + utxo.value, BigInt(0));
         
       const receivedBalance = received
-        .filter(utxo => !utxo.isSpent)
-        .reduce((sum, utxo) => sum + utxo.value, BigInt(0));
+        .filter((utxo: PrivateUTXO) => !utxo.isSpent)
+        .reduce((sum: bigint, utxo: PrivateUTXO) => sum + utxo.value, BigInt(0));
       
       return {
         ownedCount: owned.length,
         receivedCount: received.length,
         totalCount: all.length,
         totalBalance: ownedBalance + receivedBalance,
-        unspentBalance: unspentUTXOs.reduce((sum, utxo) => sum + utxo.value, BigInt(0)),
+        unspentBalance: unspentUTXOs.reduce((sum: bigint, utxo: PrivateUTXO) => sum + utxo.value, BigInt(0)),
         uniqueTokens,
         breakdown: {
-          owned: { count: owned.filter(u => !u.isSpent).length, balance: ownedBalance },
-          received: { count: received.filter(u => !u.isSpent).length, balance: receivedBalance }
+          owned: { count: owned.filter((u: PrivateUTXO) => !u.isSpent).length, balance: ownedBalance },
+          received: { count: received.filter((u: PrivateUTXO) => !u.isSpent).length, balance: receivedBalance }
         }
       };
     } catch (error) {

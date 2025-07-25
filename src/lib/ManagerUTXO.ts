@@ -192,7 +192,7 @@ export class ZKPrivateUTXOManager extends EventEmitter {
 
     try {
       const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
-      const storedUTXOs = PrivateUTXOStorage.getPrivateUTXOs(this.currentAccount.address);
+      const storedUTXOs = await PrivateUTXOStorage.getPrivateUTXOs(this.currentAccount.address);
       
       console.log(`💾 Loading ${storedUTXOs.length} UTXOs from localStorage for user ${this.currentAccount.address}`);
       
@@ -229,7 +229,7 @@ export class ZKPrivateUTXOManager extends EventEmitter {
         async (address: string, utxo: any) => {
           // Save using PrivateUTXOStorage
           const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
-          PrivateUTXOStorage.savePrivateUTXO(address, utxo);
+          await PrivateUTXOStorage.savePrivateUTXO(address, utxo);
         },
         (event: string, data: any) => this.emit(event, data)
       );
@@ -237,7 +237,7 @@ export class ZKPrivateUTXOManager extends EventEmitter {
       if (result.success && result.createdUTXOIds) {
         // Load the created UTXO into manager
         const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
-        const savedUTXOs = PrivateUTXOStorage.getPrivateUTXOs(this.currentAccount.address);
+        const savedUTXOs = await PrivateUTXOStorage.getPrivateUTXOs(this.currentAccount.address);
         
         for (const utxoId of result.createdUTXOIds) {
           const savedUTXO = savedUTXOs.find(u => u.id === utxoId);
@@ -276,7 +276,7 @@ export class ZKPrivateUTXOManager extends EventEmitter {
         
         if (this.currentAccount) {
           const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
-          const allStoredUTXOs = PrivateUTXOStorage.getAllUserUTXOs(this.currentAccount.address);
+          const allStoredUTXOs = await PrivateUTXOStorage.getAllUserUTXOs(this.currentAccount.address);
           
           const foundUTXO = allStoredUTXOs.all.find(utxo => utxo.id === params.inputUTXOId);
           
@@ -374,14 +374,14 @@ export class ZKPrivateUTXOManager extends EventEmitter {
           
           // Save to localStorage
           const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
-          PrivateUTXOStorage.savePrivateUTXO(outputUTXO.owner, outputUTXO);
+          await PrivateUTXOStorage.savePrivateUTXO(outputUTXO.owner, outputUTXO);
           console.log('✅ Split secp256k1 ZK UTXO saved');
         }
 
         // Mark input UTXO as spent
         inputUTXO.isSpent = true;
         const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
-        PrivateUTXOStorage.savePrivateUTXO(this.currentAccount.address, inputUTXO);
+        await PrivateUTXOStorage.savePrivateUTXO(this.currentAccount.address, inputUTXO);
         
         this.secp256k1OperationCount++; // ✅ INCREMENT secp256k1 operations
         
@@ -542,13 +542,13 @@ export class ZKPrivateUTXOManager extends EventEmitter {
         const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
         
         // Save spent source UTXO
-        PrivateUTXOStorage.savePrivateUTXO(this.currentAccount.address, sourceUTXO);
+        await PrivateUTXOStorage.savePrivateUTXO(this.currentAccount.address, sourceUTXO);
         
         // Save new UTXO for recipient (if we have storage for other users)
         // For now, just add to internal collection if it's for current user
         if (params.newOwner.toLowerCase() === this.currentAccount.address.toLowerCase()) {
           this.privateUTXOs.set(transferResult.newUTXOId, newUTXO);
-          PrivateUTXOStorage.savePrivateUTXO(this.currentAccount.address, newUTXO);
+          await PrivateUTXOStorage.savePrivateUTXO(this.currentAccount.address, newUTXO);
         }
         
         // 12. Emit events
@@ -675,7 +675,7 @@ export class ZKPrivateUTXOManager extends EventEmitter {
         
         // Update in localStorage
         const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
-        PrivateUTXOStorage.savePrivateUTXO(this.currentAccount.address, sourceUTXO);
+        await PrivateUTXOStorage.savePrivateUTXO(this.currentAccount.address, sourceUTXO);
         
         // 6. Emitir evento
         this.emit('utxoWithdrawn', {
@@ -784,7 +784,7 @@ export class ZKPrivateUTXOManager extends EventEmitter {
 
     // Update in localStorage too
     const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
-    PrivateUTXOStorage.savePrivateUTXO(this.currentAccount.address, utxo);
+    await PrivateUTXOStorage.savePrivateUTXO(this.currentAccount.address, utxo);
 
     console.log(`✅ UTXO ${utxoId} recovered successfully. Reason: ${reason}`);
     this.emit('private:utxo:recovered', { utxoId, reason });

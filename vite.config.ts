@@ -9,5 +9,13 @@ export default defineConfig({
 	},
 	ssr: {
 		noExternal: ['elliptic']
+	},
+	define: {
+		global: 'globalThis',
+	},
+	build: {
+		rollupOptions: {
+			external: ['crypto', 'fs', 'path', 'os']
+		}
 	}
 });
