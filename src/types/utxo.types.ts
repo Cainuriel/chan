@@ -8,7 +8,7 @@
  */
 export interface PrivateUTXO extends ExtendedUTXOData {
   // ===========================
-  // CAMPOS REQUERIDOS PARA BN254 PRIVATE UTXOs
+  // CAMPOS REQUERIDOS PARA PRIVATE UTXOs
   // ===========================
   
   /** Blinding factor for commitment (requerido, no opcional) */
@@ -20,11 +20,11 @@ export interface PrivateUTXO extends ExtendedUTXOData {
   /** Siempre true para PrivateUTXO */
   isPrivate: true;
   
-  /** Siempre BN254 para PrivateUTXO */
-  cryptographyType: 'BN254';
+  /** Cryptography type: 'secp256k1' for current implementation, 'BN254' for legacy compatibility */
+  cryptographyType: 'BN254' | 'secp256k1';
   
   // ===========================
-  // CAMPOS OPCIONALES BN254
+  // CAMPOS OPCIONALES PARA DIFERENTES TIPOS DE CRYPTOGRAFÍA
   // ===========================
   
   /** Range proof (Bulletproof format) - opcional */
@@ -61,10 +61,10 @@ export interface UTXOData {
   isSpent: boolean;
   
   // ===========================
-  // BN254 COMMITMENT FIELDS
+  // COMMITMENT FIELDS
   // ===========================
   
-  /** BN254 Pedersen commitment (required for private UTXOs) */
+  /** Pedersen commitment (required for private UTXOs) */
   commitment: string;
   /** Parent UTXO ID (for splits/combines) */
   parentUTXO: string;
@@ -120,11 +120,11 @@ export interface ExtendedUTXOData extends UTXOData {
   tokenMetadata?: TokenMetadata;
   
   // ===========================
-  // BN254 CRYPTOGRAPHY FIELDS (opcionales en ExtendedUTXOData)
+  // CRYPTOGRAPHY FIELDS (opcionales en ExtendedUTXOData)
   // ===========================
   
-  /** Cryptography type used (BN254, etc.) */
-  cryptographyType?: 'BN254' | 'Other';
+  /** Cryptography type used (secp256k1 is current implementation) */
+  cryptographyType?: 'BN254' | 'secp256k1' | 'Other';
   
   /** Nullifier hash for preventing double-spending */
   nullifierHash?: string;
@@ -296,7 +296,7 @@ export interface UTXOSelectionResult {
 }
 
 /**
- * UTXO manager statistics with BN254 cryptography support
+ * UTXO manager statistics with multi-curve cryptography support
  */
 export interface UTXOManagerStats {
   totalUTXOs: number;
@@ -312,15 +312,18 @@ export interface UTXOManagerStats {
   creationDistribution: Array<{ date: string; count: number }>;
   
   // ===========================
-  // BN254 CRYPTOGRAPHY STATS
+  // CRYPTOGRAPHY STATS
   // ===========================
   
-  /** Number of BN254 UTXOs */
+  /** Number of secp256k1 UTXOs (current implementation) */
+  secp256k1UTXOs: number;
+  /** Number of BN254 UTXOs (legacy/future compatibility) */
   bn254UTXOs: number;
-  /** Number of BN254 operations performed */
-  bn254Operations: number;
+  /** Number of crypto operations performed */
+  cryptoOperations: number;
   /** Distribution by cryptography type */
   cryptographyDistribution: {
+    secp256k1: number;
     BN254: number;
     Other: number;
   };

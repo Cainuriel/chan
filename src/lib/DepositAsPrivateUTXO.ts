@@ -289,7 +289,7 @@ export async function depositAsPrivateUTXOSimplified(
       creationTxHash: receipt.hash,
       blockNumber: receipt.blockNumber,
       nullifierHash: nullifierHash, // ✅ REAL nullifier hash
-      cryptographyType: 'BN254', // ✅ IMPORTANT: This is actually secp256k1, labeled as BN254 for type compatibility
+      cryptographyType: 'secp256k1', 
       notes: JSON.stringify({ // ✅ Store hash and additional metadata in notes for reference
         commitmentHash: ethers.keccak256(ethers.solidityPacked(['uint256', 'uint256'], [commitment.x, commitment.y])),
         commitmentX: commitment.x.toString(),
@@ -307,7 +307,7 @@ export async function depositAsPrivateUTXOSimplified(
         y: commitment.y.toString().slice(0, 10) + '...'
       },
       nullifierHash: nullifierHash.slice(0, 10) + '...',
-      cryptographyType: 'secp256k1 (labeled as BN254)'
+      cryptographyType: 'secp256k1' // ✅ REAL crypto type used
     });
 
     // 11. Store locally with REAL cryptographic data
@@ -338,7 +338,7 @@ export async function depositAsPrivateUTXOSimplified(
     console.log('📊 Final UTXO Details:', {
       id: utxoId.slice(0, 16) + '...',
       amount: formatEther(amount),
-      cryptographyType: 'secp256k1 (labeled as BN254)',
+      cryptographyType: 'secp256k1', // ✅ REAL crypto type used
       hasRealBlindingFactor: !!blindingFactor && blindingFactor !== '',
       hasRealCommitment: !!(commitment.x && commitment.y),
       hasRealNullifier: !!nullifierHash && nullifierHash !== ''
