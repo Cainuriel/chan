@@ -83,43 +83,30 @@ contract ZKUTXOVault is ZKUTXOVaultBase, ReentrancyGuard {
         ZKSplitParams calldata params
     ) external nonReentrant returns (bool) {
         
-        // 1. Pre-validación rápida
-        (bool isValid, uint8 errorCode) = preValidateSplit(params.inputNullifier);
+        // 1. Pre-validación COMPLETA (input + outputs + duplicados)
+        (bool isValid, uint8 errorCode) = preValidateSplit(
+            params.inputNullifier,
+            params.outputNullifiers,
+            params.outputUTXOIds
+        );
         require(isValid, _getSplitErrorMessage(errorCode));
         
-        // 2. Validar arrays
-        require(params.outputUTXOIds.length > 0, "No outputs");
-        require(
-            params.outputUTXOIds.length == params.outputNullifiers.length,
-            "Array length mismatch"
-        );
-        
-        // 3. Verificar attestation del backend (backend verificó conservación de valor)
+        // 2. Verificar attestation del backend (backend verificó conservación de valor)
         require(
             _verifyZKAttestation(params.attestation, "SPLIT"),
             "Invalid attestation"
         );
         
-        // 4. Verificar que output nullifiers no estén usados
-        for (uint256 i = 0; i < params.outputNullifiers.length; i++) {
-            require(
-                !nullifiersUsed[params.outputNullifiers[i]],
-                "Output nullifier already used"
-            );
-            require(params.outputUTXOIds[i] != bytes32(0), "Invalid output UTXO ID");
-            require(params.outputNullifiers[i] != bytes32(0), "Invalid output nullifier");
-        }
-        
-        // 5. Marcar input nullifier como usado (prevenir doble gasto)
+        // 3. Marcar input nullifier como usado (prevenir doble gasto)
         nullifiersUsed[params.inputNullifier] = true;
         
-        // 6. Marcar outputs como existentes (sin amounts - privacidad ZK)
+        // 4. Marcar outputs como existentes (sin amounts - privacidad ZK)
         for (uint256 i = 0; i < params.outputUTXOIds.length; i++) {
             utxoExists[params.outputUTXOIds[i]] = true;
             nullifiersUsed[params.outputNullifiers[i]] = true;
         }
         
-        // 7. Emitir evento (sin amounts - privacidad ZK)
+        // 5. Emitir evento (sin amounts - privacidad ZK)
         emit ZKSplit(
             params.inputNullifier,
             params.outputUTXOIds,     // ← Sin amounts
@@ -234,8 +221,16 @@ contract ZKUTXOVault is ZKUTXOVaultBase, ReentrancyGuard {
     }
     
     function _getSplitErrorMessage(uint8 errorCode) internal pure returns (string memory) {
-        if (errorCode == 1) return "Invalid nullifier";
+        if (errorCode == 1) return "Invalid input nullifier";
         if (errorCode == 2) return "Input already spent";
+        if (errorCode == 3) return "No outputs provided";
+        if (errorCode == 4) return "Array length mismatch";
+        if (errorCode == 5) return "Output nullifier already used";
+        if (errorCode == 6) return "Invalid output nullifier";
+        if (errorCode == 7) return "Invalid output UTXO ID";
+        if (errorCode == 8) return "Output nullifier same as input";
+        if (errorCode == 9) return "Duplicate output nullifiers";
+        if (errorCode == 10) return "Duplicate output UTXO IDs";
         return "Unknown split error";
     }
     

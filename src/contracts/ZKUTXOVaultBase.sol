@@ -221,18 +221,65 @@ abstract contract ZKUTXOVaultBase is Ownable {
     // ========================
     
     /**
-     * @notice Pre-validar split ZK (solo nullifier)
+     * @notice Pre-validar split ZK COMPLETO (input + outputs + duplicados)
+     * @dev Valida TODOS los aspectos antes de la transacción costosa
      */
     function preValidateSplit(
-        bytes32 inputNullifier
+        bytes32 inputNullifier,
+        bytes32[] calldata outputNullifiers,
+        bytes32[] calldata outputUTXOIds
     ) public view returns (bool isValid, uint8 errorCode) {
+        
+        // 1. Validar input nullifier
         if (inputNullifier == bytes32(0)) {
-            return (false, 1); // Invalid nullifier
+            return (false, 1); // Invalid input nullifier
         }
         if (nullifiersUsed[inputNullifier]) {
-            return (false, 2); // Already spent
+            return (false, 2); // Input already spent
         }
-        return (true, 0);
+        
+        // 2. Validar arrays
+        if (outputNullifiers.length == 0) {
+            return (false, 3); // No outputs provided
+        }
+        if (outputNullifiers.length != outputUTXOIds.length) {
+            return (false, 4); // Array length mismatch
+        }
+        
+        // 3. Validar todos los output nullifiers
+        for (uint256 i = 0; i < outputNullifiers.length; i++) {
+            // Verificar nullifier no usado
+            if (nullifiersUsed[outputNullifiers[i]]) {
+                return (false, 5); // Output nullifier already used
+            }
+            
+            // Verificar IDs válidos
+            if (outputNullifiers[i] == bytes32(0)) {
+                return (false, 6); // Invalid output nullifier
+            }
+            if (outputUTXOIds[i] == bytes32(0)) {
+                return (false, 7); // Invalid output UTXO ID
+            }
+            
+            // CRÍTICO: Verificar que output nullifier != input nullifier
+            if (outputNullifiers[i] == inputNullifier) {
+                return (false, 8); // Output nullifier same as input
+            }
+        }
+        
+        // 4. Verificar duplicados entre outputs
+        for (uint256 i = 0; i < outputNullifiers.length; i++) {
+            for (uint256 j = i + 1; j < outputNullifiers.length; j++) {
+                if (outputNullifiers[i] == outputNullifiers[j]) {
+                    return (false, 9); // Duplicate output nullifiers
+                }
+                if (outputUTXOIds[i] == outputUTXOIds[j]) {
+                    return (false, 10); // Duplicate output UTXO IDs
+                }
+            }
+        }
+        
+        return (true, 0); // All validations passed
     }
     
     /**

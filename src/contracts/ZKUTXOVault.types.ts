@@ -86,6 +86,24 @@ export interface ValidationResult {
   errorCode: number;
 }
 
+export interface SplitValidationResult extends ValidationResult {
+  errorMessage?: string;
+  failedValidations?: string[];
+}
+
+export interface PreValidationParams {
+  inputNullifier: string;
+  outputNullifiers: string[];
+  outputUTXOIds: string[];
+}
+
+export interface ValidationContext {
+  operation: ZKOperation;
+  userAddress: string;
+  timestamp: number;
+  blockNumber?: number;
+}
+
 // ========================
 // CONTRACT INTERFACE TYPES
 // ========================
@@ -112,7 +130,9 @@ export interface ZKUTXOVaultContract {
   ): Promise<[boolean, number]>;
   
   preValidateSplit(
-    inputNullifier: string
+    inputNullifier: string,
+    outputNullifiers: string[],
+    outputUTXOIds: string[]
   ): Promise<[boolean, number]>;
   
   preValidateTransfer(
@@ -284,6 +304,75 @@ export class ZKValidationError extends ZKOperationError {
 }
 
 // ========================
+// ERROR CODE MAPPINGS
+// ========================
+
+export const SPLIT_ERROR_CODES = {
+  1: 'Invalid input nullifier',
+  2: 'Input already spent',
+  3: 'No outputs provided',
+  4: 'Array length mismatch',
+  5: 'Output nullifier already used',
+  6: 'Invalid output nullifier',
+  7: 'Invalid output UTXO ID',
+  8: 'Output nullifier same as input',
+  9: 'Duplicate output nullifiers',
+  10: 'Duplicate output UTXO IDs'
+} as const;
+
+export const DEPOSIT_ERROR_CODES = {
+  1: 'Invalid nullifier',
+  2: 'Nullifier already used',
+  3: 'Invalid token',
+  4: 'Invalid amount',
+  5: 'Insufficient allowance',
+  6: 'Invalid token contract',
+  7: 'Insufficient balance'
+} as const;
+
+export const TRANSFER_ERROR_CODES = {
+  1: 'Invalid nullifiers',
+  2: 'Input already spent',
+  3: 'Output nullifier collision'
+} as const;
+
+export const WITHDRAW_ERROR_CODES = {
+  1: 'Invalid nullifier',
+  2: 'Already spent',
+  3: 'Invalid amount',
+  4: 'Insufficient contract balance',
+  5: 'Invalid token'
+} as const;
+
+/**
+ * Get error message for split operation
+ */
+export function getSplitErrorMessage(errorCode: number): string {
+  return SPLIT_ERROR_CODES[errorCode as keyof typeof SPLIT_ERROR_CODES] || `Unknown split error code: ${errorCode}`;
+}
+
+/**
+ * Get error message for deposit operation
+ */
+export function getDepositErrorMessage(errorCode: number): string {
+  return DEPOSIT_ERROR_CODES[errorCode as keyof typeof DEPOSIT_ERROR_CODES] || `Unknown deposit error code: ${errorCode}`;
+}
+
+/**
+ * Get error message for transfer operation
+ */
+export function getTransferErrorMessage(errorCode: number): string {
+  return TRANSFER_ERROR_CODES[errorCode as keyof typeof TRANSFER_ERROR_CODES] || `Unknown transfer error code: ${errorCode}`;
+}
+
+/**
+ * Get error message for withdraw operation
+ */
+export function getWithdrawErrorMessage(errorCode: number): string {
+  return WITHDRAW_ERROR_CODES[errorCode as keyof typeof WITHDRAW_ERROR_CODES] || `Unknown withdraw error code: ${errorCode}`;
+}
+
+// ========================
 // UTILITY TYPES
 // ========================
 
@@ -375,6 +464,90 @@ export async function isPrivateUTXOContract(contract: any): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/**
+ * Validate split parameters before contract call
+ */
+export function validateSplitParams(params: ZKSplitParams): SplitValidationResult {
+  const errors: string[] = [];
+  
+  // Check input nullifier
+  if (!params.inputNullifier || params.inputNullifier === '0x0000000000000000000000000000000000000000000000000000000000000000') {
+    errors.push('Invalid input nullifier');
+  }
+  
+  // Check arrays
+  if (!params.outputNullifiers || params.outputNullifiers.length === 0) {
+    errors.push('No output nullifiers provided');
+  }
+  
+  if (!params.outputUTXOIds || params.outputUTXOIds.length === 0) {
+    errors.push('No output UTXO IDs provided');
+  }
+  
+  if (params.outputNullifiers.length !== params.outputUTXOIds.length) {
+    errors.push('Array length mismatch');
+  }
+  
+  // Check for duplicates
+  const uniqueNullifiers = new Set(params.outputNullifiers);
+  if (uniqueNullifiers.size !== params.outputNullifiers.length) {
+    errors.push('Duplicate output nullifiers detected');
+  }
+  
+  const uniqueUTXOIds = new Set(params.outputUTXOIds);
+  if (uniqueUTXOIds.size !== params.outputUTXOIds.length) {
+    errors.push('Duplicate output UTXO IDs detected');
+  }
+  
+  // Check for input/output conflicts
+  if (params.outputNullifiers.includes(params.inputNullifier)) {
+    errors.push('Output nullifier same as input nullifier');
+  }
+  
+  // Validate individual nullifiers and IDs
+  for (const nullifier of params.outputNullifiers) {
+    if (!nullifier || nullifier === '0x0000000000000000000000000000000000000000000000000000000000000000') {
+      errors.push('Invalid output nullifier found');
+      break;
+    }
+  }
+  
+  for (const utxoId of params.outputUTXOIds) {
+    if (!utxoId || utxoId === '0x0000000000000000000000000000000000000000000000000000000000000000') {
+      errors.push('Invalid output UTXO ID found');
+      break;
+    }
+  }
+  
+  if (errors.length > 0) {
+    return {
+      isValid: false,
+      errorCode: 99, // Client-side validation error
+      errorMessage: errors.join('; '),
+      failedValidations: errors
+    };
+  }
+  
+  return {
+    isValid: true,
+    errorCode: 0
+  };
+}
+
+/**
+ * Create detailed error message from split validation result
+ */
+export function createSplitErrorMessage(result: SplitValidationResult): string {
+  if (result.isValid) return 'No errors';
+  
+  if (result.errorCode === 99) {
+    return `Client validation failed: ${result.errorMessage}`;
+  }
+  
+  const baseMessage = getSplitErrorMessage(result.errorCode);
+  return result.errorMessage ? `${baseMessage}: ${result.errorMessage}` : baseMessage;
 }
 
 // ========================

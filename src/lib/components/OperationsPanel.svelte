@@ -3,6 +3,7 @@
   import type { ERC20TokenData } from '../../types/ethereum.types';
   import type { PrivateUTXO } from '../../types/utxo.types';
   import { EthereumHelpers } from '../../utils/ethereum.helpers';
+  import { getSplitErrorMessage } from '../../contracts/ZKUTXOVault.types';
 
   // Import using default import only and infer type
   import privateUTXOManager  from '$lib/ManagerUTXO';
@@ -750,9 +751,59 @@
         dispatch('operation', { type: 'split', result });
       } else {
         console.error('Split failed:', result.error);
+        
+        // Mostrar error específico si está relacionado con validación
+        let errorMessage = result.error || 'Unknown error occurred';
+        
+        // Detectar errores específicos de pre-validación
+        if (typeof result.error === 'string') {
+          if (result.error.includes('Output nullifier same as input')) {
+            errorMessage = 'Error: Los nullifiers de salida no pueden ser iguales al de entrada. Se detectó un conflicto criptográfico.';
+          } else if (result.error.includes('Output nullifier already used')) {
+            errorMessage = 'Error: Uno de los nullifiers de salida ya está en uso. Intenta nuevamente.';
+          } else if (result.error.includes('Duplicate output nullifiers')) {
+            errorMessage = 'Error: Se detectaron nullifiers duplicados entre las salidas.';
+          } else if (result.error.includes('Input already spent')) {
+            errorMessage = 'Error: El UTXO de entrada ya ha sido gastado.';
+          } else if (result.error.includes('Pre-validación COMPLETA falló')) {
+            errorMessage = 'Error: La validación criptográfica completa falló. ' + result.error;
+          }
+        }
+        
+        console.error('💥 Split error details:', {
+          originalError: result.error,
+          displayMessage: errorMessage
+        });
       }
     } catch (error) {
       console.error('Split error:', error);
+      
+      // Manejo mejorado de errores con mensajes específicos
+      let errorMessage = 'Error desconocido durante el split';
+      
+      if (error instanceof Error) {
+        const errorText = error.message;
+        
+        // Detectar errores específicos de la nueva pre-validación
+        if (errorText.includes('Output nullifier same as input')) {
+          errorMessage = 'Error criptográfico: Los nullifiers de salida no pueden ser iguales al de entrada';
+        } else if (errorText.includes('Output nullifier already used')) {
+          errorMessage = 'Error: Uno de los nullifiers de salida ya está en uso';
+        } else if (errorText.includes('Duplicate output nullifiers')) {
+          errorMessage = 'Error: Se detectaron nullifiers duplicados';
+        } else if (errorText.includes('Input already spent')) {
+          errorMessage = 'Error: El UTXO ya ha sido gastado';
+        } else if (errorText.includes('Pre-validación COMPLETA falló')) {
+          errorMessage = 'Error de validación criptográfica: ' + errorText;
+        } else {
+          errorMessage = errorText;
+        }
+      }
+      
+      console.error('💥 Split operation failed:', {
+        originalError: error,
+        displayMessage: errorMessage
+      });
     } finally {
       isProcessing = false;
     }

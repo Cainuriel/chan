@@ -641,6 +641,16 @@
 				"internalType": "bytes32",
 				"name": "inputNullifier",
 				"type": "bytes32"
+			},
+			{
+				"internalType": "bytes32[]",
+				"name": "outputNullifiers",
+				"type": "bytes32[]"
+			},
+			{
+				"internalType": "bytes32[]",
+				"name": "outputUTXOIds",
+				"type": "bytes32[]"
 			}
 		],
 		"name": "preValidateSplit",

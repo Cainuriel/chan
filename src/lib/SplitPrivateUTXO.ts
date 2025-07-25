@@ -9,6 +9,7 @@ import type {
   ZKSplitParams,
   BackendAttestation
 } from '../contracts/ZKUTXOVault.types';
+import { getSplitErrorMessage } from '../contracts/ZKUTXOVault.types';
 import {
   UTXOOperationError,
   UTXONotFoundError,
@@ -129,6 +130,28 @@ export class SplitPrivateUTXO {
         areEqual: splitData.sourceNullifier === splitParams.inputNullifier
       });
 
+      // 🔍 PRE-VALIDACIÓN COMPLETA CON TODOS LOS DATOS
+      console.log('🔍 Ejecutando pre-validación COMPLETA antes de la transacción...');
+      try {
+        const [isValid, errorCode] = await this.contract.preValidateSplit(
+          splitParams.inputNullifier,
+          splitParams.outputNullifiers,
+          splitParams.outputUTXOIds
+        );
+
+        if (!isValid) {
+          const errorMessage = this._getValidationErrorMessage(errorCode);
+          throw new SplitValidationError(
+            `Pre-validación COMPLETA falló: ${errorMessage}`,
+            errorCode
+          );
+        }
+        console.log('✅ Pre-validación COMPLETA exitosa - todos los nullifiers y IDs validados');
+      } catch (error: any) {
+        console.error('❌ Pre-validación COMPLETA falló:', error);
+        throw new SplitValidationError(`Pre-validación COMPLETA falló: ${error.message}`);
+      }
+
       // 5. Ejecutar split en Alastria (sin estimación de gas)
       console.log('📤 Ejecutando split con criptografía secp256k1 REAL en Alastria...');
       const tx = await this.contract.splitPrivateUTXO(splitParams);
@@ -192,8 +215,8 @@ export class SplitPrivateUTXO {
   }
 
   /**
-   * @notice PRE-VALIDACIÓN usando la función pública preValidateSplit del contrato
-   * @dev Esto se ejecuta ANTES de enviar la transacción para asegurar que será aceptada
+   * @notice PRE-VALIDACIÓN COMPLETA usando la función mejorada del contrato
+   * @dev Valida input, outputs, duplicados y colisiones ANTES de la transacción
    */
   private async _preValidateWithContract(
     sourceCommitment: PedersenCommitment,
@@ -207,22 +230,16 @@ export class SplitPrivateUTXO {
         outputCommitments.map(c => this._calculateRealCommitmentHash(c))
       );
 
-      console.log(`🔍 Pre-validando con contrato: Input ${sourceCommitmentHash.substring(0, 10)}...`);
+      console.log(`🔍 Pre-validando COMPLETO con contrato: Input ${sourceCommitmentHash.substring(0, 10)}...`);
 
-      // LLAMAR A LA FUNCIÓN PÚBLICA preValidateSplit DEL CONTRATO (solo nullifier en ZK)
-      const [isValid, errorCode] = await this.contract.preValidateSplit(
-        sourceNullifier
-      );
+      // 🚨 NECESITAMOS LOS DATOS COMPLETOS PARA LA NUEVA PRE-VALIDACIÓN
+      // Esto requiere acceso a los nullifiers y UTXO IDs de salida
+      console.log('⚠️ Pre-validación completa requiere datos de split completos');
+      console.log('🔄 Validación completa se ejecutará en el momento de la transacción');
 
-      if (!isValid) {
-        const errorMessage = this._getValidationErrorMessage(errorCode);
-        throw new SplitValidationError(
-          `Pre-validación del contrato falló: ${errorMessage}`,
-          errorCode
-        );
-      }
-
-      console.log('✅ Pre-validación del contrato exitosa - Split será aceptado');
+      // NOTA: La pre-validación completa se hará antes de la transacción real
+      // donde tenemos acceso a todos los nullifiers y UTXO IDs generados
+      console.log('✅ Pre-validación será ejecutada antes de la transacción');
 
     } catch (error) {
       if (error instanceof SplitValidationError) {
@@ -587,15 +604,19 @@ export class SplitPrivateUTXO {
     errorMessage?: string;
   }> {
     try {
-      // En la nueva arquitectura ZK, solo validamos el nullifier
-      const [isValid, errorCode] = await this.contract.preValidateSplit(
-        sourceNullifier
-      );
+      // Para validación ligera, solo verificamos si el nullifier está usado
+      const isUsed = await this.contract.isNullifierUsed(sourceNullifier);
+      
+      if (isUsed) {
+        return {
+          isValid: false,
+          errorCode: 2,
+          errorMessage: 'Input already spent'
+        };
+      }
 
       return {
-        isValid,
-        errorCode: isValid ? undefined : errorCode,
-        errorMessage: isValid ? undefined : this._getValidationErrorMessage(errorCode)
+        isValid: true
       };
     } catch (error) {
       return {
@@ -609,17 +630,7 @@ export class SplitPrivateUTXO {
    * @notice Mensajes de error criptográficos basados en los códigos del contrato
    */
   private _getValidationErrorMessage(errorCode: number): string {
-    const errorMessages: { [key: number]: string } = {
-      0: 'Validación criptográfica exitosa',
-      1: 'UTXO criptográfico no encontrado',
-      2: 'UTXO criptográfico ya gastado',
-      3: 'No hay outputs para split',
-      4: 'Commitment criptográfico vacío', 
-      6: 'Nullifier criptográfico inválido',
-      7: 'Nullifier criptográfico ya usado'
-    };
-
-    return errorMessages[errorCode] || `Error criptográfico código: ${errorCode}`;
+    return getSplitErrorMessage(errorCode);
   }
 }
 
