@@ -73,6 +73,19 @@ export async function depositAsPrivateUTXOSimplified(
   console.log(`💰 Creating REAL secp256k1 private UTXO deposit for ${params.amount} tokens...`);
   console.log('🔐 Using REAL CRYPTOGRAPHY - NO DUMMY DATA');
 
+  // Validate required parameters
+  if (!ethereum || typeof ethereum.getSigner !== 'function') {
+    throw new Error('❌ Ethereum helper not available or missing getSigner method');
+  }
+  
+  if (!contract) {
+    throw new Error('❌ Contract not available');
+  }
+  
+  if (!currentEOA) {
+    throw new Error('❌ Current EOA not available');
+  }
+
   try {
     const { tokenAddress, amount } = params;
 

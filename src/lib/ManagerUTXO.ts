@@ -224,7 +224,7 @@ export class ZKPrivateUTXOManager extends EventEmitter {
         params,
         this.contract,
         this.currentAccount,
-        null, // ethereum helper
+        EthereumHelpers, // ethereum helper
         this.utxos,
         async (address: string, utxo: any) => {
           // Save using PrivateUTXOStorage
