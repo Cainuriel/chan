@@ -601,7 +601,9 @@
       const fetchedAvailableUTXOs = privateUTXOManager.getPrivateUTXOsByOwner(currentAccount.address)
         .map(utxo => ({
           ...utxo,
-          cryptographyType: "BN254" as const
+          cryptographyType: (utxo.cryptographyType === 'BN254' || utxo.cryptographyType === 'secp256k1') 
+            ? utxo.cryptographyType 
+            : 'secp256k1' as const
         }));
       
       // HISTORY: TODOS los UTXOs (incluyendo gastados)
@@ -609,7 +611,9 @@
       const allUTXOs = privateUTXOManager.getAllPrivateUTXOsByOwner(currentAccount.address)
         .map(utxo => ({
           ...utxo,
-          cryptographyType: "BN254" as const
+          cryptographyType: (utxo.cryptographyType === 'BN254' || utxo.cryptographyType === 'secp256k1') 
+            ? utxo.cryptographyType 
+            : 'secp256k1' as const
         }));
       
       // Para el Balance tab, usar solo disponibles
@@ -622,10 +626,16 @@
         available: availableUTXOs.length,
         unspent: allUTXOs.filter(u => !u.isSpent).length,
         spent: allUTXOs.filter(u => u.isSpent).length,
+        cryptoTypes: {
+          secp256k1: allUTXOs.filter(u => u.cryptographyType === 'secp256k1').length,
+          bn254: allUTXOs.filter(u => u.cryptographyType === 'BN254').length,
+          total: allUTXOs.length
+        },
         details: allUTXOs.map(u => ({
           id: u.id.slice(0, 8) + '...',
           value: u.value.toString(),
           isSpent: u.isSpent,
+          cryptoType: u.cryptographyType || 'undefined',
           createdAt: new Date(u.localCreatedAt).toLocaleTimeString()
         }))
       });
@@ -849,8 +859,8 @@
 </script>
 
 <svelte:head>
-  <title>UTXO Manager - Privacy-First Token Management</title>
-  <meta name="description" content="Manage ERC20 tokens with privacy using UTXOs and modern cryptography" />
+  <title>UTXO Manager - secp256k1 Privacy-First Token Management</title>
+  <meta name="description" content="Manage ERC20 tokens with secp256k1 cryptographic privacy using UTXOs" />
 </svelte:head>
 
 <div class="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900">
@@ -889,7 +899,7 @@
           </div>
           <div>
             <h1 class="text-2xl font-bold text-white">UTXO Manager</h1>
-            <p class="text-gray-300 text-sm">Privacy-First Token Management</p>
+            <p class="text-gray-300 text-sm">secp256k1 Privacy-First Token Management</p>
           </div>
         </div>
         
@@ -899,7 +909,7 @@
               <!-- Private Mode Indicator (Always On) -->
               <div class="flex items-center space-x-2 px-3 py-2 rounded-lg bg-purple-600 text-white">
                 <span>🔐</span>
-                <span class="text-sm">Private Mode</span>
+                <span class="text-sm">secp256k1 Privacy</span>
               </div>
               
               <!-- Network Selector -->
@@ -1293,8 +1303,8 @@
             <div class="bg-white/10 backdrop-blur-sm rounded-lg p-6 border border-white/20">
               <div class="flex items-center justify-between">
                 <div>
-                  <p class="text-gray-400 text-sm">Operations</p>
-                  <p class="text-2xl font-bold text-blue-400">{stats.bn254Operations}</p>
+                  <p class="text-gray-400 text-sm">Crypto Operations</p>
+                  <p class="text-2xl font-bold text-blue-400">{stats.cryptoOperations}</p>
                 </div>
                 <div class="text-blue-400 text-2xl">⚡</div>
               </div>
@@ -1545,8 +1555,8 @@
   .shadow-lg {
     box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3), 0 4px 6px -2px rgba(0, 0, 0, 0.2);
   }
-  
-  .shadow-xl {
+    
+  /* .shadow-xl {
     box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.4), 0 10px 10px -5px rgba(0, 0, 0, 0.3);
-  }
+  } */
 </style>
