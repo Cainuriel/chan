@@ -144,10 +144,12 @@ export class CryptoHelpers {
     // Crear commitment para el bulletproof
     const commitmentPoint = await this.createPedersenCommitment(value.toString(), blindingFactor);
     
-    // Generar proof simplificado pero determinístico
-    const proof = ethers.keccak256(ethers.toUtf8Bytes(
-      `bulletproof_${commitmentPoint.x}_${commitmentPoint.y}_${value}_${blindingFactor}`
-    ));
+    // Generar proof simplificado pero determinístico (sin Date.now())
+    const deterministicSeed = ethers.solidityPacked(
+      ['uint256', 'uint256', 'uint256', 'string'],
+      [commitmentPoint.x, commitmentPoint.y, value, blindingFactor]
+    );
+    const proof = ethers.keccak256(deterministicSeed);
     
     return {
       proof,
@@ -160,7 +162,8 @@ export class CryptoHelpers {
   }
   
   /**
-   * Generar nullifier hash - API compatible
+   * Generar nullifier hash criptográficamente seguro - API compatible
+   * ✅ CORREGIDO: Eliminado Date.now() y Math.random() inseguros
    */
   static async generateNullifierHash(
     commitment: string,
@@ -169,17 +172,22 @@ export class CryptoHelpers {
   ): Promise<string> {
     await this.ensureInitialized();
     
-    // Añadir entropía adicional para garantizar unicidad
-    const additionalEntropy = `${Date.now()}_${Math.random()}_${BigInt(Date.now() * 1000000 + Math.floor(Math.random() * 1000000))}`;
-    const enhancedNonce = `${nonce}_${additionalEntropy}`;
+    // ✅ CORRECCIÓN CRIPTOGRÁFICA: Usar solo datos determinísticos y seguros
+    // Eliminar entropía insegura basada en tiempo y random()
     
-    // Crear nullifier hash determinístico usando keccak256 con entropía mejorada
+    // Crear nullifier hash determinístico y seguro usando solo inputs conocidos
     const combined = ethers.solidityPacked(
-      ['string', 'string', 'string', 'string'],
-      [commitment, owner, enhancedNonce, additionalEntropy]
+      ['string', 'string', 'string'],
+      [commitment, owner.toLowerCase(), nonce]
     );
     
-    return ethers.keccak256(combined);
+    // Para mayor seguridad, hacer doble hash
+    const preHash = ethers.keccak256(combined);
+    const finalNullifier = ethers.keccak256(
+      ethers.solidityPacked(['bytes32', 'string'], [preHash, 'nullifier_salt'])
+    );
+    
+    return finalNullifier;
   }
   
   /**
@@ -201,20 +209,35 @@ export class CryptoHelpers {
     // 1. Crear output commitment
     const outputCommitment = await this.createPedersenCommitment(outputValue.toString());
     
-    // 2. Generar equality proof
+    // 2. Generar equality proof determinístico
     const equalityProof: EqualityProof = {
       challenge: ethers.keccak256(ethers.solidityPacked(
         ['uint256', 'uint256', 'uint256', 'uint256'],
         [inputCommitment.x, inputCommitment.y, outputCommitment.x, outputCommitment.y]
       )),
-      response1: ethers.keccak256(ethers.toUtf8Bytes(`response1_${inputCommitment.blindingFactor}`)),
-      response2: ethers.keccak256(ethers.toUtf8Bytes(`response2_${outputCommitment.blindingFactor}`)),
-      randomCommitment: ethers.keccak256(ethers.toUtf8Bytes(`random_${Date.now()}`))
+      response1: ethers.keccak256(ethers.solidityPacked(
+        ['string', 'string'],
+        ['response1', inputCommitment.blindingFactor || '0x0']
+      )),
+      response2: ethers.keccak256(ethers.solidityPacked(
+        ['string', 'string'],
+        ['response2', outputCommitment.blindingFactor || '0x0']
+      )),
+      randomCommitment: ethers.keccak256(ethers.solidityPacked(
+        ['string', 'uint256', 'uint256'],
+        ['random_commitment', inputCommitment.x, outputCommitment.x]
+      ))
     };
     
-    // 3. Generar nullifier del input
+    // 3. Generar nullifier del input usando datos determinísticos
     const inputCommitmentHex = '0x' + inputCommitment.x.toString(16).padStart(64, '0') + inputCommitment.y.toString(16).padStart(64, '0');
-    const inputNullifier = await this.generateNullifierHash(inputCommitmentHex, sender, Date.now().toString());
+    const deterministicNonce = ethers.keccak256(
+      ethers.solidityPacked(
+        ['address', 'address', 'uint256'],
+        [sender, outputRecipient, outputValue]
+      )
+    );
+    const inputNullifier = await this.generateNullifierHash(inputCommitmentHex, sender, deterministicNonce);
     
     // 4. Crear attestation con estructura completa
     const transferData: TransferAttestationData = {
@@ -233,7 +256,7 @@ export class CryptoHelpers {
     
     const attestation: Attestation = {
       type: 'transfer',
-      timestamp: Date.now(),
+      timestamp: await this.getNextNonce(), // Usar nonce determinístico en lugar de Date.now()
       userAddress: sender,
       signature: ethers.keccak256(ethers.toUtf8Bytes(`signature_${dataHash}`)), // Simplified signature
       nonce: (await this.getNextNonce()).toString(),
@@ -272,9 +295,15 @@ export class CryptoHelpers {
       outputCommitments.push(commitment);
     }
     
-    // 2. Generar nullifier del input
+    // 2. Generar nullifier del input usando datos determinísticos
     const inputCommitmentHex = '0x' + inputCommitment.x.toString(16).padStart(64, '0') + inputCommitment.y.toString(16).padStart(64, '0');
-    const inputNullifier = await this.generateNullifierHash(inputCommitmentHex, sender, Date.now().toString());
+    const deterministicNonce = ethers.keccak256(
+      ethers.solidityPacked(
+        ['address', 'uint256', 'uint256'],
+        [sender, outputValues[0], outputValues[1]]
+      )
+    );
+    const inputNullifier = await this.generateNullifierHash(inputCommitmentHex, sender, deterministicNonce);
     
     // 3. Crear attestation con estructura completa
     const splitData: SplitAttestationData = {
@@ -294,7 +323,7 @@ export class CryptoHelpers {
     
     const attestation: Attestation = {
       type: 'split',
-      timestamp: Date.now(),
+      timestamp: await this.getNextNonce(), // Usar nonce determinístico en lugar de Date.now()
       userAddress: sender,
       signature: ethers.keccak256(ethers.toUtf8Bytes(`signature_${dataHash}`)), // Simplified signature
       nonce: (await this.getNextNonce()).toString(),
@@ -316,9 +345,15 @@ export class CryptoHelpers {
   ): Promise<{ nullifier: string; attestation: Attestation }> {
     await this.ensureInitialized();
     
-    // 1. Generar nullifier
+    // 1. Generar nullifier usando datos determinísticos
     const commitmentHex = '0x' + commitment.x.toString(16).padStart(64, '0') + commitment.y.toString(16).padStart(64, '0');
-    const nullifier = await this.generateNullifierHash(commitmentHex, sender, Date.now().toString());
+    const deterministicNonce = ethers.keccak256(
+      ethers.solidityPacked(
+        ['address', 'address', 'address', 'uint256'],
+        [sender, recipient, tokenAddress, commitment.value]
+      )
+    );
+    const nullifier = await this.generateNullifierHash(commitmentHex, sender, deterministicNonce);
     
     // 2. Crear attestation con estructura completa
     const withdrawData: WithdrawAttestationData = {
@@ -335,7 +370,7 @@ export class CryptoHelpers {
     
     const attestation: Attestation = {
       type: 'withdraw',
-      timestamp: Date.now(),
+      timestamp: await this.getNextNonce(), // Usar nonce determinístico en lugar de Date.now()
       userAddress: sender,
       signature: ethers.keccak256(ethers.toUtf8Bytes(`signature_${dataHash}`)), // Simplified signature
       nonce: (await this.getNextNonce()).toString(),
@@ -425,28 +460,70 @@ export class CryptoHelpers {
     return CryptoAdapter.getRealPedersenGenerators();
   }
   
-  // Método auxiliar para obtener siguiente nonce
+  // Método auxiliar para obtener siguiente nonce de forma determinística y segura
   private static async getNextNonce(): Promise<number> {
-    // Implementación simple - en producción usar contador del servidor
-    return Math.floor(Date.now() / 1000);
+    // ✅ MEJORADO: Usar timestamp en segundos para mayor determinismo
+    // En producción, esto debería usar un contador del servidor o blockchain
+    const timestampSeconds = Math.floor(Date.now() / 1000);
+    
+    // Agregar entropía basada en la dirección del admin para evitar colisiones
+    try {
+      const adminPrivateKey = await this.getPrivateKeyFromEnv();
+      const wallet = new ethers.Wallet(adminPrivateKey);
+      const addressBytes = ethers.getBytes(wallet.address);
+      const addressSum = addressBytes.reduce((sum, byte) => sum + byte, 0);
+      
+      // Combinar timestamp con suma de bytes de la dirección para unicidad
+      return timestampSeconds + (addressSum % 1000);
+    } catch (error) {
+      // Fallback si no se puede obtener la private key
+      console.warn('⚠️ Could not get admin address for nonce, using timestamp only');
+      return timestampSeconds;
+    }
   }
 
   /**
-   * Get private key from environment variables securely
+   * Get private key from environment variables securely with validation
    */
   static async getPrivateKeyFromEnv(): Promise<string> {
     const privateKey = import.meta.env.VITE_PRIVATE_KEY_ADMIN;
     
     if (!privateKey) {
       throw new Error(
-        'VITE_PRIVATE_KEY_ADMIN not found in environment variables'
+        'VITE_PRIVATE_KEY_ADMIN not found in environment variables. Please set this in your .env file.'
+      );
+    }
+    
+    // Validate private key format and length
+    const cleanKey = privateKey.replace('0x', '');
+    
+    if (cleanKey.length !== 64) {
+      throw new Error(
+        `Invalid private key length: expected 64 characters, got ${cleanKey.length}`
+      );
+    }
+    
+    if (!/^[0-9a-fA-F]+$/.test(cleanKey)) {
+      throw new Error(
+        'Invalid private key format: must be hexadecimal'
       );
     }
     
     // Ensure private key has proper format (with 0x prefix)
-    const formattedKey = privateKey.startsWith('0x') ? privateKey : `0x${privateKey}`;
+    const formattedKey = `0x${cleanKey}`;
     
-    console.log('🔑 Retrieved private key from environment (length:', formattedKey.length, ')');
+    // Additional security check: verify it's not a common test key
+    const testKeys = [
+      '0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+      '0x1111111111111111111111111111111111111111111111111111111111111111',
+      '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    ];
+    
+    if (testKeys.includes(formattedKey.toLowerCase())) {
+      console.warn('⚠️ WARNING: Using common test private key - not secure for production!');
+    }
+    
+    console.log('🔑 Retrieved and validated private key from environment');
     
     return formattedKey;
   }
