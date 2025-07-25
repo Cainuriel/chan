@@ -2,9 +2,10 @@ import { ethers } from 'ethers';
 import type { Contract } from 'ethers';
 
 /**
- * @title HashCalculator - Función centralizada para cálculo de hashes UTXO
+ * @title HashCalculator - Función centralizada para cálculo de hashes UTXO con soporte ZK
  * @notice Implementa el patrón VERIFICADO que coincide exactamente con el contrato
  * @dev Usa ethers.keccak256(ethers.solidityPacked(...)) - método probado como correcto
+ * @version 2.0 - Con soporte para operaciones ZK
  */
 
 export interface DepositHashParams {
@@ -14,6 +15,29 @@ export interface DepositHashParams {
   nullifierHash: string;
   amount: string | bigint;
   sender: string;
+}
+
+export interface ZKSplitHashParams {
+  sourceNullifier: string;
+  outputCommitments: Array<{ x: bigint; y: bigint }>;
+  tokenAddress: string;
+  operation: 'SPLIT';
+}
+
+export interface ZKWithdrawHashParams {
+  nullifier: string;
+  revealedAmount: bigint;
+  tokenAddress: string;
+  recipient: string;
+  operation: 'WITHDRAW';
+}
+
+export interface ZKTransferHashParams {
+  sourceNullifier: string;
+  targetCommitment: { x: bigint; y: bigint };
+  tokenAddress: string;
+  recipient: string;
+  operation: 'TRANSFER';
 }
 
 export interface HashValidationResult {
@@ -94,10 +118,19 @@ export function calculateDepositDataHash(params: DepositHashParams): HashValidat
 /**
  * @dev Función de validación opcional contra contrato (solo para debugging)
  * @notice NO debe usarse en producción - solo para verificar implementación
+ * @param params Parámetros del depósito
+ * @param contract Instancia del contrato
+ * @param attestationData Datos reales de attestation (NO dummy data)
  */
 export async function validateHashAgainstContract(
   params: DepositHashParams,
-  contract: Contract
+  contract: Contract,
+  attestationData: {
+    operation: string;
+    nonce: bigint;
+    timestamp: bigint; // ✅ REAL timestamp from attestation
+    signature: string;
+  }
 ): Promise<{ isValid: boolean; frontendHash: string; contractHash: string; error?: string }> {
   
   console.log('🔍 === VALIDACIÓN CONTRA CONTRATO (DEBUG) ===');
@@ -115,7 +148,7 @@ export async function validateHashAgainstContract(
       };
     }
 
-    // 2. Construir params para el contrato (estructura exacta que espera)
+    // 2. Construir params para el contrato usando DATOS REALES (NO dummy)
     const contractParams = {
       tokenAddress: params.tokenAddress,
       commitment: {
@@ -125,13 +158,20 @@ export async function validateHashAgainstContract(
       nullifierHash: params.nullifierHash,
       amount: params.amount.toString(),
       attestation: {
-        operation: "DEPOSIT",
-        dataHash: "0x0000000000000000000000000000000000000000000000000000000000000000", // dummy
-        nonce: 1,
-        timestamp: Math.floor(Date.now() / 1000),
-        signature: "0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" // dummy
+        operation: attestationData.operation, // REAL operation
+        dataHash: result.hash, // REAL hash calculado
+        nonce: attestationData.nonce.toString(), // REAL nonce
+        timestamp: attestationData.timestamp, // ✅ REAL timestamp from attestation
+        signature: attestationData.signature // REAL signature
       }
     };
+
+    console.log('📋 Using REAL attestation data:');
+    console.log('   - Operation:', attestationData.operation);
+    console.log('   - DataHash:', result.hash);
+    console.log('   - Nonce:', attestationData.nonce.toString());
+    console.log('   - Timestamp:', attestationData.timestamp.toString()); // ✅ REAL timestamp
+    console.log('   - Signature:', attestationData.signature.slice(0, 20) + '...');
 
     // 3. Llamar al contrato para calcular su hash
     const contractHash = await contract.calculateDepositDataHash(contractParams, params.sender);
@@ -227,6 +267,7 @@ export function calculateCryptoHelperHash(
 /**
  * @dev Función para crear parámetros de depósito completos
  * @notice Incluye el hash calculado con el patrón verificado
+ * @param timestamp ✅ REAL timestamp from attestation service (NO auto-generated)
  */
 export function createDepositParams(
   tokenAddress: string,
@@ -235,6 +276,7 @@ export function createDepositParams(
   amount: bigint,
   sender: string,
   nonce: bigint,
+  timestamp: bigint, // ✅ REAL timestamp parameter
   signature: string
 ) {
   // Calcular hash con el patrón verificado
@@ -264,7 +306,7 @@ export function createDepositParams(
       operation: "DEPOSIT",
       dataHash: result.hash,
       nonce: nonce.toString(),
-      timestamp: Math.floor(Date.now() / 1000),
+      timestamp: timestamp, // ✅ REAL timestamp from parameter
       signature
     }
   };
@@ -308,4 +350,223 @@ export function logAttestationData(attestation: any, operation: string = 'UNKNOW
   console.log('🚨 =============================');
   
   return attestation;
+}
+
+/**
+ * @dev NUEVA FUNCIÓN ZK - Calcular hash para operaciones de split ZK
+ * @notice Split operations con privacidad ZK - amounts ocultos
+ * @param params Parámetros del split ZK
+ * @returns Hash calculado para split ZK
+ */
+export function calculateZKSplitHash(params: ZKSplitHashParams): HashValidationResult {
+  console.log('🔍 === ZK SPLIT HASH CALCULATOR ===');
+  console.log('📊 Input params:', {
+    sourceNullifier: params.sourceNullifier,
+    outputCommitments: params.outputCommitments.length,
+    tokenAddress: params.tokenAddress,
+    operation: params.operation
+  });
+
+  try {
+    // ZK Split: hash = keccak256(sourceNullifier, outputCommitments[], tokenAddress, operation)
+    const commitmentData = params.outputCommitments.flatMap(c => [c.x.toString(), c.y.toString()]);
+    const types = ['bytes32', ...Array(commitmentData.length).fill('uint256'), 'address', 'string'];
+    const values = [params.sourceNullifier, ...commitmentData, params.tokenAddress, params.operation];
+
+    const hash = ethers.keccak256(
+      ethers.solidityPacked(types, values)
+    );
+    
+    console.log('✅ ZK Split hash calculado:', hash);
+    
+    return {
+      hash,
+      success: true
+    };
+    
+  } catch (error) {
+    const errorMessage = `Error calculando ZK split hash: ${error instanceof Error ? error.message : String(error)}`;
+    console.error('❌', errorMessage);
+    
+    return {
+      hash: '',
+      success: false,
+      error: errorMessage
+    };
+  }
+}
+
+/**
+ * @dev NUEVA FUNCIÓN ZK - Calcular hash para operaciones de withdraw ZK
+ * @notice Withdraw operations con privacidad ZK
+ * @param params Parámetros del withdraw ZK
+ * @returns Hash calculado para withdraw ZK
+ */
+export function calculateZKWithdrawHash(params: ZKWithdrawHashParams): HashValidationResult {
+  console.log('🔍 === ZK WITHDRAW HASH CALCULATOR ===');
+  console.log('📊 Input params:', {
+    nullifier: params.nullifier,
+    revealedAmount: params.revealedAmount.toString(),
+    tokenAddress: params.tokenAddress,
+    recipient: params.recipient,
+    operation: params.operation
+  });
+
+  try {
+    // ZK Withdraw: hash = keccak256(nullifier, revealedAmount, tokenAddress, recipient, operation)
+    const hash = ethers.keccak256(
+      ethers.solidityPacked(
+        ['bytes32', 'uint256', 'address', 'address', 'string'],
+        [
+          params.nullifier,
+          params.revealedAmount.toString(),
+          params.tokenAddress,
+          params.recipient,
+          params.operation
+        ]
+      )
+    );
+    
+    console.log('✅ ZK Withdraw hash calculado:', hash);
+    
+    return {
+      hash,
+      success: true
+    };
+    
+  } catch (error) {
+    const errorMessage = `Error calculando ZK withdraw hash: ${error instanceof Error ? error.message : String(error)}`;
+    console.error('❌', errorMessage);
+    
+    return {
+      hash: '',
+      success: false,
+      error: errorMessage
+    };
+  }
+}
+
+/**
+ * @dev NUEVA FUNCIÓN ZK - Calcular hash para operaciones de transfer ZK
+ * @notice Transfer operations con privacidad ZK - amounts ocultos
+ * @param params Parámetros del transfer ZK
+ * @returns Hash calculado para transfer ZK
+ */
+export function calculateZKTransferHash(params: ZKTransferHashParams): HashValidationResult {
+  console.log('🔍 === ZK TRANSFER HASH CALCULATOR ===');
+  console.log('📊 Input params:', {
+    sourceNullifier: params.sourceNullifier,
+    targetCommitment: { x: params.targetCommitment.x.toString(), y: params.targetCommitment.y.toString() },
+    tokenAddress: params.tokenAddress,
+    recipient: params.recipient,
+    operation: params.operation
+  });
+
+  try {
+    // ZK Transfer: hash = keccak256(sourceNullifier, targetCommitment.x, targetCommitment.y, tokenAddress, recipient, operation)
+    const hash = ethers.keccak256(
+      ethers.solidityPacked(
+        ['bytes32', 'uint256', 'uint256', 'address', 'address', 'string'],
+        [
+          params.sourceNullifier,
+          params.targetCommitment.x.toString(),
+          params.targetCommitment.y.toString(),
+          params.tokenAddress,
+          params.recipient,
+          params.operation
+        ]
+      )
+    );
+    
+    console.log('✅ ZK Transfer hash calculado:', hash);
+    
+    return {
+      hash,
+      success: true
+    };
+    
+  } catch (error) {
+    const errorMessage = `Error calculando ZK transfer hash: ${error instanceof Error ? error.message : String(error)}`;
+    console.error('❌', errorMessage);
+    
+    return {
+      hash: '',
+      success: false,
+      error: errorMessage
+    };
+  }
+}
+
+/**
+ * @dev FUNCIONES DE CONVENIENCIA ZK para usar en servicios
+ */
+
+/**
+ * Función de conveniencia para calcular hash de split ZK
+ */
+export function calculateZKSplitHashConvenience(
+  sourceNullifier: string,
+  outputCommitments: Array<{ x: bigint; y: bigint }>,
+  tokenAddress: string
+): string {
+  const result = calculateZKSplitHash({
+    sourceNullifier,
+    outputCommitments,
+    tokenAddress,
+    operation: 'SPLIT'
+  });
+
+  if (!result.success || !result.hash) {
+    throw new Error(result.error || 'ZK Split hash calculation failed');
+  }
+
+  return result.hash;
+}
+
+/**
+ * Función de conveniencia para calcular hash de withdraw ZK
+ */
+export function calculateZKWithdrawHashConvenience(
+  nullifier: string,
+  revealedAmount: bigint,
+  tokenAddress: string,
+  recipient: string
+): string {
+  const result = calculateZKWithdrawHash({
+    nullifier,
+    revealedAmount,
+    tokenAddress,
+    recipient,
+    operation: 'WITHDRAW'
+  });
+
+  if (!result.success || !result.hash) {
+    throw new Error(result.error || 'ZK Withdraw hash calculation failed');
+  }
+
+  return result.hash;
+}
+
+/**
+ * Función de conveniencia para calcular hash de transfer ZK
+ */
+export function calculateZKTransferHashConvenience(
+  sourceNullifier: string,
+  targetCommitment: { x: bigint; y: bigint },
+  tokenAddress: string,
+  recipient: string
+): string {
+  const result = calculateZKTransferHash({
+    sourceNullifier,
+    targetCommitment,
+    tokenAddress,
+    recipient,
+    operation: 'TRANSFER'
+  });
+
+  if (!result.success || !result.hash) {
+    throw new Error(result.error || 'ZK Transfer hash calculation failed');
+  }
+
+  return result.hash;
 }
