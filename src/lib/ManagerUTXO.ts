@@ -402,7 +402,7 @@ export class ZKPrivateUTXOManager extends EventEmitter {
           outputUTXOIds: splitResult.outputUTXOIds,
           outputCommitments: splitResult.outputCommitments,
           outputNullifiers: splitResult.outputNullifiers,
-          outputBlindingFactors: splitData.outputBlindingFactors
+          outputBlindingFactors: splitResult.outputBlindingFactors // ✅ FIXED: Use splitResult instead of splitData
         });
         
         // Create output UTXOs with REAL data from split service
@@ -410,6 +410,7 @@ export class ZKPrivateUTXOManager extends EventEmitter {
           // ✅ Use REAL cryptographic data from split service
           const realCommitment = splitResult.outputCommitments?.[index];
           const realNullifier = splitResult.outputNullifiers?.[index];
+          const realBlindingFactor = splitResult.outputBlindingFactors?.[index];
           
           // 🚨 VERIFICAR QUE LOS DATOS CRIPTOGRÁFICOS SON REALES (NO DUMMY)
           if (!realCommitment || (realCommitment.x === 0n && realCommitment.y === 0n)) {
@@ -422,6 +423,13 @@ export class ZKPrivateUTXOManager extends EventEmitter {
           if (!realNullifier || realNullifier === '') {
             throw new UTXOOperationError(
               `UTXO ${index}: Real nullifier missing from split service - dummy data detected!`,
+              'splitPrivateUTXO'
+            );
+          }
+          
+          if (!realBlindingFactor || realBlindingFactor === '') {
+            throw new UTXOOperationError(
+              `UTXO ${index}: Real blinding factor missing from split service - dummy data detected!`,
               'splitPrivateUTXO'
             );
           }
@@ -441,10 +449,10 @@ export class ZKPrivateUTXOManager extends EventEmitter {
             owner: params.outputOwners[index], // ✅ USE CORRECT OWNER FROM PARAMS
             timestamp: BigInt(Math.floor(Date.now() / 1000)),
             isSpent: false,
-            commitment: JSON.stringify(realCommitment), // ✅ ONLY REAL DATA
+            commitment: JSON.stringify({ x: realCommitment.x.toString(), y: realCommitment.y.toString() }), // ✅ FIXED: Convert BigInt to string before JSON.stringify
             parentUTXO: params.inputUTXOId,
             utxoType: UTXOType.SPLIT,
-            blindingFactor: '', // Will be retrieved from split service if available
+            blindingFactor: realBlindingFactor, // ✅ FIXED: Use real blinding factor from split service
             localCreatedAt: Date.now(),
             confirmed: true, // ✅ Only true because transaction was confirmed
             creationTxHash: splitResult.transactionHash || '',
@@ -705,7 +713,10 @@ export class ZKPrivateUTXOManager extends EventEmitter {
           owner: params.newOwner,
           timestamp: BigInt(Math.floor(Date.now() / 1000)),
           isSpent: false,
-          commitment: JSON.stringify(transferData.outputCommitment),
+          commitment: JSON.stringify({ 
+            x: transferData.outputCommitment.x.toString(), 
+            y: transferData.outputCommitment.y.toString() 
+          }), // ✅ FIXED: Convert BigInt to string before JSON.stringify
           parentUTXO: params.utxoId,
           utxoType: UTXOType.TRANSFER,
           blindingFactor: transferData.outputBlindingFactor,

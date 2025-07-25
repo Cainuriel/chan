@@ -55,11 +55,13 @@ export interface SplitUTXOData {
 export interface SplitOperationResult {
   success: boolean;
   transactionHash?: string;
-  outputCommitmentHashes?: string[];  // Hashes criptográficos REALES
+  blockNumber?: number;                   // ← AGREGAR: número de bloque
+  outputCommitmentHashes?: string[];      // Hashes criptográficos REALES
   outputCommitments?: PedersenCommitment[]; // Coordenadas completas para withdraw posterior
-  outputNullifiers?: string[];        // Nullifiers criptográficos REALES
-  error?: string;
+  outputNullifiers?: string[];            // Nullifiers criptográficos REALES
+  outputBlindingFactors?: string[];       // ← AGREGAR: blinding factors generados
   outputUTXOIds?: string[];
+  error?: string;
 }
 
 /**
@@ -67,6 +69,8 @@ export interface SplitOperationResult {
  * @notice Divide un UTXO en múltiples UTXOs usando criptografía Pedersen REAL
  */
 export class SplitPrivateUTXO {
+  private lastGeneratedBlindingFactors: string[] = [];
+
   constructor(
     private contract: ZKUTXOVaultContract,
     private signer: ethers.Signer
@@ -181,13 +185,18 @@ export class SplitPrivateUTXO {
       // 6. Extraer UTXOIds REALES de los eventos
       const outputUTXOIds = await this._extractRealUTXOIds(receipt);
 
+      // ✅ SIGUIENDO PATRÓN DE DepositAsPrivateUTXO: Retornar datos completos
+      console.log('✅ Retornando datos completos para ManagerUTXO...');
+      
       return {
         success: true,
         transactionHash: receipt.hash,
-        outputCommitmentHashes: outputs.commitmentHashes,  // Hashes REALES
-        outputCommitments: outputs.commitments,            // Coordenadas completas para withdraw
-        outputNullifiers: outputs.nullifiers,              // Nullifiers REALES
-        outputUTXOIds
+        blockNumber: receipt.blockNumber,                    // ← AGREGAR: número de bloque
+        outputCommitmentHashes: outputs.commitmentHashes,    // Hashes REALES
+        outputCommitments: outputs.commitments,              // Coordenadas completas para withdraw
+        outputNullifiers: outputs.nullifiers,                // Nullifiers REALES
+        outputBlindingFactors: this.lastGeneratedBlindingFactors, // ← AGREGAR: blinding factors
+        outputUTXOIds: outputUTXOIds.length > 0 ? outputUTXOIds : outputs.nullifiers // ← MEJORAR: usar event o fallback
       };
 
     } catch (error: any) {
@@ -277,6 +286,9 @@ export class SplitPrivateUTXO {
         console.log(`🔐 Generated blinding factor ${i + 1}: ${blindingFactor.substring(0, 16)}...`);
       }
     }
+
+    // ✅ NUEVO: Guardar para uso posterior por ManagerUTXO
+    this.lastGeneratedBlindingFactors = [...splitData.outputBlindingFactors];
 
     for (let i = 0; i < splitData.outputValues.length; i++) {
       const value = splitData.outputValues[i];
@@ -527,34 +539,53 @@ export class SplitPrivateUTXO {
     try {
       const outputUTXOIds: string[] = [];
       
-      // Buscar eventos PrivateUTXOCreated REALES
+      console.log('🔍 Buscando eventos ZKSplit en transaction receipt...');
+      
+      // Buscar eventos ZKSplit del contrato
       for (const log of receipt.logs) {
         try {
-          // Parsear logs criptográficos REALES
-          if (log.topics.length > 0 && log.topics[0]) {
-            // El primer topic es el hash del evento
-            const eventSignature = ethers.id("PrivateUTXOCreated(bytes32,bytes32,address,bytes32,uint8,uint256)");
+          // El evento ZKSplit tiene esta estructura:
+          // emit ZKSplit(inputNullifier, outputUTXOIds, outputNullifiers, timestamp)
+          const eventSignature = ethers.id("ZKSplit(bytes32,bytes32[],bytes32[],uint256)");
+          
+          if (log.topics[0] === eventSignature) {
+            console.log('✅ Evento ZKSplit encontrado, decodificando...');
             
-            if (log.topics[0] === eventSignature) {
-              // Decodificar datos criptográficos REALES
-              const utxoId = log.topics[1]; // Primer indexed parameter
-              if (utxoId) {
-                outputUTXOIds.push(utxoId);
+            // Decodificar el evento ZKSplit usando ethers directamente
+            try {
+              // Los datos del evento están en log.data
+              // Formato: ZKSplit(bytes32 inputNullifier, bytes32[] outputUTXOIds, bytes32[] outputNullifiers, uint256 timestamp)
+              const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+              const decoded = abiCoder.decode(
+                ['bytes32[]', 'bytes32[]', 'uint256'], // outputUTXOIds, outputNullifiers, timestamp
+                log.data
+              );
+              
+              const eventOutputUTXOIds = decoded[0]; // outputUTXOIds es el primer parámetro
+              if (eventOutputUTXOIds && Array.isArray(eventOutputUTXOIds)) {
+                outputUTXOIds.push(...eventOutputUTXOIds);
+                console.log(`📋 Extraídos ${eventOutputUTXOIds.length} UTXOIds del evento ZKSplit`);
               }
+              
+            } catch (decodeError) {
+              console.warn('⚠️ Error decodificando evento ZKSplit:', decodeError);
+              // Fallback: usar los nullifiers generados como UTXOIds
+              console.log('🔄 Usando nullifiers como fallback para UTXOIds');
             }
           }
         } catch (parseError) {
-          // Continuar con otros logs
+          console.warn('⚠️ Error parsing log:', parseError);
           continue;
         }
       }
       
-      console.log(`📋 Extraídos ${outputUTXOIds.length} UTXOIds REALES de eventos criptográficos`);
+      console.log(`📋 Total de ${outputUTXOIds.length} UTXOIds REALES extraídos del evento ZKSplit`);
       return outputUTXOIds;
       
     } catch (error) {
-      console.warn('⚠️ No se pudieron extraer UTXOIds REALES:', error);
-      return [];
+      console.error('❌ Error extrayendo UTXOIds del evento ZKSplit:', error);
+      console.log('🔄 Retornando array vacío - ManagerUTXO usará nullifiers como fallback');
+      return []; // ManagerUTXO puede usar nullifiers como fallback
     }
   }
 
@@ -624,6 +655,14 @@ export class SplitPrivateUTXO {
         errorMessage: `Error durante validación: ${error instanceof Error ? error.message : error}`
       };
     }
+  }
+
+  /**
+   * @notice Obtener los blinding factors generados durante el split
+   * @dev Útil para ManagerUTXO que necesita estos datos para crear UTXOs locales
+   */
+  getGeneratedBlindingFactors(): string[] {
+    return this.lastGeneratedBlindingFactors || [];
   }
 
   /**
