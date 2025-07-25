@@ -1,5 +1,5 @@
 /**
- * @fileoverview SplitPrivateUTXO - Split de UTXO Privado con Criptografía BN254 Real
+ * @fileoverview SplitPrivateUTXO - Split de UTXO Privado con Criptografía secp256k1 Real
  * @description Divide un UTXO en múltiples UTXOs más pequeños manteniendo privacidad REAL
  */
 
@@ -34,7 +34,7 @@ export class SplitValidationError extends UTXOOperationError {
  */
 export interface SplitUTXOData {
   // UTXO de entrada - con criptografía REAL
-  sourceCommitment: CommitmentPoint;  // Commitment Pedersen REAL en BN254
+  sourceCommitment: CommitmentPoint;  // Commitment Pedersen REAL en secp256k1
   sourceValue: bigint;
   sourceBlindingFactor: string;       // Blinding factor criptográfico REAL
   sourceNullifier: string;            // Nullifier hash criptográfico REAL
@@ -62,7 +62,7 @@ export interface SplitOperationResult {
 }
 
 /**
- * @title SplitPrivateUTXO - Split con Criptografía BN254 REAL
+ * @title SplitPrivateUTXO - Split con Criptografía secp256k1 REAL
  * @notice Divide un UTXO en múltiples UTXOs usando criptografía Pedersen REAL
  */
 export class SplitPrivateUTXO {
@@ -86,7 +86,7 @@ export class SplitPrivateUTXO {
       this._validateSplitData(splitData);
 
       // 2. Generar commitments Pedersen REALES y nullifiers criptográficos REALES
-      console.log('🔐 Generando commitments Pedersen REALES en BN254...');
+      console.log('🔐 Generando commitments Pedersen REALES en secp256k1...');
       const outputs = await this._generateRealCryptographicOutputs(splitData);
 
       // 3. PRE-VALIDACIÓN USANDO EL CONTRATO (ANTES DE ENVIAR TRANSACCIÓN)
@@ -130,7 +130,7 @@ export class SplitPrivateUTXO {
       });
 
       // 5. Ejecutar split en Alastria (sin estimación de gas)
-      console.log('📤 Ejecutando split con criptografía BN254 REAL en Alastria...');
+      console.log('📤 Ejecutando split con criptografía secp256k1 REAL en Alastria...');
       const tx = await this.contract.splitPrivateUTXO(splitParams);
       
       console.log(`⏳ Transacción criptográfica enviada: ${tx.hash}`);
@@ -186,7 +186,7 @@ export class SplitPrivateUTXO {
       
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Error en criptografía BN254'
+        error: error instanceof Error ? error.message : 'Error en criptografía secp256k1'
       };
     }
   }
@@ -269,7 +269,7 @@ export class SplitPrivateUTXO {
 
       console.log(`🔐 Generando commitment Pedersen REAL ${i + 1}/${splitData.outputValues.length}`);
 
-      // Crear commitment Pedersen REAL usando ZenroomHelpers con BN254
+      // Crear commitment Pedersen REAL usando ZenroomHelpers con secp256k1
       const pedersenCommitment = await ZenroomHelpers.createPedersenCommitment(
         value.toString(), 
         blindingFactor
@@ -277,23 +277,31 @@ export class SplitPrivateUTXO {
       
       // Convertir a formato del contrato manteniendo precisión criptográfica
       const commitmentPoint: CommitmentPoint = {
-        x: pedersenCommitment.x,  // Coordenada X REAL en BN254
-        y: pedersenCommitment.y   // Coordenada Y REAL en BN254
+        x: pedersenCommitment.x,  // Coordenada X REAL en secp256k1
+        y: pedersenCommitment.y   // Coordenada Y REAL en secp256k1
       };
       
       // Hash criptográfico REAL del commitment
       const commitmentHash = await this._calculateRealCommitmentHash(commitmentPoint);
       
-      // Generar nullifier hash criptográfico REAL con entropía suficiente
-      const sourceCommitStr = JSON.stringify({
-        x: splitData.sourceCommitment.x.toString(),
-        y: splitData.sourceCommitment.y.toString()
-      });
-      const uniqueEntropy = `${splitData.sourceNullifier}_${sourceCommitStr}_${Date.now()}_${i}_${Math.random()}_${BigInt(Date.now() * 1000000 + Math.floor(Math.random() * 1000000))}`;
+      // ✅ CORREGIDO: Generar nullifier criptográficamente seguro y determinístico
+      // Usar datos determinísticos en lugar de Date.now() y Math.random() inseguros
+      const deterministicSeed = ethers.solidityPacked(
+        ['bytes32', 'uint256', 'uint256', 'uint256', 'uint256'],
+        [
+          splitData.sourceNullifier,         // Nullifier del UTXO padre
+          splitData.sourceCommitment.x,      // Coordenada X del commitment padre
+          splitData.sourceCommitment.y,      // Coordenada Y del commitment padre  
+          BigInt(i),                         // Índice del output (determinístico)
+          value                              // Valor del output (determinístico)
+        ]
+      );
+      
+      // Generar nullifier usando seed determinístico y criptográficamente seguro
       const nullifier = await ZenroomHelpers.generateNullifierHash(
         commitmentHash,
         signerAddress,
-        uniqueEntropy // Seed único criptográfico con múltiples fuentes de entropía
+        ethers.keccak256(deterministicSeed) // Seed criptográficamente seguro y reproducible
       );
 
       commitments.push(commitmentPoint);
@@ -303,7 +311,7 @@ export class SplitPrivateUTXO {
       console.log(`   ✅ Commitment Pedersen REAL generado: ${commitmentHash.substring(0, 10)}...`);
     }
 
-    console.log(`✅ Generados ${commitments.length} commitments Pedersen REALES en BN254`);
+    console.log(`✅ Generados ${commitments.length} commitments Pedersen REALES con secp256k1`);
     return { commitments, commitmentHashes, nullifiers };
   }
 
