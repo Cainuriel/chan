@@ -1,15 +1,14 @@
 /**
- * @fileoverview PrivateUTXOManager - Manager refactorizado usando composición
- * @description Implementa privacidad real usando SOLO Pedersen commitments, Range proofs y Equality proofs
+ * @fileoverview ZK-PrivateUTXOManager - Manager with ZK privacy enhancements
+ * @description Implements true ZK privacy using ultra-simplified contracts and backend attestations
  */
 
 import { ethers, toBigInt, type BigNumberish } from 'ethers';
-import { depositAsPrivateUTXOSimplified } from './DepositAsPrivateUTXO';
-import { SplitPrivateUTXO, type SplitOperationResult, type SplitUTXOData } from './SplitPrivateUTXO';
-import { WithdrawPrivateUTXO, type WithdrawUTXOData } from './WithdrawPrivateUTXO';
+import { ZKCompatibilityAdapter } from './ZKCompatibilityAdapter';
+import { ZKCryptoServiceImpl } from './ZKCryptoService';
 import { AttestationService } from './AttestationService';
-import { CryptoHelpers as ZenroomHelpers } from '../utils/crypto.helpers.js';
 import { EthereumHelpers } from './../utils/ethereum.helpers';
+import { CryptoHelpers } from './../utils/crypto.helpers';
 import { gasManager } from './GasManager';
 import { UTXORecoveryService } from './UTXORecoveryService';
 import {
@@ -96,12 +95,13 @@ export interface PrivateUTXO extends ExtendedUTXOData {
 }
 
 /**
- * PrivateUTXOManager - Manager refactorizado usando composición
- * No hereda de UTXOLibrary, usa servicios específicos
+ * ZKPrivateUTXOManager - Manager with ZK privacy enhancements
+ * Uses ZK compatibility adapter and simplified contract architecture
  */
-export class PrivateUTXOManager extends EventEmitter {
-  // Servicios de operaciones específicas
-  private splitService: SplitPrivateUTXO | null = null;
+export class ZKPrivateUTXOManager extends EventEmitter {
+  // ZK Services
+  private zkAdapter: ZKCompatibilityAdapter | null = null;
+  private zkCryptoService: ZKCryptoServiceImpl | null = null;
   private attestationService: AttestationService | null = null;
   
   // Core components
@@ -134,7 +134,7 @@ export class PrivateUTXOManager extends EventEmitter {
   }
 
   /**
-   * Initialize the manager and services
+   * Initialize the manager and ZK services
    */
   async initialize(contractAddressOrProvider: string): Promise<boolean> {
     try {
@@ -160,26 +160,23 @@ export class PrivateUTXOManager extends EventEmitter {
       console.log(`⛽ Detected chain ID: ${this.currentChainId}`);
       console.log(`⛽ Network requires gas: ${gasManager.requiresGas(this.currentChainId)}`);
 
-      // Initialize services with contract and signer
-      this.splitService = new SplitPrivateUTXO(this.contract, signer);
+      // Initialize ZK services with contract and signer
+      this.zkCryptoService = ZKCryptoServiceImpl.getInstance();
+      this.zkAdapter = new ZKCompatibilityAdapter(this.contract as any);
       
       // Initialize attestation service with contract
       this.attestationService = new AttestationService(this.contract as any);
-      console.log('✅ Attestation service initialized');
-
-      // Configure CryptoHelpers with the contract
-      const { CryptoHelpers } = await import('../utils/crypto.helpers');
-      CryptoHelpers.setContract(this.contract as any);
+      console.log('✅ ZK Attestation service initialized');
       
       // Load existing UTXOs from localStorage for the current user
       await this.loadUTXOsFromStorage();
       
       this.isInitialized = true;
-      console.log('✅ PrivateUTXOManager (refactored) initialized successfully');
+      console.log('✅ ZKPrivateUTXOManager initialized successfully with ZK privacy');
       
       return true;
     } catch (error) {
-      console.error('❌ Failed to initialize PrivateUTXOManager:', error);
+      console.error('❌ Failed to initialize ZKPrivateUTXOManager:', error);
       return false;
     }
   }
@@ -210,70 +207,66 @@ export class PrivateUTXOManager extends EventEmitter {
   }
 
   /**
-   * Create a private UTXO using the deposit function
+   * Create a private UTXO using ZK adapter
    */
   async createPrivateUTXO(params: CreateUTXOParams): Promise<UTXOOperationResult> {
-    if (!this.isInitialized || !this.contract) {
+    if (!this.isInitialized || !this.contract || !this.zkAdapter) {
       throw new UTXOOperationError('Manager not initialized', 'createPrivateUTXO');
     }
 
     try {
-      console.log('🔄 Creating private UTXO...');
+      console.log('🔄 Creating private UTXO with ZK privacy...');
       
-      // Use the deposit function with all required parameters
-      const result = await depositAsPrivateUTXOSimplified(
-        params,
-        this.contract,
-        this.currentAccount,
-        EthereumHelpers,
-        this.utxos,
-        async (userAddress: string, utxo: any) => {
-          console.log('💾 Saving UTXO to manager:', utxo.id);
-          
-          // Save to internal collection
-          this.privateUTXOs.set(utxo.id, utxo);
-          console.log('✅ UTXO saved to manager internal collection');
-          
-          // ALSO save to localStorage using PrivateUTXOStorage
-          const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
-          PrivateUTXOStorage.savePrivateUTXO(userAddress, utxo);
-          console.log('✅ UTXO also saved to localStorage');
-        },
-        (event: string, data: any) => this.emit(event, data)
+      // Use ZK compatibility adapter for deposit
+      const zkResult = await this.zkAdapter.createPrivateUTXO(
+        params.amount.toString(),
+        this.currentAccount.address,
+        params.tokenAddress || ethers.ZeroAddress
       );
+      
+      // Convert ZK result to UTXOOperationResult
+      const result: UTXOOperationResult = {
+        success: true,
+        transactionHash: undefined, // ZK operations are off-chain initially
+        createdUTXOIds: [zkResult.utxoData.id],
+        error: undefined
+      };
+      
+      // Save UTXO using internal save logic
+      const utxoData = zkResult.utxoData;
+      console.log('💾 Saving ZK UTXO to manager:', utxoData.id);
+      
+      // Save to internal collection
+      this.privateUTXOs.set(utxoData.id, utxoData);
+      console.log('✅ ZK UTXO saved to manager internal collection');
+      
+      // ALSO save to localStorage using PrivateUTXOStorage
+      const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
+      PrivateUTXOStorage.savePrivateUTXO(this.currentAccount.address, utxoData);
+      console.log('✅ ZK UTXO also saved to localStorage');
       
       return result;
     } catch (error) {
-      console.error('❌ Failed to create private UTXO:', error);
+      console.error('❌ Failed to create private UTXO with ZK:', error);
       throw new UTXOOperationError(`Failed to create private UTXO: ${error}`, 'createPrivateUTXO');
     }
   }
 
   /**
-   * Split a private UTXO using the split service
+   * Split a private UTXO using ZK adapter
    */
   async splitPrivateUTXO(params: SplitUTXOParams): Promise<UTXOOperationResult> {
-    if (!this.isInitialized || !this.contract || !this.splitService) {
-      throw new UTXOOperationError('Manager not initialized', 'splitPrivateUTXO');
+    if (!this.isInitialized || !this.contract || !this.zkAdapter) {
+      throw new UTXOOperationError('ZK Manager not initialized', 'splitPrivateUTXO');
     }
 
     try {
-      console.log('🔄 Splitting private UTXO...');
+      console.log('🔄 Splitting private UTXO with ZK privacy...');
       
-      // Initialize crypto system if not already done
-      const { CryptoHelpers } = await import('../utils/crypto.helpers');
-      const isInitialized = await CryptoHelpers.initialize();
-      if (!isInitialized) {
-        throw new UTXOOperationError('Failed to initialize crypto system', 'splitPrivateUTXO');
-      }
-      console.log('✅ Crypto system initialized for split operation');
-      console.log('🔍 Looking for UTXO ID:', params.inputUTXOId);
-      
-      // First, try to get from internal collection
+      // Find and validate input UTXO (same validation logic as before)
       let inputUTXO = this.privateUTXOs.get(params.inputUTXOId);
       
       if (!inputUTXO) {
-        // If not found in internal collection, try to load from localStorage
         console.log('⚠️ UTXO not found in internal collection, checking localStorage...');
         
         if (this.currentAccount) {
@@ -285,7 +278,6 @@ export class PrivateUTXOManager extends EventEmitter {
           if (foundUTXO) {
             console.log('✅ Found UTXO in localStorage, adding to internal collection');
             
-            // Convert and add to internal collection
             const convertedUTXO: PrivateUTXO = {
               ...foundUTXO,
               blindingFactor: foundUTXO.blindingFactor || '',
@@ -299,275 +291,73 @@ export class PrivateUTXOManager extends EventEmitter {
             
             this.privateUTXOs.set(params.inputUTXOId, convertedUTXO);
             inputUTXO = convertedUTXO;
-            
-            console.log('🔄 UTXO synchronized from localStorage to manager');
           }
         }
       }
       
       if (!inputUTXO) {
-        console.error('❌ UTXO not found in manager or localStorage');
-        console.error('Available UTXOs in manager:', Array.from(this.privateUTXOs.keys()));
         throw new UTXONotFoundError(params.inputUTXOId);
       }
       
-      // Check if UTXO is already spent
       if (inputUTXO.isSpent) {
         throw new UTXOAlreadySpentError(params.inputUTXOId);
       }
       
-      console.log('✅ Found UTXO for split:', {
+      console.log('✅ Found UTXO for ZK split:', {
         id: inputUTXO.id,
         value: inputUTXO.value.toString(),
         isSpent: inputUTXO.isSpent,
         owner: inputUTXO.owner
       });
 
-      // Convert to SplitUTXOData format
-      console.log('🔄 Converting UTXO data for split operation...');
+      // Use ZK compatibility adapter for split
+      const privateKey = await this.getPrivateKeyFromEnv();
+      const zkResult = await this.zkAdapter.splitPrivateUTXO(
+        params.inputUTXOId,
+        inputUTXO.value,
+        inputUTXO.blindingFactor,
+        params.outputValues,
+        privateKey
+      );
       
-      // Validate required cryptographic data
-      if (!inputUTXO.commitment || !inputUTXO.blindingFactor || !inputUTXO.nullifierHash) {
-        throw new UTXOOperationError(
-          'UTXO missing required cryptographic data (commitment, blindingFactor, or nullifierHash)',
-          'splitPrivateUTXO'
-        );
-      }
-      
-      // Parse commitment coordinates
-      let sourceCommitment;
-      try {
-        if (inputUTXO.commitment.startsWith('0x')) {
-          // Handle hex string format (legacy or specific format)
-          const commitmentHex = inputUTXO.commitment.slice(2);
-          if (commitmentHex.length === 128) { // 64 chars for x + 64 chars for y
-            sourceCommitment = {
-              x: BigInt('0x' + commitmentHex.slice(0, 64)),
-              y: BigInt('0x' + commitmentHex.slice(64))
-            };
-          } else if (commitmentHex.length === 64) {
-            // This is a hash, try to get coordinates from notes
-            console.log('🔍 Detected commitment hash, looking for coordinates in notes...');
-            if (inputUTXO.notes) {
-              try {
-                const notes = JSON.parse(inputUTXO.notes);
-                if (notes.commitmentX && notes.commitmentY) {
-                  sourceCommitment = {
-                    x: BigInt(notes.commitmentX),
-                    y: BigInt(notes.commitmentY)
-                  };
-                  console.log('✅ Found coordinates in notes');
-                } else {
-                  throw new Error('Commitment coordinates not found in notes');
-                }
-              } catch (notesError) {
-                throw new Error('Cannot parse coordinates from notes and commitment is a hash');
-              }
-            } else {
-              throw new Error('Commitment is a hash but no notes available with coordinates');
-            }
-          } else {
-            throw new Error(`Invalid hex commitment format: unexpected length ${commitmentHex.length}`);
-          }
-        } else if (inputUTXO.commitment.startsWith('{')) {
-          // Handle JSON format (new format)
-          const parsedCommitment = JSON.parse(inputUTXO.commitment);
-          sourceCommitment = {
-            x: BigInt(parsedCommitment.x),
-            y: BigInt(parsedCommitment.y)
-          };
-        } else {
-          // Try to parse as JSON without curly braces check
-          const parsedCommitment = JSON.parse(inputUTXO.commitment);
-          sourceCommitment = {
-            x: BigInt(parsedCommitment.x),
-            y: BigInt(parsedCommitment.y)
-          };
-        }
-      } catch (error) {
-        console.error('❌ Failed to parse commitment:', inputUTXO.commitment);
-        console.error('❌ Available data:', {
-          commitment: inputUTXO.commitment,
-          hasNotes: !!inputUTXO.notes,
-          notes: inputUTXO.notes
-        });
-        throw new UTXOOperationError(
-          `Invalid commitment format: ${error instanceof Error ? error.message : error}`,
-          'splitPrivateUTXO'
-        );
-      }
-      
-      console.log('🔐 Commitment parsed successfully:', {
-        x: sourceCommitment.x.toString(16),
-        y: sourceCommitment.y.toString(16)
-      });
-      
-      // 🔧 FIX: USAR el nullifier del UTXO existente (NO generar uno nuevo)
-      console.log('🔑 Using EXISTING nullifier from UTXO (NO generating new one)...');
-      
-      // USAR el nullifier que ya está almacenado en localStorage
-      const existingNullifier = inputUTXO.nullifierHash;
-      
-      if (!existingNullifier) {
-        throw new UTXOOperationError('UTXO nullifier not found in localStorage', 'splitPrivateUTXO');
-      }
-      
-      console.log('✅ Using existing nullifier:', existingNullifier.substring(0, 20) + '...');
-      
-      const splitData: SplitUTXOData = {
-        sourceCommitment,
-        sourceValue: inputUTXO.value,
-        sourceBlindingFactor: inputUTXO.blindingFactor,
-        sourceNullifier: existingNullifier, // 🔧 FIX: Usar nullifier del localStorage
-        outputValues: params.outputValues,
-        outputBlindingFactors: [], // Will be generated by the service
-        tokenAddress: inputUTXO.tokenAddress,
-        sourceUTXOId: params.inputUTXOId
+      // Convert ZK result to UTXOOperationResult
+      const result: UTXOOperationResult = {
+        success: true,
+        transactionHash: undefined, // ZK operations are off-chain initially
+        createdUTXOIds: zkResult.outputUTXOs.map((utxo: any) => utxo.id),
+        error: undefined
       };
 
-      // Store original UTXO state for rollback in case of failure
-      const originalIsSpent = inputUTXO.isSpent;
-      let transactionSuccessful = false;
-      
-      try {
-        // Verify attestation service is ready
-        if (!this.attestationService || !this.attestationService.isReady()) {
-          throw new Error('❌ Attestation service not ready. Cannot create split attestation.');
-        }
-
-        // Use the split service with REAL backend attestation provider
-        console.log('🚀 Executing split operation with REAL attestation...');
-        const result = await this.splitService.executeSplit(
-          splitData,
-          this.attestationService.getSplitAttestationProvider()
-        );
+      // Save output UTXOs and mark input as spent
+      for (const outputUTXO of zkResult.outputUTXOs) {
+        console.log('💾 Saving split ZK UTXO to manager:', outputUTXO.id);
         
-        // Convert SplitOperationResult to UTXOOperationResult
-        const utxoResult: UTXOOperationResult = {
-          success: result.success,
-          transactionHash: result.transactionHash,
-          createdUTXOIds: result.outputUTXOIds || [],
-          error: result.error
-        };
-
-        // ONLY update UTXOs state if blockchain transaction was successful
-        if (result.success && result.transactionHash) {
-          console.log('✅ Blockchain transaction confirmed, updating UTXO state...');
-          transactionSuccessful = true;
-          
-          // Mark input UTXO as spent ONLY after confirmed blockchain success
-          console.log(`🔄 Marking UTXO ${params.inputUTXOId} as spent (NOT DELETING)`);
-          inputUTXO.isSpent = true;
-          console.log(`✅ UTXO ${params.inputUTXOId} marked as spent, preserved in memory`);
-          
-          // Update spent UTXO in localStorage too
-          const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
-          PrivateUTXOStorage.savePrivateUTXO(this.currentAccount?.address || '', inputUTXO);
-          console.log(`💾 Updated spent UTXO ${params.inputUTXOId} in localStorage`);
-          
-          this.emit('private:utxo:spent', params.inputUTXOId);
-          
-          // Add output UTXOs
-          if (result.outputUTXOIds) {
-            result.outputUTXOIds.forEach(async (utxoId, index) => {
-              const outputAmount = params.outputValues[index];
-              const ownerAddress = params.outputOwners[index] || this.currentAccount?.address || '';
-              
-              // Crear notas con las coordenadas del commitment para uso posterior en withdraw
-              const commitmentCoords = result.outputCommitments?.[index];
-              const notes = commitmentCoords ? JSON.stringify({
-                commitmentX: commitmentCoords.x.toString(),
-                commitmentY: commitmentCoords.y.toString(),
-                createdBy: 'split',
-                originalUTXO: params.inputUTXOId
-              }) : undefined;
-              
-              const outputUTXO: PrivateUTXO = {
-                id: utxoId,
-                exists: true,
-                value: outputAmount,
-                tokenAddress: inputUTXO.tokenAddress,
-                owner: ownerAddress, // Usar el owner específico del parámetro
-                timestamp: BigInt(Date.now()),
-                isSpent: false,
-                commitment: result.outputCommitmentHashes?.[index] || '',
-                parentUTXO: params.inputUTXOId,
-                utxoType: UTXOType.SPLIT,
-                localCreatedAt: Date.now(),
-                confirmed: true, // Mark as confirmed since blockchain transaction succeeded
-                nullifierHash: result.outputNullifiers?.[index] || '',
-                blindingFactor: '', // Would need to be provided by the service
-                isPrivate: true,
-                cryptographyType: 'BN254',
-                notes: notes // Guardar coordenadas para withdraw posterior
-              };
-              
-              // Save to internal collections
-              this.privateUTXOs.set(utxoId, outputUTXO);
-              this.utxos.set(utxoId, outputUTXO);
-              
-              // IMPORTANT: Save to localStorage of the correct owner, not the executor
-              const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
-              PrivateUTXOStorage.savePrivateUTXO(outputUTXO.owner, outputUTXO);
-              console.log(`💾 Saved new split UTXO ${utxoId} to localStorage for owner ${outputUTXO.owner}`);
-              console.log(`✅ UTXO ${utxoId.slice(0, 8)}... assigned to owner: ${outputUTXO.owner}`);
-              
-              this.emit('private:utxo:created', outputUTXO);
-            });
-          }
-          
-          this.emit('private:utxo:split', { 
-            input: params.inputUTXOId, 
-            outputs: result.outputUTXOIds || [] 
-          });
-          
-          // 🔍 DEBUGGING NULLIFIERS DESPUÉS DEL SPLIT EN MANAGER
-          console.log('🔍 MANAGER - DESPUÉS DEL SPLIT EXITOSO:');
-          
-          // Verificar si el nullifier del source se marcó como usado
-          if (this.contract) {
-            const isUsedAfter = await this.contract.isNullifierUsed(inputUTXO.nullifierHash);
-            console.log('🔍 Source nullifier used AFTER split?', {
-              inputUTXOId: params.inputUTXOId,
-              nullifier: inputUTXO.nullifierHash,
-              isUsed: isUsedAfter
-            });
-            
-            // Verificar los nullifiers de output
-            if (result.outputNullifiers) {
-              for (let i = 0; i < result.outputNullifiers.length; i++) {
-                const outputNullifier = result.outputNullifiers[i];
-                const isOutputUsed = await this.contract.isNullifierUsed(outputNullifier);
-                console.log(`🔍 Output ${i+1} nullifier used?`, {
-                  nullifier: outputNullifier,
-                  isUsed: isOutputUsed
-                });
-              }
-            }
-          }
-          
-          console.log('🎉 Split operation completed successfully');
-        } else {
-          console.error('❌ Split operation failed:', result.error);
-          throw new UTXOOperationError(
-            result.error || 'Split operation failed without specific error',
-            'splitPrivateUTXO'
-          );
-        }
+        // Save to internal collection
+        this.privateUTXOs.set(outputUTXO.id, outputUTXO);
         
-        return utxoResult;
-        
-      } catch (splitError) {
-        // Rollback UTXO state if transaction failed
-        if (!transactionSuccessful) {
-          console.log('🔄 Rolling back UTXO state due to failed transaction...');
-          inputUTXO.isSpent = originalIsSpent;
-          console.log('✅ UTXO state rolled back successfully');
-        }
-        throw splitError;
+        // Save to localStorage
+        const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
+        PrivateUTXOStorage.savePrivateUTXO(outputUTXO.owner, outputUTXO);
+        console.log('✅ Split ZK UTXO saved');
       }
+
+      // Mark input UTXO as spent
+      inputUTXO.isSpent = true;
+      const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
+      PrivateUTXOStorage.savePrivateUTXO(this.currentAccount?.address || '', inputUTXO);
+      
+      this.emit('private:utxo:spent', params.inputUTXOId);
+      this.emit('private:utxo:split', { 
+        input: params.inputUTXOId, 
+        outputs: result.createdUTXOIds || [] 
+      });
+      
+      console.log('🎉 ZK Split operation completed successfully');
+      
+      return result;
+      
     } catch (error) {
-      console.error('❌ Failed to split private UTXO:', error);
+      console.error('❌ Failed to split private UTXO with ZK:', error);
       throw new UTXOOperationError(`Failed to split private UTXO: ${error}`, 'splitPrivateUTXO');
     }
   }
@@ -580,10 +370,10 @@ export class PrivateUTXOManager extends EventEmitter {
   }
 
   /**
-   * Withdraw a private UTXO to public tokens
+   * Withdraw a private UTXO to public tokens using ZK adapter
    */
   async withdrawPrivateUTXO(params: WithdrawUTXOParams): Promise<UTXOOperationResult> {
-    console.log('🔄 Starting withdraw operation in ManagerUTXO...');
+    console.log('🔄 Starting ZK withdraw operation in ManagerUTXO...');
     console.log('📋 Withdraw params:', {
       utxoId: params.utxoId,
       recipient: params.recipient
@@ -595,8 +385,8 @@ export class PrivateUTXOManager extends EventEmitter {
         throw new UTXOOperationError('No hay cuenta conectada', 'withdrawPrivateUTXO');
       }
 
-      if (!this.contract) {
-        throw new UTXOOperationError('Contrato no inicializado', 'withdrawPrivateUTXO');
+      if (!this.contract || !this.zkAdapter) {
+        throw new UTXOOperationError('ZK Manager no inicializado', 'withdrawPrivateUTXO');
       }
 
       // 2. Buscar el UTXO a retirar
@@ -617,149 +407,61 @@ export class PrivateUTXOManager extends EventEmitter {
         );
       }
 
-      console.log('🔍 Source UTXO details for withdraw:');
-      console.log('  - id:', sourceUTXO.id);
-      console.log('  - value:', sourceUTXO.value?.toString());
-      console.log('  - owner:', sourceUTXO.owner);
-      console.log('  - isSpent:', sourceUTXO.isSpent);
-      console.log('  - nullifierHash:', sourceUTXO.nullifierHash);
-      console.log('  - commitment:', sourceUTXO.commitment);
-      console.log('  - tokenAddress:', sourceUTXO.tokenAddress);
-
-      console.log('✅ Source UTXO found and validated:', {
+      console.log('✅ Source UTXO found and validated for ZK withdraw:', {
         id: sourceUTXO.id,
         amount: sourceUTXO.value.toString(),
         owner: sourceUTXO.owner,
         tokenAddress: sourceUTXO.tokenAddress
       });
 
-      // 4. Preparar datos para withdraw criptográfico
-      // Parse commitment coordinates (same logic as split)
-      let sourceCommitment;
-      try {
-        if (sourceUTXO.commitment.startsWith('0x')) {
-          // Handle hex string format (legacy or specific format)
-          const commitmentHex = sourceUTXO.commitment.slice(2);
-          if (commitmentHex.length === 128) { // 64 chars for x + 64 chars for y
-            sourceCommitment = {
-              x: BigInt('0x' + commitmentHex.slice(0, 64)),
-              y: BigInt('0x' + commitmentHex.slice(64))
-            };
-          } else if (commitmentHex.length === 64) {
-            // This is a hash, try to get coordinates from notes
-            console.log('🔍 Detected commitment hash, looking for coordinates in notes...');
-            if (sourceUTXO.notes) {
-              try {
-                const notes = JSON.parse(sourceUTXO.notes);
-                if (notes.commitmentX && notes.commitmentY) {
-                  sourceCommitment = {
-                    x: BigInt(notes.commitmentX),
-                    y: BigInt(notes.commitmentY)
-                  };
-                  console.log('✅ Found coordinates in notes');
-                } else {
-                  throw new Error('Commitment coordinates not found in notes');
-                }
-              } catch (notesError) {
-                throw new Error('Cannot parse coordinates from notes and commitment is a hash');
-              }
-            } else {
-              throw new Error('Commitment is a hash but no notes available with coordinates');
-            }
-          } else {
-            throw new Error(`Invalid hex commitment format: unexpected length ${commitmentHex.length}`);
-          }
-        } else if (sourceUTXO.commitment.startsWith('{')) {
-          // Handle JSON format (new format)
-          const parsedCommitment = JSON.parse(sourceUTXO.commitment);
-          sourceCommitment = {
-            x: BigInt(parsedCommitment.x),
-            y: BigInt(parsedCommitment.y)
-          };
-        } else {
-          // Try to parse as JSON without curly braces check
-          try {
-            const parsedCommitment = JSON.parse(sourceUTXO.commitment);
-            sourceCommitment = {
-              x: BigInt(parsedCommitment.x),
-              y: BigInt(parsedCommitment.y)
-            };
-          } catch (parseError) {
-            throw new Error(`Cannot parse commitment: ${sourceUTXO.commitment}`);
-          }
-        }
-      } catch (error: any) {
-        throw new UTXOOperationError(
-          `Failed to parse source commitment: ${error.message}`, 
-          'withdrawPrivateUTXO'
-        );
-      }
-
-      const withdrawData: WithdrawUTXOData = {
-        sourceCommitment: sourceCommitment,
-        sourceValue: sourceUTXO.value,
-        sourceBlindingFactor: sourceUTXO.blindingFactor,
-        sourceNullifier: sourceUTXO.nullifierHash, // Use nullifierHash (available in PrivateUTXO)
-        revealedAmount: sourceUTXO.value, // Retirar todo el valor
-        recipient: params.recipient,
-        tokenAddress: sourceUTXO.tokenAddress,
-        sourceUTXOId: params.utxoId
-      };
-
-      // DEBUG: Check if this nullifier is already used
-      console.log('🔍 Debugging nullifier usage before withdraw...');
-      console.log('🔍 All UTXOs in localStorage:');
-      this.debugLocalNullifiers();
-      
-      // 5. Crear instancia del servicio withdraw
-      const withdrawService = new WithdrawPrivateUTXO(this.contract, this.currentAccount.signer);
-      
-      // DEBUG: Check nullifier status in contract
-      const isNullifierUsed = await withdrawService.debugCheckNullifier(sourceUTXO.nullifierHash);
-      
-      if (isNullifierUsed) {
-        console.error('🚨 PROBLEM FOUND: Nullifier is already used in contract!');
-        console.error('This means the UTXO was already spent but localStorage is not updated');
-        throw new UTXOOperationError(
-          'UTXO nullifier already used in contract - inconsistent state',
-          'nullifier_already_used'
-        );
-      }
-
-      console.log('✅ Nullifier check passed - UTXO can be withdrawn');
-
-      // 6. Ejecutar withdraw con attestation
-      console.log('🚀 Executing withdraw with real cryptography...');
+      // 4. Use ZK compatibility adapter for withdraw (method needs implementation)
+      console.log('🚀 Executing ZK withdraw operation...');
       
       if (!this.attestationService) {
         throw new UTXOOperationError('Attestation service not initialized', 'withdrawPrivateUTXO');
       }
       
-      // Create adapter for AttestationService interface
-      const attestationAdapter = {
-        createWithdrawAttestation: async (withdrawData: WithdrawUTXOData) => {
-          // Convert WithdrawUTXOData to WithdrawData format
-          const attestationData = {
-            nullifier: withdrawData.sourceNullifier,
-            amount: withdrawData.revealedAmount,
-            tokenAddress: withdrawData.tokenAddress,
-            recipientAddress: withdrawData.recipient
-          };
-          return await this.attestationService!.createWithdrawAttestation(attestationData);
-        }
+      // Create ZK withdraw data
+      const zkWithdrawData = {
+        sourceUTXOId: params.utxoId,
+        nullifier: sourceUTXO.nullifierHash,
+        amount: sourceUTXO.value,
+        tokenAddress: sourceUTXO.tokenAddress,
+        recipient: params.recipient
       };
       
-      const result = await withdrawService.executeWithdraw(
-        withdrawData,
-        attestationAdapter
+      // Create withdraw attestation using ZK service
+      const attestation = await this.attestationService.createZKWithdrawAttestation(zkWithdrawData);
+      
+      // Execute withdraw on contract (using ZK contract method)
+      const tx = await (this.contract as any).zkWithdraw(
+        sourceUTXO.nullifierHash,
+        sourceUTXO.value,
+        sourceUTXO.tokenAddress,
+        params.recipient,
+        attestation.signature,
+        attestation.timestamp
       );
+      
+      const receipt = await tx.wait();
+      
+      const result: UTXOOperationResult = {
+        success: true,
+        transactionHash: receipt.hash,
+        createdUTXOIds: [],
+        error: undefined
+      };
 
       if (result.success) {
-        // 7. Marcar UTXO como gastado
+        // 5. Marcar UTXO como gastado
         sourceUTXO.isSpent = true;
         console.log(`✅ UTXO ${params.utxoId} marked as spent`);
 
-        // 8. Emitir evento
+        // Update in localStorage
+        const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
+        PrivateUTXOStorage.savePrivateUTXO(this.currentAccount.address, sourceUTXO);
+
+        // 6. Emitir evento
         this.emit('utxoWithdrawn', {
           utxoId: params.utxoId,
           recipient: params.recipient,
@@ -767,13 +469,13 @@ export class PrivateUTXOManager extends EventEmitter {
           transactionHash: result.transactionHash
         });
 
-        console.log('🎉 Withdraw operation completed successfully!');
+        console.log('🎉 ZK Withdraw operation completed successfully!');
       }
 
       return result;
 
     } catch (error: any) {
-      console.error('❌ Error in withdrawPrivateUTXO:', error);
+      console.error('❌ Error in ZK withdrawPrivateUTXO:', error);
       
       // Re-throw specific UTXO errors
       if (error instanceof UTXOOperationError || 
@@ -784,7 +486,7 @@ export class PrivateUTXOManager extends EventEmitter {
       
       // Wrap other errors
       throw new UTXOOperationError(
-        `Withdraw failed: ${error.message}`, 
+        `ZK Withdraw failed: ${error.message}`, 
         'withdrawPrivateUTXO', 
         error
       );
@@ -1083,13 +785,24 @@ export class PrivateUTXOManager extends EventEmitter {
   }
 
   /**
-   * Generate BN254 UTXO ID
+   * Get private key from environment using CryptoHelpers
+   */
+  private async getPrivateKeyFromEnv(): Promise<string> {
+    return await CryptoHelpers.getPrivateKeyFromEnv();
+  }
+
+  /**
+   * Generate BN254 UTXO ID using ZK crypto service
    */
   private async generateBN254UTXOId(amount: bigint, blindingFactor: string, owner: string): Promise<string> {
-    const commitment = await ZenroomHelpers.createPedersenCommitment(amount.toString(), blindingFactor);
+    if (!this.zkCryptoService) {
+      throw new Error('ZK Crypto service not initialized');
+    }
+    
+    const commitment = await this.zkCryptoService.generateCommitment(amount, blindingFactor);
     return ethers.keccak256(ethers.solidityPacked(
       ['string', 'string', 'address'],
-      [commitment.x, commitment.y, blindingFactor, owner]
+      [commitment.x.toString(), commitment.y.toString(), owner]
     ));
   }
 
@@ -1244,6 +957,10 @@ export class PrivateUTXOManager extends EventEmitter {
   }
 }
 
-// Export singleton instance
-export const privateUTXOManager = new PrivateUTXOManager();
-export default privateUTXOManager;
+// Export singleton instance with ZK enhancements
+export const zkPrivateUTXOManager = new ZKPrivateUTXOManager();
+
+// Maintain backward compatibility
+export const privateUTXOManager = zkPrivateUTXOManager;
+
+export default zkPrivateUTXOManager;

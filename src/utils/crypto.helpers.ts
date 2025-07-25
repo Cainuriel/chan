@@ -430,6 +430,26 @@ export class CryptoHelpers {
     // Implementación simple - en producción usar contador del servidor
     return Math.floor(Date.now() / 1000);
   }
+
+  /**
+   * Get private key from environment variables securely
+   */
+  static async getPrivateKeyFromEnv(): Promise<string> {
+    const privateKey = import.meta.env.VITE_PRIVATE_KEY_ADMIN;
+    
+    if (!privateKey) {
+      throw new Error(
+        'VITE_PRIVATE_KEY_ADMIN not found in environment variables'
+      );
+    }
+    
+    // Ensure private key has proper format (with 0x prefix)
+    const formattedKey = privateKey.startsWith('0x') ? privateKey : `0x${privateKey}`;
+    
+    console.log('🔑 Retrieved private key from environment (length:', formattedKey.length, ')');
+    
+    return formattedKey;
+  }
 }
 
 // Alias para compatibilidad total
