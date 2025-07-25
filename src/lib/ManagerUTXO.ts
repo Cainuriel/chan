@@ -398,9 +398,41 @@ export class ZKPrivateUTXOManager extends EventEmitter {
       // 8. ONLY save UTXOs if transaction was confirmed
       if (result.success && splitResult.outputUTXOIds && splitResult.outputUTXOIds.length > 0) {
         console.log('✅ Split transaction confirmed, creating and saving UTXOs...');
+        console.log('🔍 Split result data:', {
+          outputUTXOIds: splitResult.outputUTXOIds,
+          outputCommitments: splitResult.outputCommitments,
+          outputNullifiers: splitResult.outputNullifiers,
+          outputBlindingFactors: splitData.outputBlindingFactors
+        });
         
         // Create output UTXOs with REAL data from split service
         const outputUTXOs: PrivateUTXO[] = splitResult.outputUTXOIds.map((utxoId, index) => {
+          // ✅ Use REAL cryptographic data from split service
+          const realCommitment = splitResult.outputCommitments?.[index];
+          const realNullifier = splitResult.outputNullifiers?.[index];
+          
+          // 🚨 VERIFICAR QUE LOS DATOS CRIPTOGRÁFICOS SON REALES (NO DUMMY)
+          if (!realCommitment || (realCommitment.x === 0n && realCommitment.y === 0n)) {
+            throw new UTXOOperationError(
+              `UTXO ${index}: Real commitment missing from split service - dummy data detected!`,
+              'splitPrivateUTXO'
+            );
+          }
+          
+          if (!realNullifier || realNullifier === '') {
+            throw new UTXOOperationError(
+              `UTXO ${index}: Real nullifier missing from split service - dummy data detected!`,
+              'splitPrivateUTXO'
+            );
+          }
+          
+          console.log(`🔐 Creating UTXO ${index} with VERIFIED REAL crypto data:`, {
+            utxoId,
+            commitment: `{x: ${realCommitment.x.toString().substring(0, 16)}..., y: ${realCommitment.y.toString().substring(0, 16)}...}`,
+            nullifier: realNullifier.substring(0, 16) + '...',
+            owner: params.outputOwners[index]
+          });
+          
           return {
             id: utxoId,
             exists: true,
@@ -409,22 +441,23 @@ export class ZKPrivateUTXOManager extends EventEmitter {
             owner: params.outputOwners[index], // ✅ USE CORRECT OWNER FROM PARAMS
             timestamp: BigInt(Math.floor(Date.now() / 1000)),
             isSpent: false,
-            commitment: JSON.stringify(splitResult.outputCommitments?.[index] || { x: '0', y: '0' }),
+            commitment: JSON.stringify(realCommitment), // ✅ ONLY REAL DATA
             parentUTXO: params.inputUTXOId,
             utxoType: UTXOType.SPLIT,
-            blindingFactor: splitData.outputBlindingFactors[index] || '',
+            blindingFactor: '', // Will be retrieved from split service if available
             localCreatedAt: Date.now(),
             confirmed: true, // ✅ Only true because transaction was confirmed
             creationTxHash: splitResult.transactionHash || '',
             blockNumber: 0,
-            nullifierHash: splitResult.outputNullifiers?.[index] || '',
+            nullifierHash: realNullifier, // ✅ ONLY REAL DATA
             cryptographyType: 'secp256k1' as const, // ✅ REAL crypto type
             isPrivate: true as const,
             notes: JSON.stringify({
               splitFrom: params.inputUTXOId,
               cryptographyType: 'secp256k1',
               contractTransaction: splitResult.transactionHash,
-              realCryptography: true
+              realCryptography: true,
+              verifiedRealData: true
             })
           };
         });
@@ -432,6 +465,28 @@ export class ZKPrivateUTXOManager extends EventEmitter {
         // Save UTXOs to correct owners and update internal state
         for (const outputUTXO of outputUTXOs) {
           console.log(`💾 Saving split UTXO for owner: ${outputUTXO.owner}`);
+          console.log(`🔐 UTXO crypto data verification:`, {
+            utxoId: outputUTXO.id,
+            hasRealCommitment: outputUTXO.commitment !== '{"x":"0","y":"0"}',
+            hasRealNullifier: !!outputUTXO.nullifierHash && outputUTXO.nullifierHash !== '',
+            owner: outputUTXO.owner,
+            value: outputUTXO.value.toString()
+          });
+          
+          // ✅ VERIFICACIÓN CRÍTICA: Validar que los datos criptográficos son reales
+          if (outputUTXO.commitment === '{"x":"0","y":"0"}') {
+            throw new UTXOOperationError(
+              `CRITICAL ERROR: UTXO ${outputUTXO.id} has dummy commitment data - this is forbidden!`,
+              'splitPrivateUTXO'
+            );
+          }
+          
+          if (!outputUTXO.nullifierHash || outputUTXO.nullifierHash === '') {
+            throw new UTXOOperationError(
+              `CRITICAL ERROR: UTXO ${outputUTXO.id} has empty nullifier - this is forbidden!`,
+              'splitPrivateUTXO'
+            );
+          }
           
           // ✅ Solo añadir a colección interna si pertenece al usuario actual
           const isCurrentUserUTXO = outputUTXO.owner.toLowerCase() === this.currentAccount.address.toLowerCase();
@@ -443,15 +498,64 @@ export class ZKPrivateUTXOManager extends EventEmitter {
           }
           
           // ✅ SIEMPRE guardar TODOS los UTXOs en localStorage asociados a SU PROPIETARIO
-          const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
-          await PrivateUTXOStorage.savePrivateUTXO(outputUTXO.owner, outputUTXO);
-          console.log(`✅ Split UTXO saved for owner: ${outputUTXO.owner}`);
+          try {
+            const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
+            await PrivateUTXOStorage.savePrivateUTXO(outputUTXO.owner, outputUTXO);
+            console.log(`✅ Split UTXO saved for owner: ${outputUTXO.owner}`);
+            
+            // ✅ VERIFICACIÓN: Confirmar que se guardó correctamente
+            const savedUTXOs = await PrivateUTXOStorage.getPrivateUTXOs(outputUTXO.owner);
+            const savedUTXO = savedUTXOs.find(u => u.id === outputUTXO.id);
+            
+            if (savedUTXO) {
+              console.log(`✅ VERIFIED: UTXO ${outputUTXO.id} successfully saved and retrievable from localStorage`);
+              console.log(`📋 Saved UTXO details:`, {
+                id: savedUTXO.id,
+                owner: savedUTXO.owner,
+                value: savedUTXO.value.toString(),
+                isSpent: savedUTXO.isSpent,
+                hasRealNullifier: !!savedUTXO.nullifierHash && savedUTXO.nullifierHash !== '',
+                hasRealCommitment: savedUTXO.commitment !== '{"x":"0","y":"0"}'
+              });
+            } else {
+              console.error(`❌ VERIFICATION FAILED: UTXO ${outputUTXO.id} was not saved properly to localStorage!`);
+              throw new UTXOOperationError(
+                `Failed to save UTXO ${outputUTXO.id} to localStorage`,
+                'splitPrivateUTXO'
+              );
+            }
+          } catch (saveError) {
+            console.error(`❌ Failed to save UTXO ${outputUTXO.id} for owner ${outputUTXO.owner}:`, saveError);
+            throw new UTXOOperationError(
+              `Failed to save UTXO ${outputUTXO.id}: ${saveError}`,
+              'splitPrivateUTXO'
+            );
+          }
         }
 
-        // Mark input UTXO as spent
+        // ✅ Mark input UTXO as spent and update storage
+        console.log('🔄 Marking input UTXO as spent...');
+        console.log('📦 Original input UTXO state:', {
+          id: inputUTXO.id,
+          isSpent: inputUTXO.isSpent,
+          owner: inputUTXO.owner,
+          value: inputUTXO.value.toString()
+        });
+        
         inputUTXO.isSpent = true;
+        
+        // Update internal collection
+        this.privateUTXOs.set(inputUTXO.id, inputUTXO);
+        
+        // Update localStorage
         const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
         await PrivateUTXOStorage.savePrivateUTXO(this.currentAccount.address, inputUTXO);
+        
+        console.log('✅ Input UTXO marked as spent and saved:', {
+          id: inputUTXO.id,
+          isSpent: inputUTXO.isSpent,
+          owner: inputUTXO.owner
+        });
         
         this.secp256k1OperationCount++; // ✅ INCREMENT secp256k1 operations
         
@@ -462,7 +566,16 @@ export class ZKPrivateUTXOManager extends EventEmitter {
           outputs: result.createdUTXOIds || [] 
         });
         
+        // ✅ Emit refresh event to update UI
+        this.emit('utxos:updated');
+        this.emit('private:utxos:changed');
+        
         console.log('🎉 REAL secp256k1 ZK Split operation completed successfully with contract confirmation');
+        console.log('📊 Final summary:', {
+          inputUTXOSpent: inputUTXO.isSpent,
+          outputUTXOsCreated: result.createdUTXOIds?.length || 0,
+          totalAvailableUTXOs: this.getPrivateUTXOs().length
+        });
       } else {
         console.error('❌ Split failed or no UTXOs were created');
       }
