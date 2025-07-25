@@ -4,6 +4,11 @@
  */
 
 /**
+ * Supported cryptography types
+ */
+export type CryptographyType = 'BN254' | 'secp256k1' | 'Other';
+
+/**
  * Core UTXO data structure (matches smart contract)
  */
 export interface PrivateUTXO extends ExtendedUTXOData {

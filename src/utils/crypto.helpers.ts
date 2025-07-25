@@ -531,3 +531,65 @@ export class CryptoHelpers {
 
 // Alias para compatibilidad total
 export { CryptoHelpers as ZenroomHelpers };
+
+/**
+ * ZK Cryptography Service for secp256k1 operations
+ * Provides high-level interface for cryptographic status checking
+ */
+export class ZKCryptoService {
+  /**
+   * Check if ZK system is properly initialized
+   */
+  static async isInitialized(): Promise<boolean> {
+    try {
+      return CryptoHelpers.isFullCryptoAvailable;
+    } catch (error) {
+      return false;
+    }
+  }
+  
+  /**
+   * Check if secp256k1 cryptography is available
+   */
+  static async checkSecp256k1Support(): Promise<boolean> {
+    try {
+      // Verificar que se pueden generar commitments secp256k1
+      const testCommitment = await CryptoHelpers.createPedersenCommitment('1');
+      return testCommitment !== null && testCommitment.x !== undefined;
+    } catch (error) {
+      return false;
+    }
+  }
+  
+  /**
+   * Check if ZK proof generation is available
+   */
+  static async canGenerateProofs(): Promise<boolean> {
+    try {
+      // Verificar que se pueden generar pruebas de igualdad
+      const c1 = await CryptoHelpers.createPedersenCommitment('1');
+      const c2 = await CryptoHelpers.createPedersenCommitment('1');
+      const proof = await CryptoHelpers.generateEqualityProof(c1, c2);
+      return proof !== null && proof.length > 0;
+    } catch (error) {
+      return false;
+    }
+  }
+  
+  /**
+   * Get comprehensive cryptographic capabilities
+   */
+  static async getCryptoCapabilities(): Promise<{
+    initialized: boolean;
+    secp256k1: boolean;
+    zkProofs: boolean;
+    pedersenCommitments: boolean;
+  }> {
+    return {
+      initialized: await this.isInitialized(),
+      secp256k1: await this.checkSecp256k1Support(),
+      zkProofs: await this.canGenerateProofs(),
+      pedersenCommitments: await this.checkSecp256k1Support()
+    };
+  }
+}
