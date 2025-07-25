@@ -57,10 +57,7 @@ contract ZKUTXOVault is ZKUTXOVaultBase, ReentrancyGuard {
         // 5. Marcar UTXO como existente (sin almacenar amounts)
         utxoExists[params.utxoId] = true;
         
-        // 6. Marcar nullifier como usado (prevenir reutilización)
-        nullifiersUsed[params.nullifierHash] = true;
-        
-        // 7. Emitir evento (amount visible en deposit)
+        // 6. Emitir evento (amount visible en deposit)
         emit ZKDeposit(
             params.utxoId,
             msg.sender,
@@ -103,7 +100,6 @@ contract ZKUTXOVault is ZKUTXOVaultBase, ReentrancyGuard {
         // 4. Marcar outputs como existentes (sin amounts - privacidad ZK)
         for (uint256 i = 0; i < params.outputUTXOIds.length; i++) {
             utxoExists[params.outputUTXOIds[i]] = true;
-            nullifiersUsed[params.outputNullifiers[i]] = true;
         }
         
         // 5. Emitir evento (sin amounts - privacidad ZK)
@@ -150,7 +146,7 @@ contract ZKUTXOVault is ZKUTXOVaultBase, ReentrancyGuard {
         
         // 5. Crear nuevo UTXO para receptor (sin amount - privacidad ZK)
         utxoExists[params.outputUTXOId] = true;
-        nullifiersUsed[params.outputNullifier] = true;
+      
         
         // 6. Emitir evento (sin amounts - privacidad ZK)
         emit ZKTransfer(
