@@ -203,11 +203,11 @@ export class EthersCryptoProvider implements CryptoProvider {
   }
   
   async generateEqualityProof(c1: PedersenCommitment, c2: PedersenCommitment): Promise<string> {
-    // Proof simple pero válido: hash de ambos commitments
+    // ✅ CORREGIDO: Eliminar Date.now() inseguro, usar proof determinístico
     return ethers.keccak256(
       ethers.solidityPacked(
-        ['uint256', 'uint256', 'uint256', 'uint256', 'uint256'],
-        [c1.x, c1.y, c2.x, c2.y, BigInt(Date.now())]
+        ['uint256', 'uint256', 'uint256', 'uint256', 'string'],
+        [c1.x, c1.y, c2.x, c2.y, 'equality_proof_salt']
       )
     );
   }
