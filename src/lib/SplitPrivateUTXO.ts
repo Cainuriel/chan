@@ -279,25 +279,68 @@ export class SplitPrivateUTXO {
       // Hash criptográfico REAL del commitment
       const commitmentHash = await this._calculateRealCommitmentHash(commitmentPoint);
       
-      // ✅ CORREGIDO: Generar nullifier criptográficamente seguro y determinístico
-      // Usar datos determinísticos en lugar de Date.now() y Math.random() inseguros
-      const deterministicSeed = ethers.solidityPacked(
-        ['bytes32', 'uint256', 'uint256', 'uint256', 'uint256'],
+      // ✅ CORREGIDO: Generar nullifier único con MÁXIMA ENTROPÍA y verificación de colisiones
+      // NO usar sourceNullifier (que ya está gastado) - usar solo datos únicos del output
+      const uniqueSeed = ethers.solidityPacked(
+        ['bytes32', 'uint256', 'uint256', 'uint256', 'uint256', 'uint256'],
         [
-          splitData.sourceNullifier,         // Nullifier del UTXO padre
-          splitData.sourceCommitment.x,      // Coordenada X del commitment padre
-          splitData.sourceCommitment.y,      // Coordenada Y del commitment padre  
-          BigInt(i),                         // Índice del output (determinístico)
-          value                              // Valor del output (determinístico)
+          blindingFactor,                    // ✅ Factor de cegado único del output
+          commitmentHash,                    // ✅ Hash del commitment único del output
+          splitData.sourceCommitment.x,      // ✅ Coordenada X del commitment padre (para derivación)
+          splitData.sourceCommitment.y,      // ✅ Coordenada Y del commitment padre (para derivación)
+          BigInt(i),                         // ✅ Índice del output (determinístico)
+          value                              // ✅ Valor del output (determinístico)
         ]
       );
       
-      // Generar nullifier usando seed determinístico y criptográficamente seguro
-      const nullifier = await ZenroomHelpers.generateNullifierHash(
+      // Generar nullifier usando datos únicos del output (NO sourceNullifier)
+      let nullifier = await ZenroomHelpers.generateNullifierHash(
         commitmentHash,
         signerAddress,
-        ethers.keccak256(deterministicSeed) // Seed criptográficamente seguro y reproducible
+        ethers.keccak256(uniqueSeed) // Seed criptográficamente seguro y único
       );
+      
+      // ✅ CRÍTICO: Verificar que el nullifier generado NO esté ya en uso
+      let attemptCount = 0;
+      while (attemptCount < 10) { // Máximo 10 intentos para evitar loops infinitos
+        try {
+          const isNullifierUsed = await this.contract.isNullifierUsed(nullifier);
+          if (!isNullifierUsed) {
+            break; // Nullifier único encontrado
+          }
+          
+          // Nullifier ya en uso - regenerar con entropía adicional
+          console.warn(`⚠️ Nullifier collision detected for output ${i}, regenerating...`);
+          const additionalEntropy = ethers.keccak256(ethers.solidityPacked(
+            ['bytes32', 'uint256', 'uint256'],
+            [nullifier, BigInt(attemptCount), BigInt(Date.now())]
+          ));
+          
+          const newUniqueSeed = ethers.keccak256(ethers.solidityPacked(
+            ['bytes32', 'bytes32'],
+            [ethers.keccak256(uniqueSeed), additionalEntropy]
+          ));
+          
+          nullifier = await ZenroomHelpers.generateNullifierHash(
+            commitmentHash,
+            signerAddress,
+            newUniqueSeed
+          );
+          
+          attemptCount++;
+        } catch (error) {
+          console.error(`❌ Error checking nullifier uniqueness: ${error}`);
+          break;
+        }
+      }
+      
+      if (attemptCount >= 10) {
+        throw new SplitValidationError(
+          `Failed to generate unique nullifier for output ${i} after 10 attempts`
+        );
+      }
+      
+      console.log(`   ✅ Nullifier único generado para output ${i}: ${nullifier.substring(0, 10)}...`)
 
       commitments.push(commitmentPoint);
       commitmentHashes.push(commitmentHash);
@@ -307,6 +350,35 @@ export class SplitPrivateUTXO {
     }
 
     console.log(`✅ Generados ${commitments.length} commitments Pedersen REALES con secp256k1`);
+    
+    // ✅ VERIFICACIÓN FINAL: Asegurar que no hay nullifiers duplicados entre los outputs
+    const uniqueNullifiers = new Set(nullifiers);
+    if (uniqueNullifiers.size !== nullifiers.length) {
+      console.error('❌ DUPLICATED NULLIFIERS DETECTED:', {
+        expected: nullifiers.length,
+        unique: uniqueNullifiers.size,
+        nullifiers: nullifiers.map((n, i) => `${i}: ${n.substring(0, 12)}...`)
+      });
+      throw new SplitValidationError(
+        `Duplicated nullifiers detected: expected ${nullifiers.length} unique, got ${uniqueNullifiers.size}`
+      );
+    }
+    
+    // ✅ VERIFICACIÓN CRÍTICA: Los nullifiers de salida NO deben ser igual al nullifier de entrada
+    const sourceNullifier = splitData.sourceNullifier;
+    const conflictingOutputs = nullifiers.filter(n => n === sourceNullifier);
+    if (conflictingOutputs.length > 0) {
+      console.error('❌ OUTPUT NULLIFIER CONFLICTS WITH SOURCE NULLIFIER:', {
+        sourceNullifier: sourceNullifier.substring(0, 12) + '...',
+        conflictingOutputs: conflictingOutputs.length
+      });
+      throw new SplitValidationError(
+        `Output nullifiers cannot be the same as source nullifier. Found ${conflictingOutputs.length} conflicts.`
+      );
+    }
+    
+    console.log(`✅ Verificación de unicidad: ${nullifiers.length} nullifiers únicos generados`);
+    console.log(`✅ Verificación de conflictos: No conflicts with source nullifier`);
     return { commitments, commitmentHashes, nullifiers };
   }
 
