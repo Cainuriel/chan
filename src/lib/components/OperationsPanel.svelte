@@ -749,6 +749,7 @@
         ];
         
         dispatch('operation', { type: 'split', result });
+
       } else {
         console.error('Split failed:', result.error);
         

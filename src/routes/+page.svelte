@@ -855,6 +855,7 @@
   function handleOperationCompleted(event: CustomEvent) {
     console.log('Operation completed:', event.detail);
     refreshData();
+    setActiveTab('balance');
   }
 </script>
 
