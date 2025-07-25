@@ -72,14 +72,14 @@ export class SplitPrivateUTXO {
   ) {}
 
   /**
-   * @notice Ejecuta split de UTXO con criptografía BN254 REAL y pre-validación
+   * @notice Ejecuta split de UTXO con criptografía secp256k1 REAL y pre-validación
    */
   async executeSplit(
     splitData: SplitUTXOData,
     backendAttestationProvider: (dataHash: string) => Promise<BackendAttestation>
   ): Promise<SplitOperationResult> {
     try {
-      console.log('🔄 Iniciando split de UTXO con criptografía BN254 REAL...');
+      console.log('🔄 Iniciando split de UTXO con criptografía secp256k1 REAL...');
       console.log(`📊 Split: 1 UTXO (${splitData.sourceValue}) → ${splitData.outputValues.length} UTXOs`);
 
       // 1. Validar conservación de valor y datos criptográficos
