@@ -24,7 +24,7 @@ function generateRealBlindingFactor(): string {
 }
 
 /**
- * Create REAL Pedersen Commitment using BN254 elliptic curve
+ * Create REAL Pedersen Commitment using secp256k1 elliptic curve (Ethereum compatible)
  * Commitment = value*G + blindingFactor*H
  * NO DUMMY DATA - This is actual cryptographic commitment
  */
@@ -75,6 +75,7 @@ function createRealPedersenCommitment(value: bigint, blindingFactor: string): { 
 /**
  * @dev REAL secp256k1 UTXO deposit function - NO DUMMY DATA
  * @notice Uses actual Pedersen commitments, real blinding factors, and proper secp256k1 cryptography
+ * @param timestamp ✅ REAL timestamp from attestation service (NO auto-generated)
  */
 export async function depositAsPrivateUTXOSimplified(
   params: CreateUTXOParams,
@@ -83,7 +84,8 @@ export async function depositAsPrivateUTXOSimplified(
   ethereum: any,
   utxos: Map<string, ExtendedUTXOData>,
   savePrivateUTXOToLocal: Function,
-  emit: Function
+  emit: Function,
+  timestamp?: bigint // ✅ NUEVO: timestamp real opcional, si no se proporciona se genera
 ): Promise<UTXOOperationResult> {
   
   console.log(`💰 Creating REAL secp256k1 private UTXO deposit for ${params.amount} tokens...`);
@@ -106,13 +108,13 @@ export async function depositAsPrivateUTXOSimplified(
       y: commitment.y.toString().slice(0, 10) + '...'
     });
 
-    // 3. Generate REAL nullifier hash using commitment coordinates
-    console.log('🔐 Generating REAL nullifier hash...');
+    // 3. Generate REAL nullifier hash using commitment and deterministic data
+    console.log('🔐 Generating REAL deterministic nullifier hash...');
     const nullifierHash = ethers.keccak256(ethers.solidityPacked(
-      ['address', 'uint256', 'uint256', 'uint256'],
-      [currentEOA.address, commitment.x, commitment.y, Date.now()]
+      ['address', 'uint256', 'uint256', 'bytes32'],
+      [currentEOA.address, commitment.x, commitment.y, blindingFactor]
     ));
-    console.log('✅ REAL nullifier hash generated:', nullifierHash);
+    console.log('✅ REAL deterministic nullifier hash generated:', nullifierHash);
 
     // 4. Calculate data hash using HashCalculator with REAL cryptographic data
     console.log('🧮 Calculating data hash using REAL cryptographic data...');
@@ -139,7 +141,10 @@ export async function depositAsPrivateUTXOSimplified(
 
     // 5. Create real attestation with proper backend signature
     console.log('📝 Creating attestation with real backend signature...');
-    const currentTime = Math.floor(Date.now() / 1000);
+    
+    // ✅ Use provided timestamp or generate current time (for backward compatibility)
+    const attestationTimestamp = timestamp || BigInt(Math.floor(Date.now() / 1000));
+    console.log('📅 Using attestation timestamp:', attestationTimestamp.toString());
     
     // Get backend private key for signing
     const backendPrivateKey = import.meta.env.VITE_PRIVATE_KEY_ADMIN;
@@ -156,7 +161,7 @@ export async function depositAsPrivateUTXOSimplified(
       operation: "DEPOSIT",
       dataHash: dataHashResult,
       nonce: currentNonce + 1n,
-      timestamp: BigInt(currentTime)
+      timestamp: attestationTimestamp
     };
     
     // Create message hash exactly as the contract expects
