@@ -1,18 +1,24 @@
 /**
  * @fileoverview REAL SECP256K1 UTXO deposit function with REAL CRYPTOGRAPHY
  * @description NO DUMMY DATA - Uses actual Pedersen commitments and blinding factors with Ethereum-compatible curve
+ * 
+ * IMPORTANTE: ARQUITECTURA CRIPTOGRÁFICA
+ * =====================================
+ * Este archivo usa EXCLUSIVAMENTE secp256k1 (curva de Ethereum).
+ * Las referencias a "BN254" son solo para compatibilidad de tipos legacy.
+ * 
+ * IMPLEMENTACIÓN REAL:
+ * - Curva: secp256k1 (Ethereum compatible)
+ * - Commitments: Pedersen sobre secp256k1
+ * - Nullifiers: keccak256 determinísticos  
+ * - Signatures: ECDSA estándar de Ethereum
  */
 
 import { ethers, formatEther } from 'ethers';
 import { calculateAndValidateDepositHash, logAttestationData } from './HashCalculator';
 import type { CreateUTXOParams, UTXOOperationResult, ExtendedUTXOData } from '../types/utxo.types';
 import { UTXOType } from '../types/utxo.types';
-
-// Import elliptic for REAL secp256k1 cryptography (Ethereum compatible)
-import { ec as EC } from 'elliptic';
-
-// Initialize secp256k1 curve for REAL cryptography (compatible with Ethereum)
-const curve = new EC('secp256k1');
+import { CryptoHelpers } from '../utils/crypto.helpers';
 
 /**
  * Generate REAL cryptographically secure blinding factor for secp256k1
@@ -24,48 +30,24 @@ function generateRealBlindingFactor(): string {
 }
 
 /**
- * Create REAL Pedersen Commitment using secp256k1 elliptic curve (Ethereum compatible)
+ * Create REAL Pedersen Commitment using centralized secure crypto services
  * Commitment = value*G + blindingFactor*H
- * NO DUMMY DATA - This is actual cryptographic commitment
+ * NO DUMMY DATA - This is actual cryptographic commitment via CryptoHelpers
  */
-function createRealPedersenCommitment(value: bigint, blindingFactor: string): { x: bigint; y: bigint } {
+async function createRealPedersenCommitment(value: bigint, blindingFactor: string): Promise<{ x: bigint; y: bigint }> {
   try {
-    console.log('🔐 Creating REAL Pedersen commitment with secp256k1...');
+    console.log('🔐 Creating REAL Pedersen commitment with secp256k1 via CryptoHelpers...');
     
-    // secp256k1 generator points (standard curve parameters)
-    const G = curve.g; // Generator G
+    // ✅ Use centralized service for all cryptographic operations (NO direct curve access)
+    const commitment = await CryptoHelpers.createPedersenCommitment(value.toString(), blindingFactor);
     
-    // Create a second generator H by hashing G to get another valid point
-    // This ensures H is cryptographically independent from G
-    const hashOfG = ethers.keccak256(ethers.solidityPacked(['uint256', 'uint256'], [
-      BigInt('0x' + G.getX().toString(16)),
-      BigInt('0x' + G.getY().toString(16))
-    ]));
-    
-    // Use the hash to create a valid key pair, then get its public point as H
-    const hKey = curve.keyFromPrivate(hashOfG.slice(2), 'hex');
-    const H = hKey.getPublic();
-    
-    // Convert value and blinding factor to proper format
-    const valueScalar = curve.keyFromPrivate(value.toString(16).padStart(64, '0'), 'hex').getPrivate();
-    const blindingScalar = curve.keyFromPrivate(blindingFactor.startsWith('0x') ? blindingFactor.slice(2) : blindingFactor, 'hex').getPrivate();
-    
-    // Compute commitment: C = value*G + blindingFactor*H
-    const valueG = G.mul(valueScalar);
-    const blindingH = H.mul(blindingScalar);
-    const commitment = valueG.add(blindingH);
-    
-    // Extract coordinates
-    const x = BigInt('0x' + commitment.getX().toString(16));
-    const y = BigInt('0x' + commitment.getY().toString(16));
-    
-    console.log('✅ REAL Pedersen commitment created with secp256k1:', {
-      x: x.toString().slice(0, 10) + '...',
-      y: y.toString().slice(0, 10) + '...',
+    console.log('✅ REAL Pedersen commitment created via CryptoHelpers:', {
+      x: commitment.x.toString().slice(0, 10) + '...',
+      y: commitment.y.toString().slice(0, 10) + '...',
       cryptographyType: 'secp256k1 (Ethereum compatible)'
     });
     
-    return { x, y };
+    return { x: BigInt(commitment.x), y: BigInt(commitment.y) };
   } catch (error) {
     console.error('❌ Failed to create REAL Pedersen commitment:', error);
     throw new Error(`REAL Pedersen commitment failed: ${error}`);
@@ -101,7 +83,7 @@ export async function depositAsPrivateUTXOSimplified(
 
     // 2. Create REAL Pedersen commitment using secp256k1 elliptic curve
     console.log('🔐 Creating REAL secp256k1 Pedersen commitment...');
-    const commitment = createRealPedersenCommitment(BigInt(amount), blindingFactor);
+    const commitment = await createRealPedersenCommitment(BigInt(amount), blindingFactor);
     
     console.log('✅ REAL commitment created:', {
       x: commitment.x.toString().slice(0, 10) + '...',
@@ -142,7 +124,7 @@ export async function depositAsPrivateUTXOSimplified(
     // 5. Create real attestation with proper backend signature
     console.log('📝 Creating attestation with real backend signature...');
     
-    // ✅ Use provided timestamp or generate current time (for backward compatibility)
+    // ✅ Use provided timestamp or generate current time (for logging/metadata only - NOT crypto)
     const attestationTimestamp = timestamp || BigInt(Math.floor(Date.now() / 1000));
     console.log('📅 Using attestation timestamp:', attestationTimestamp.toString());
     
@@ -296,18 +278,18 @@ export async function depositAsPrivateUTXOSimplified(
       value: BigInt(amount),
       tokenAddress,
       owner: currentEOA.address,
-      timestamp: BigInt(Date.now()),
+      timestamp: attestationTimestamp, // ✅ Use consistent timestamp from attestation
       isSpent: false,
       commitment: JSON.stringify({ x: commitment.x.toString(), y: commitment.y.toString() }), // ✅ FIXED: Store coordinates as JSON
       parentUTXO: '',
       utxoType: UTXOType.DEPOSIT,
       blindingFactor: blindingFactor, // ✅ REAL secp256k1 blinding factor
-      localCreatedAt: Date.now(),
+      localCreatedAt: Number(attestationTimestamp) * 1000, // ✅ Convert back to milliseconds for consistency
       confirmed: true,
       creationTxHash: receipt.hash,
       blockNumber: receipt.blockNumber,
       nullifierHash: nullifierHash, // ✅ REAL nullifier hash
-      cryptographyType: 'BN254', // ✅ Using REAL secp256k1 cryptography (labeled as BN254 for compatibility)
+      cryptographyType: 'BN254', // ✅ IMPORTANT: This is actually secp256k1, labeled as BN254 for type compatibility
       notes: JSON.stringify({ // ✅ Store hash and additional metadata in notes for reference
         commitmentHash: ethers.keccak256(ethers.solidityPacked(['uint256', 'uint256'], [commitment.x, commitment.y])),
         commitmentX: commitment.x.toString(),
