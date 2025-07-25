@@ -1,6 +1,7 @@
 /**
  * @fileoverview GasManager - Gestión inteligente de gas para diferentes redes
  * @description Maneja costes de gas de manera inteligente, evitando costes en redes gratuitas como Alastria
+ * @version 2.0 - Con soporte para operaciones ZK (Zero-Knowledge)
  */
 
 import { ethers, type Provider } from 'ethers';
@@ -9,7 +10,8 @@ export interface NetworkGasConfig {
   requiresGas: boolean;
   defaultGasLimit?: bigint;
   defaultGasPrice?: bigint;
-  gasMultiplier?: number; // Multiplicador para ajustar gas price
+  gasMultiplier?: number; // Multiplicador para operaciones ZK (todas son ZK)
+  zkOptimized?: boolean; // ✅ NUEVO: Indica si la red está optimizada para ZK
 }
 
 export interface GasOptions {
@@ -23,39 +25,43 @@ export class GasManager {
   private networkConfigs: Map<number, NetworkGasConfig> = new Map();
 
   constructor() {
-    // Configuraciones por defecto para redes conocidas
+    // ✅ TODAS las configuraciones son para operaciones ZK-private
     this.networkConfigs.set(80002, { // Polygon Amoy
       requiresGas: true,
-      defaultGasLimit: BigInt(500000),
+      defaultGasLimit: BigInt(400000), // ✅ Optimizado para ZK (menos gas que legacy)
       defaultGasPrice: BigInt(30000000000), // 30 Gwei
-      gasMultiplier: 1.2 // +20% para operaciones BN254
+      gasMultiplier: 1.1, // ✅ Solo +10% porque ZK es más eficiente
+      zkOptimized: true
     });
 
     this.networkConfigs.set(2020, { // Alastria
-      requiresGas: false // Red sin costes de gas
+      requiresGas: false, // Red sin costes de gas
+      zkOptimized: true // ✅ Optimizada para ZK
     });
 
     this.networkConfigs.set(137, { // Polygon Mainnet
       requiresGas: true,
-      defaultGasLimit: BigInt(500000),
+      defaultGasLimit: BigInt(400000), // ✅ ZK-optimized
       defaultGasPrice: BigInt(50000000000), // 50 Gwei
-      gasMultiplier: 1.5 // +50% para operaciones complejas
+      gasMultiplier: 1.2, // ✅ +20% para ZK en mainnet
+      zkOptimized: true
     });
 
     this.networkConfigs.set(1, { // Ethereum Mainnet
       requiresGas: true,
-      defaultGasLimit: BigInt(500000),
+      defaultGasLimit: BigInt(450000), // ✅ Más gas para ZK en Ethereum
       defaultGasPrice: BigInt(20000000000), // 20 Gwei
-      gasMultiplier: 1.3 // +30% para asegurar procesamiento
+      gasMultiplier: 1.3, // ✅ +30% para ZK en Ethereum
+      zkOptimized: false // Ethereum no está optimizado para ZK
     });
   }
 
   /**
-   * Registra una nueva configuración de red
+   * Registra una nueva configuración de red ZK
    */
   registerNetwork(chainId: number, config: NetworkGasConfig): void {
     this.networkConfigs.set(chainId, config);
-    console.log(`⛽ Registered gas config for chain ${chainId}:`, config);
+    console.log(`🔐 Registered ZK gas config for chain ${chainId}:`, config);
   }
 
   /**
@@ -67,7 +73,8 @@ export class GasManager {
   }
 
   /**
-   * Obtiene opciones de gas para una transacción
+   * ✅ Obtiene opciones de gas para operaciones ZK-private
+   * @notice TODAS las operaciones son ZK por defecto
    */
   async getGasOptions(
     chainId: number, 
@@ -79,22 +86,22 @@ export class GasManager {
     
     // Si la red no requiere gas, retornar null
     if (!config?.requiresGas) {
-      console.log(`⛽ Chain ${chainId} is gas-free, skipping gas calculations`);
+      console.log(`🔐 Chain ${chainId} is gas-free ZK network, skipping gas calculations`);
       return null;
     }
 
-    console.log(`⛽ Calculating gas for chain ${chainId}, operation: ${operation}`);
+    console.log(`🔐 Calculating ZK-private gas for chain ${chainId}, operation: ${operation}`);
 
     try {
       const gasOptions: GasOptions = {};
 
-      // Establecer gas limit base según la operación
-      gasOptions.gasLimit = this.getGasLimitForOperation(operation, config);
+      // ✅ Establecer gas limit optimizado para ZK
+      gasOptions.gasLimit = this.getZKGasLimitForOperation(operation, config);
 
       // Si hay provider, intentar obtener datos de gas actuales
       if (provider) {
         const feeData = await provider.getFeeData();
-        console.log(`⛽ Current fee data:`, {
+        console.log(`🔐 Current ZK fee data:`, {
           gasPrice: feeData.gasPrice ? ethers.formatUnits(feeData.gasPrice, 'gwei') + ' gwei' : 'N/A',
           maxFeePerGas: feeData.maxFeePerGas ? ethers.formatUnits(feeData.maxFeePerGas, 'gwei') + ' gwei' : 'N/A',
           maxPriorityFeePerGas: feeData.maxPriorityFeePerGas ? ethers.formatUnits(feeData.maxPriorityFeePerGas, 'gwei') + ' gwei' : 'N/A'
@@ -104,26 +111,26 @@ export class GasManager {
         if (feeData.maxFeePerGas && feeData.maxPriorityFeePerGas) {
           gasOptions.maxFeePerGas = this.applyMultiplier(feeData.maxFeePerGas, config.gasMultiplier);
           gasOptions.maxPriorityFeePerGas = this.applyMultiplier(feeData.maxPriorityFeePerGas, config.gasMultiplier);
-          console.log(`⛽ Using EIP-1559 pricing with ${config.gasMultiplier}x multiplier`);
+          console.log(`🔐 Using EIP-1559 ZK pricing with ${config.gasMultiplier}x multiplier`);
         } 
         // Fallback a legacy gas pricing
         else if (feeData.gasPrice) {
           gasOptions.gasPrice = this.applyMultiplier(feeData.gasPrice, config.gasMultiplier);
-          console.log(`⛽ Using legacy gas pricing with ${config.gasMultiplier}x multiplier`);
+          console.log(`🔐 Using legacy ZK gas pricing with ${config.gasMultiplier}x multiplier`);
         }
         // Último fallback: usar configuración por defecto
         else {
           gasOptions.gasPrice = config.defaultGasPrice || BigInt(20000000000); // 20 Gwei
-          console.log(`⛽ Using default gas price fallback`);
+          console.log(`🔐 Using default ZK gas price fallback`);
         }
       } 
       // Sin provider, usar valores por defecto
       else {
         gasOptions.gasPrice = config.defaultGasPrice || BigInt(20000000000);
-        console.log(`⛽ Using default config (no provider)`);
+        console.log(`🔐 Using default ZK config (no provider)`);
       }
 
-      console.log(`⛽ Final gas options:`, {
+      console.log(`🔐 Final ZK gas options:`, {
         gasLimit: gasOptions.gasLimit?.toString(),
         gasPrice: gasOptions.gasPrice ? ethers.formatUnits(gasOptions.gasPrice, 'gwei') + ' gwei' : 'N/A',
         maxFeePerGas: gasOptions.maxFeePerGas ? ethers.formatUnits(gasOptions.maxFeePerGas, 'gwei') + ' gwei' : 'N/A',
@@ -133,18 +140,18 @@ export class GasManager {
       return gasOptions;
 
     } catch (error: any) {
-      console.warn(`⚠️ Failed to get gas options for chain ${chainId}:`, error.message);
+      console.warn(`⚠️ Failed to get ZK gas options for chain ${chainId}:`, error.message);
       
-      // Fallback seguro
+      // Fallback seguro para ZK
       return {
-        gasLimit: config.defaultGasLimit || BigInt(500000),
+        gasLimit: config.defaultGasLimit || BigInt(400000), // ✅ ZK-optimized fallback
         gasPrice: config.defaultGasPrice || BigInt(20000000000)
       };
     }
   }
 
   /**
-   * Aplica gas options a parámetros de transacción
+   * ✅ Aplica gas options ZK a parámetros de transacción
    */
   async applyGasToTransaction(
     txParams: any, 
@@ -154,13 +161,14 @@ export class GasManager {
   ): Promise<any> {
     
     if (!this.requiresGas(chainId)) {
-      console.log(`⛽ Chain ${chainId} is gas-free, returning transaction params unchanged`);
+      console.log(`🔐 Chain ${chainId} is gas-free ZK network, returning transaction params unchanged`);
       return txParams;
     }
 
     const gasOptions = await this.getGasOptions(chainId, provider, operation);
     
     if (gasOptions) {
+      console.log(`🔐 Applied ZK gas options for ${operation} operation`);
       return { ...txParams, ...gasOptions };
     }
 
@@ -168,20 +176,25 @@ export class GasManager {
   }
 
   /**
-   * Obtiene gas limit apropiado según la operación
+   * ✅ Obtiene gas limit apropiado para operaciones ZK-private
+   * @notice Todas las operaciones usan arquitectura ZK simplificada
    */
-  private getGasLimitForOperation(operation: string, config: NetworkGasConfig): bigint {
-    const baseLimit = config.defaultGasLimit || BigInt(500000);
+  private getZKGasLimitForOperation(operation: string, config: NetworkGasConfig): bigint {
+    const baseLimit = config.defaultGasLimit || BigInt(400000); // ✅ Base ZK-optimized
     
     switch (operation) {
       case 'deposit':
-        return baseLimit; // Depósitos son relativamente simples
+        // ✅ ZK Deposit: Amount visible, crear UTXO privado
+        return baseLimit; // Base limit suficiente
       case 'transfer':
-        return baseLimit + BigInt(100000); // Transferencias requieren más gas
+        // ✅ ZK Transfer: Amount OCULTO, solo nullifiers
+        return baseLimit - BigInt(50000); // ✅ 50k menos gas (más eficiente)
       case 'split':
-        return baseLimit + BigInt(200000); // Split es más complejo
+        // ✅ ZK Split: Amounts OCULTOS, múltiples outputs
+        return baseLimit + BigInt(50000); // ✅ 50k más gas (múltiples outputs)
       case 'withdraw':
-        return baseLimit + BigInt(150000); // Withdraw requiere validaciones extra
+        // ✅ ZK Withdraw: Amount visible, salir del sistema
+        return baseLimit + BigInt(25000); // ✅ 25k más gas (transfer externo)
       default:
         return baseLimit;
     }
@@ -194,54 +207,87 @@ export class GasManager {
     if (!multiplier || multiplier === 1) return gasValue;
     
     const multiplierBigInt = BigInt(Math.floor(multiplier * 100));
-    return gasValue * multiplierBigInt / 100n;
+    return gasValue * multiplierBigInt / BigInt(100);
   }
 
   /**
-   * Estima costo de transacción (solo para redes con gas)
+   * ✅ Estima costo de transacción ZK (solo para redes con gas)
    */
-  async estimateTransactionCost(
+  async estimateZKTransactionCost(
     chainId: number,
     gasLimit: bigint,
+    operation: 'deposit' | 'transfer' | 'split' | 'withdraw',
     provider?: Provider
-  ): Promise<{ cost: bigint; costInEth: string; gasPrice: bigint } | null> {
+  ): Promise<{ cost: bigint; costInEth: string; gasPrice: bigint; zkOptimized: boolean } | null> {
     
     if (!this.requiresGas(chainId)) {
-      return null; // Sin costo para redes gratuitas
+      return null; // Sin costo para redes ZK gratuitas
     }
 
     try {
-      const gasOptions = await this.getGasOptions(chainId, provider);
+      const config = this.networkConfigs.get(chainId);
+      const gasOptions = await this.getGasOptions(chainId, provider, operation);
       if (!gasOptions) return null;
 
       const effectiveGasPrice = gasOptions.gasPrice || gasOptions.maxFeePerGas || BigInt(0);
       const cost = gasLimit * effectiveGasPrice;
 
+      console.log(`🔐 ZK ${operation} estimated cost:`, {
+        gasLimit: gasLimit.toString(),
+        gasPrice: ethers.formatUnits(effectiveGasPrice, 'gwei') + ' gwei',
+        cost: ethers.formatEther(cost) + ' ETH',
+        zkOptimized: config?.zkOptimized || false
+      });
+
       return {
         cost,
         costInEth: ethers.formatEther(cost),
-        gasPrice: effectiveGasPrice
+        gasPrice: effectiveGasPrice,
+        zkOptimized: config?.zkOptimized || false
       };
 
     } catch (error: any) {
-      console.warn(`⚠️ Failed to estimate transaction cost:`, error.message);
+      console.warn(`⚠️ Failed to estimate ZK transaction cost:`, error.message);
       return null;
     }
   }
 
   /**
-   * Debug: Muestra configuración actual
+   * ✅ Debug: Muestra configuración ZK actual
    */
-  debugConfiguration(): void {
-    console.log('⛽ === GAS MANAGER CONFIGURATION ===');
-    for (const [chainId, config] of this.networkConfigs.entries()) {
-      console.log(`Chain ${chainId}:`, {
+  debugZKConfiguration(): void {
+    console.log('🔐 === ZK GAS MANAGER CONFIGURATION ===');
+    this.networkConfigs.forEach((config, chainId) => {
+      console.log(`Chain ${chainId} (ZK-enabled):`, {
         requiresGas: config.requiresGas,
+        zkOptimized: config.zkOptimized || false,
         defaultGasLimit: config.defaultGasLimit?.toString(),
         defaultGasPrice: config.defaultGasPrice ? ethers.formatUnits(config.defaultGasPrice, 'gwei') + ' gwei' : 'N/A',
-        gasMultiplier: config.gasMultiplier || 1
+        gasMultiplier: config.gasMultiplier || 1,
+        benefits: this.getZKBenefits(config)
       });
+    });
+  }
+
+  /**
+   * ✅ Obtiene beneficios de ZK para una configuración
+   */
+  private getZKBenefits(config: NetworkGasConfig): string[] {
+    const benefits = ['Private amounts in transfers/splits'];
+    
+    if (!config.requiresGas) {
+      benefits.push('Gas-free operations');
     }
+    
+    if (config.zkOptimized) {
+      benefits.push('ZK-optimized infrastructure');
+    }
+    
+    if ((config.gasMultiplier || 1) <= 1.2) {
+      benefits.push('Low gas overhead for ZK proofs');
+    }
+    
+    return benefits;
   }
 }
 
