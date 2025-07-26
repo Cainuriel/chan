@@ -591,11 +591,20 @@
       console.log('🔄 Starting refreshData...');
       console.log('🔄 Current account:', currentAccount.address);
       
-      // Sync with blockchain and localStorage
+      // ✅ NUEVO: Sincronizar múltiples veces para garantizar consistencia
+      console.log('🔄 First sync with blockchain...');
       const syncSuccess = await privateUTXOManager.syncWithBlockchain();
-      console.log('🔄 Sync result:', syncSuccess);
+      console.log('🔄 First sync result:', syncSuccess);
+      
+      // ✅ NUEVO: Pequeño delay y segunda sincronización para withdraws
+      await new Promise(resolve => setTimeout(resolve, 200));
+      
+      console.log('🔄 Second sync to ensure withdraw state is updated...');
+      await privateUTXOManager.syncWithBlockchain();
       
       // Get private UTXOs (from localStorage)
+      console.log('🔄 Getting updated UTXOs from manager...');
+      
       // BALANCE: Solo UTXOs disponibles (no gastados)
       console.log('🔄 Calling getPrivateUTXOsByOwner for available UTXOs...');
       const fetchedAvailableUTXOs = privateUTXOManager.getPrivateUTXOsByOwner(currentAccount.address)
@@ -616,10 +625,9 @@
             : 'secp256k1' as const
         }));
       
-      // Para el Balance tab, usar solo disponibles
-      availableUTXOs = fetchedAvailableUTXOs;
-      // Para el History tab, usar todos
-      privateUTXOs = allUTXOs; // Cambiado para incluir gastados en History
+      // ✅ NUEVO: Forzar actualización de arrays para trigger Svelte reactivity
+      availableUTXOs = [...fetchedAvailableUTXOs];
+      privateUTXOs = [...allUTXOs];
       
       console.log('🔒 Private UTXOs after refresh:', {
         total: allUTXOs.length,
@@ -642,6 +650,9 @@
       
       // Get stats - SOLO estadísticas, no configuración
       stats = privateUTXOManager.getUTXOStats();
+      
+      // ✅ NUEVO: Forzar actualización de stats también
+      stats = { ...stats };
       
       console.log('📊 Data refreshed successfully:', {
         totalPrivateUTXOs: allUTXOs.length,
