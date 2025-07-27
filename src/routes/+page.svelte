@@ -153,10 +153,52 @@
       refreshData();
     });
 
-    privateUTXOManager.on('private:utxo:withdrawn', (utxoId: string) => {
+    privateUTXOManager.on('private:utxo:withdrawn', async (utxoId: string) => {
       console.log('💸 Private UTXO withdrawn:', utxoId);
       addNotification('success', 'Private UTXO withdrawn successfully');
-      refreshData();
+      
+      // ✅ NUEVO: Actualización específica para withdraw
+      console.log('🔄 Handling withdraw update - forcing immediate refresh...');
+      
+      // 1. Pequeño delay para permitir que el localStorage se actualice
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      // 2. Encontrar el UTXO específico y forzar actualización
+      const withdrawnUTXOIndex = availableUTXOs.findIndex(utxo => utxo.id === utxoId);
+      const withdrawnUTXOHistoryIndex = privateUTXOs.findIndex(utxo => utxo.id === utxoId);
+      
+      if (withdrawnUTXOIndex !== -1) {
+        // Remover de available UTXOs inmediatamente
+        console.log('🗑️ Removing withdrawn UTXO from available list');
+        availableUTXOs = availableUTXOs.filter(utxo => utxo.id !== utxoId);
+      }
+      
+      if (withdrawnUTXOHistoryIndex !== -1) {
+        // Actualizar en history para mostrar como spent
+        console.log('🔄 Marking UTXO as spent in history');
+        privateUTXOs[withdrawnUTXOHistoryIndex].isSpent = true;
+        privateUTXOs = [...privateUTXOs]; // Force reactivity
+      }
+      
+      // 3. Ejecutar refreshData para sincronizar con el estado actual
+      await refreshData();
+      
+      // 4. Verificar que la actualización fue exitosa
+      const stillAvailable = availableUTXOs.some(utxo => utxo.id === utxoId);
+      const markedAsSpent = privateUTXOs.find(utxo => utxo.id === utxoId)?.isSpent;
+      
+      console.log('✅ Withdraw update verification:', {
+        utxoId: utxoId.slice(0, 8) + '...',
+        stillInAvailableList: stillAvailable,
+        markedAsSpentInHistory: markedAsSpent,
+        totalAvailable: availableUTXOs.length,
+        totalInHistory: privateUTXOs.length
+      });
+      
+      if (stillAvailable) {
+        console.warn('⚠️ UTXO still appears in available list after withdraw - forcing manual removal');
+        availableUTXOs = availableUTXOs.filter(utxo => utxo.id !== utxoId);
+      }
     });
 
     // Blockchain events
@@ -591,13 +633,22 @@
       console.log('🔄 Starting refreshData...');
       console.log('🔄 Current account:', currentAccount.address);
       
+      // ✅ NUEVO: Limpiar arrays antes de recargar para forzar detección de cambios
+      console.log('🧹 Clearing existing data arrays to force refresh...');
+      const previousAvailableCount = availableUTXOs.length;
+      const previousTotalCount = privateUTXOs.length;
+      
+      // Limpiar arrays completamente para forzar re-render
+      availableUTXOs = [];
+      privateUTXOs = [];
+      
       // ✅ NUEVO: Sincronizar múltiples veces para garantizar consistencia
       console.log('🔄 First sync with blockchain...');
       const syncSuccess = await privateUTXOManager.syncWithBlockchain();
       console.log('🔄 First sync result:', syncSuccess);
       
       // ✅ NUEVO: Pequeño delay y segunda sincronización para withdraws
-      await new Promise(resolve => setTimeout(resolve, 200));
+      await new Promise(resolve => setTimeout(resolve, 300)); // Aumentado a 300ms
       
       console.log('🔄 Second sync to ensure withdraw state is updated...');
       await privateUTXOManager.syncWithBlockchain();
@@ -625,9 +676,20 @@
             : 'secp256k1' as const
         }));
       
-      // ✅ NUEVO: Forzar actualización de arrays para trigger Svelte reactivity
+      // ✅ NUEVO: Siempre crear nuevos arrays para garantizar detección de cambios
       availableUTXOs = [...fetchedAvailableUTXOs];
       privateUTXOs = [...allUTXOs];
+      
+      console.log('🔄 Data refresh comparison:', {
+        previousAvailable: previousAvailableCount,
+        newAvailable: availableUTXOs.length,
+        availableChanged: previousAvailableCount !== availableUTXOs.length,
+        previousTotal: previousTotalCount,
+        newTotal: privateUTXOs.length,
+        totalChanged: previousTotalCount !== privateUTXOs.length,
+        spentUTXOs: allUTXOs.filter(u => u.isSpent).length,
+        unspentUTXOs: allUTXOs.filter(u => !u.isSpent).length
+      });
       
       console.log('🔒 Private UTXOs after refresh:', {
         total: allUTXOs.length,
@@ -865,7 +927,23 @@
   
   function handleOperationCompleted(event: CustomEvent) {
     console.log('Operation completed:', event.detail);
-    refreshData();
+    
+    // ✅ NUEVO: Agregar delay para permitir que el estado se propague especialmente para withdraw
+    setTimeout(async () => {
+      await refreshData();
+      
+      // ✅ NUEVO: Forzar re-render adicional para operaciones críticas
+      availableUTXOs = [...availableUTXOs]; // Force reactivity
+      privateUTXOs = [...privateUTXOs]; // Force reactivity
+      
+      console.log('🔄 Forced UI update after operation:', {
+        operationType: event.detail?.type || 'unknown',
+        availableUTXOs: availableUTXOs.length,
+        privateUTXOs: privateUTXOs.length,
+        spentUTXOs: privateUTXOs.filter(u => u.isSpent).length
+      });
+    }, 100); // 100ms delay
+    
     setActiveTab('balance');
   }
 </script>
