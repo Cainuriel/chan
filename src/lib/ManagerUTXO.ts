@@ -737,16 +737,155 @@ export class ZKPrivateUTXOManager extends EventEmitter {
 
       console.log('✅ Transfer executed successfully on-chain');
 
-      // 7. ✅ Update source UTXO state and increment counter
-      const updatedSourceUTXO: PrivateUTXO = {
-        ...sourceUTXO,
-        isSpent: true
-      };
-
-      this.privateUTXOs.set(sourceUTXOId, updatedSourceUTXO);
-      this.secp256k1OperationCount++;
-
-      console.log('✅ Source UTXO marked as spent');
+      // 7. ✅ ONLY proceed if transaction was confirmed (following split pattern)
+      if (result.success && result.createdUTXOIds && result.createdUTXOIds.length > 0) {
+        console.log('✅ Transfer transaction confirmed, processing UTXOs...');
+        const newUTXOId = result.createdUTXOIds[0];
+        
+        // 8. ✅ Mark source UTXO as spent following split pattern
+        console.log('🔄 Marking source UTXO as spent...');
+        console.log('📦 Original source UTXO state:', {
+          id: sourceUTXO.id,
+          isSpent: sourceUTXO.isSpent,
+          owner: sourceUTXO.owner,
+          value: sourceUTXO.value.toString()
+        });
+        
+        sourceUTXO.isSpent = true;
+        
+        // Update internal collection
+        this.privateUTXOs.set(sourceUTXOId, sourceUTXO);
+        
+        // Update localStorage for current user
+        const { PrivateUTXOStorage } = await import('./PrivateUTXOStorage');
+        await PrivateUTXOStorage.savePrivateUTXO(this.currentAccount.address, sourceUTXO);
+        
+        console.log('✅ Source UTXO marked as spent and saved:', {
+          id: sourceUTXO.id,
+          isSpent: sourceUTXO.isSpent,
+          owner: sourceUTXO.owner
+        });
+        
+        // 9. ✅ Create new UTXO for recipient following split pattern
+        console.log('🔄 Creating new UTXO for recipient...');
+        
+        // Get the real cryptographic data from the transfer service result
+        const newUTXO: PrivateUTXO = {
+          id: newUTXOId,
+          exists: true,
+          value: actualTransferAmount,
+          tokenAddress: sourceUTXO.tokenAddress,
+          owner: recipientAddress, // ✅ NEW OWNER from transfer
+          timestamp: BigInt(Math.floor(Date.now() / 1000)),
+          isSpent: false,
+          commitment: JSON.stringify({ 
+            x: transferData.outputCommitment.x.toString(), 
+            y: transferData.outputCommitment.y.toString() 
+          }),
+          parentUTXO: sourceUTXOId,
+          utxoType: UTXOType.TRANSFER,
+          blindingFactor: transferData.outputBlindingFactor,
+          localCreatedAt: Date.now(),
+          confirmed: true, // ✅ Only true because transaction was confirmed
+          creationTxHash: result.transactionHash || '',
+          blockNumber: result.blockNumber || 0,
+          nullifierHash: transferData.outputNullifier,
+          cryptographyType: 'secp256k1' as const,
+          isPrivate: true as const,
+          notes: JSON.stringify({
+            transferredFrom: sourceUTXOId,
+            originalOwner: this.currentAccount.address,
+            cryptographyType: 'secp256k1',
+            transferReason: 'Private UTXO transfer'
+          })
+        };
+        
+        // 10. ✅ Save new UTXO for recipient following split pattern
+        console.log(`💾 Saving new UTXO for recipient: ${recipientAddress}`);
+        console.log(`🔐 New UTXO crypto data verification:`, {
+          utxoId: newUTXO.id,
+          hasRealCommitment: newUTXO.commitment !== '{"x":"0","y":"0"}',
+          hasRealNullifier: !!newUTXO.nullifierHash && newUTXO.nullifierHash !== '',
+          owner: newUTXO.owner,
+          value: newUTXO.value.toString()
+        });
+        
+        // ✅ VERIFICACIÓN CRÍTICA: Validar que los datos criptográficos son reales
+        if (newUTXO.commitment === '{"x":"0","y":"0"}') {
+          throw new UTXOOperationError(
+            `CRITICAL ERROR: UTXO ${newUTXO.id} has dummy commitment data - this is forbidden!`,
+            'transferPrivateUTXOSimple'
+          );
+        }
+        
+        if (!newUTXO.nullifierHash || newUTXO.nullifierHash === '') {
+          throw new UTXOOperationError(
+            `CRITICAL ERROR: UTXO ${newUTXO.id} has empty nullifier - this is forbidden!`,
+            'transferPrivateUTXOSimple'
+          );
+        }
+        
+        // ✅ SIEMPRE guardar el UTXO en localStorage asociado al PROPIETARIO CORRECTO
+        try {
+          await PrivateUTXOStorage.savePrivateUTXO(recipientAddress, newUTXO);
+          console.log(`✅ Transfer UTXO saved for recipient: ${recipientAddress}`);
+          
+          // ✅ VERIFICACIÓN: Confirmar que se guardó correctamente
+          const savedUTXOs = await PrivateUTXOStorage.getPrivateUTXOs(recipientAddress);
+          const savedUTXO = savedUTXOs.find(u => u.id === newUTXO.id);
+          
+          if (savedUTXO) {
+            console.log(`✅ VERIFIED: UTXO ${newUTXO.id} successfully saved and retrievable from localStorage`);
+            console.log(`📋 Saved UTXO details:`, {
+              id: savedUTXO.id,
+              owner: savedUTXO.owner,
+              value: savedUTXO.value.toString(),
+              isSpent: savedUTXO.isSpent,
+              hasRealNullifier: !!savedUTXO.nullifierHash && savedUTXO.nullifierHash !== '',
+              hasRealCommitment: savedUTXO.commitment !== '{"x":"0","y":"0"}'
+            });
+          } else {
+            console.error(`❌ VERIFICATION FAILED: UTXO ${newUTXO.id} was not saved properly to localStorage!`);
+            throw new UTXOOperationError(
+              `Failed to save UTXO ${newUTXO.id} to localStorage`,
+              'transferPrivateUTXOSimple'
+            );
+          }
+        } catch (saveError) {
+          console.error(`❌ Failed to save UTXO ${newUTXO.id} for recipient ${recipientAddress}:`, saveError);
+          throw new UTXOOperationError(
+            `Failed to save UTXO ${newUTXO.id}: ${saveError}`,
+            'transferPrivateUTXOSimple'
+          );
+        }
+        
+        this.secp256k1OperationCount++; // ✅ INCREMENT secp256k1 operations
+        
+        // Emit events following split pattern
+        this.emit('private:utxo:spent', sourceUTXOId);
+        this.emit('private:utxo:transfer', { 
+          input: sourceUTXOId, 
+          output: newUTXOId,
+          fromAddress: this.currentAccount.address,
+          toAddress: recipientAddress,
+          amount: actualTransferAmount.toString(),
+          transactionHash: result.transactionHash
+        });
+        
+        // ✅ Emit refresh event to update UI
+        this.emit('utxos:updated');
+        this.emit('private:utxos:changed');
+        
+        console.log('🎉 REAL secp256k1 ZK transfer operation completed successfully with confirmed storage');
+        console.log('📊 Final transfer summary:', {
+          inputUTXOSpent: sourceUTXO.isSpent,
+          outputUTXOCreated: newUTXOId,
+          recipientAddress: recipientAddress.slice(0, 8) + '...',
+          totalAvailableUTXOs: this.getPrivateUTXOs().length
+        });
+      } else {
+        console.error('❌ Transfer failed or no UTXOs were created');
+      }
 
       // 8. ✅ Convert result to UTXOOperationResult format (already is UTXOOperationResult)
       const convertedResult: UTXOOperationResult = {

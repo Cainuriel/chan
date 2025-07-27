@@ -192,7 +192,30 @@ export class TransferPrivateUTXO {
       const attestation = await backendAttestationProvider(dataHash);
       console.log('✅ Backend attestation created');
       
-      // 8. Execute transfer on contract
+      // 8. ✅ PRE-VALIDATE transfer using contract preValidateTransfer (following split pattern)
+      console.log('🔍 Pre-validating transfer with contract preValidateTransfer...');
+      try {
+        const [isValid, errorCode] = await this.contract.preValidateTransfer(
+          transferData.sourceNullifier,
+          newNullifier
+        );
+        
+        if (!isValid) {
+          const errorCodes = {
+            1: 'Invalid nullifiers',
+            2: 'Input already spent',
+            3: 'Output nullifier collision'
+          };
+          throw new Error(`❌ Pre-validation failed: ${errorCodes[errorCode as keyof typeof errorCodes] || 'Unknown error'}`);
+        }
+        
+        console.log('✅ Transfer pre-validation passed');
+      } catch (preValidationError) {
+        console.error('❌ Transfer pre-validation failed:', preValidationError);
+        throw new Error(`Transfer pre-validation failed: ${preValidationError}`);
+      }
+      
+      // 9. Execute transfer on contract
       console.log('⛓️ Executing transfer on smart contract...');
       
       // ✅ CORRECTED: Use transferPrivateUTXO with ZKTransferParams structure
