@@ -32,18 +32,26 @@
     isConnecting = true;
 
     try {
+      // Si no estamos inicializados, dispatch para que el padre maneje el flujo controlado
       if (!isInitialized) {
-        dispatch('initialize');
+        dispatch('needsFullSetup');
+        return;
+      }
+      
+      // Si ya estamos inicializados, intentar reconectar directamente
+      console.log('🔌 Attempting reconnection from header button...');
+      const result = await utxoManager.connectWallet(WalletProviderType.METAMASK);
+      
+      if (result) {
+        console.log('✅ Reconnection successful');
+        dispatch('reconnected');
       } else {
-        const result = await utxoManager.connectWallet(WalletProviderType.METAMASK);
-        if (!result) {
-          console.error('Connection failed');
-          alert('Error de conexión: No se pudo conectar con MetaMask.');
-        }
+        console.error('❌ Reconnection failed');
+        throw new Error('Failed to reconnect wallet');
       }
     } catch (error) {
       console.error('Connection error:', error);
-      alert('Error inesperado al conectar con MetaMask. Por favor recarga la página e intenta de nuevo.');
+      alert('Error al conectar con MetaMask. Por favor recarga la página e intenta de nuevo.');
     } finally {
       isConnecting = false;
     }
@@ -53,7 +61,9 @@
     isDisconnecting = true;
 
     try {
+      console.log('🔌 Disconnecting wallet from header...');
       await utxoManager.disconnect();
+      dispatch('disconnected');
     } catch (error) {
       console.error('Disconnection error:', error);
     } finally {

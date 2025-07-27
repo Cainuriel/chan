@@ -220,27 +220,32 @@
       
       currentAccount = account;
       
-      // NO setear isInitialized aquí - solo cuando se complete el flujo completo
-      // isInitialized solo debe ser true después de initializeLibrary()
+      // Si estamos en step 4 (ya inicializados), esta es una reconexión
+      if (currentStep === 4) {
+        console.log('✅ Wallet reconnected in initialized system');
+        isWalletConnected = true;
+        addNotification('success', `Wallet reconnected: ${account.address.slice(0, 6)}...${account.address.slice(-4)}`);
+        // Refrescar datos ya que estamos completamente inicializados
+        refreshData();
+        return;
+      }
       
-      addNotification('success', `Wallet connected: ${account.address.slice(0, 6)}...${account.address.slice(-4)}`);
-      
-      // Si estamos en el flujo controlado, avanzar al siguiente paso
+      // Si estamos en el flujo controlado inicial (step 1), avanzar normalmente
       if (currentStep === 1) {
         isWalletConnected = true;
         currentStep = 2;
         console.log('✅ Step 1 complete: Advancing to network selection');
         console.log('🔍 Updated - currentStep:', currentStep, 'isWalletConnected:', isWalletConnected);
         
+        addNotification('success', `Wallet connected: ${account.address.slice(0, 6)}...${account.address.slice(-4)}`);
+        addNotification('info', '🎯 Step 2: Please select a network to continue');
+        
         // Forzar re-render de Svelte
         currentStep = currentStep; // Force reactivity
-        
-        // Mostrar notificación de progreso
-        addNotification('info', '🎯 Step 2: Please select a network to continue');
       }
       
       // Solo refrescar datos si ya estamos completamente inicializados
-      if (isInitialized && isLibraryInitialized) {
+      if (isInitialized && isLibraryInitialized && currentStep === 4) {
         refreshData();
       }
     });
@@ -248,15 +253,28 @@
     privateUTXOManager.on('wallet:disconnected', () => {
       console.log('🔌 Wallet disconnected');
       currentAccount = null;
-      isInitialized = false;
-      isWalletConnected = false;
-      isNetworkSelected = false;
-      isLibraryInitialized = false;
-      currentStep = 1;
+      
+      // Si estábamos completamente inicializados, permitir reconexión rápida
+      if (currentStep === 4 && isInitialized) {
+        console.log('🔄 Wallet disconnected but system was initialized - allowing quick reconnection');
+        addNotification('warning', 'Wallet disconnected - Click the Connect button to reconnect');
+        // Mantener currentStep en 4 para permitir reconexión desde el header
+        // Solo resetear el estado de conexión de wallet
+        isWalletConnected = false;
+      } else {
+        // Si no estábamos completamente inicializados, resetear todo
+        console.log('🔄 Wallet disconnected during setup - resetting full flow');
+        isInitialized = false;
+        isWalletConnected = false;
+        isNetworkSelected = false;
+        isLibraryInitialized = false;
+        currentStep = 1;
+        addNotification('info', 'Wallet disconnected - Please restart the setup process');
+      }
+      
       privateUTXOs = [];
       availableUTXOs = [];
       stats = null;
-      addNotification('info', 'Wallet disconnected - Please restart the setup process');
     });
   }
 
@@ -438,6 +456,29 @@
     }
     
     return txParams;
+  }
+
+  // ========================
+  // WALLET CONNECTION HANDLERS (for header button)
+  // ========================
+
+  function handleNeedsFullSetup() {
+    console.log('🔄 Header button clicked but full setup needed - redirecting to flow');
+    addNotification('info', 'Please complete the setup process first');
+    // Si el usuario hace clic en conectar pero no hemos completado el setup, reiniciar flujo
+    resetFlow();
+  }
+
+  function handleWalletReconnected() {
+    console.log('✅ Wallet reconnected from header button');
+    addNotification('success', 'Wallet reconnected successfully');
+    // No necesitamos hacer nada más, el evento 'wallet:connected' se disparará automáticamente
+  }
+
+  function handleWalletDisconnected() {
+    console.log('🔌 Wallet disconnected from header button');
+    addNotification('info', 'Wallet disconnected');
+    // El evento 'wallet:disconnected' se disparará automáticamente y reseteará el estado
   }
 
   // ========================
@@ -1033,74 +1074,6 @@
                 </span>
               </div>
               
-              <!-- Debug Tools - Commented for production, uncomment for development -->
-              <!--
-              {#if currentAccount}
-                <button
-                  on:click={clearAllLocalData}
-                  class="flex items-center space-x-2 px-3 py-2 rounded-lg bg-red-600/20 text-red-300 hover:bg-red-600/30 transition-all duration-200"
-                  title="⚠️ Clear all local UTXO data"
-                >
-                  <span>🗑️</span>
-                  <span class="text-sm">Clear Data</span>
-                </button>
-                
-                <button
-                  on:click={verifyUTXOAuthenticity}
-                  class="flex items-center space-x-2 px-3 py-2 rounded-lg bg-orange-600/20 text-orange-300 hover:bg-orange-600/30 transition-all duration-200"
-                  title="Verify UTXO authenticity on blockchain"
-                >
-                  <span>🔍</span>
-                  <span class="text-sm">Verify UTXOs</span>
-                </button>
-                
-                <button
-                  on:click={loadAllUserUTXOs}
-                  class="flex items-center space-x-2 px-3 py-2 rounded-lg bg-blue-600/20 text-blue-300 hover:bg-blue-600/30 transition-all duration-200"
-                  title="Load all UTXOs (owned + received)"
-                >
-                  <span>📁</span>
-                  <span class="text-sm">Load All UTXOs</span>
-                </button>
-                
-                <button
-                  on:click={debugMultiAccountStorage}
-                  class="flex items-center space-x-2 px-3 py-2 rounded-lg bg-purple-600/20 text-purple-300 hover:bg-purple-600/30 transition-all duration-200"
-                  title="Debug multi-account storage system"
-                >
-                  <span>🐛</span>
-                  <span class="text-sm">Debug Storage</span>
-                </button>
-                
-                <button
-                  on:click={testContractDebug}
-                  class="flex items-center space-x-2 px-3 py-2 rounded-lg bg-yellow-600/20 text-yellow-300 hover:bg-yellow-600/30 transition-all duration-200"
-                  title="Test contract interaction"
-                >
-                  <span>⚗️</span>
-                  <span class="text-sm">Test Contract</span>
-                </button>
-                
-                <button
-                  on:click={testRPCEndpoints}
-                  class="flex items-center space-x-2 px-3 py-2 rounded-lg bg-indigo-600/20 text-indigo-300 hover:bg-indigo-600/30 transition-all duration-200"
-                  title="Test RPC endpoints for network issues"
-                >
-                  <span>🌐</span>
-                  <span class="text-sm">RPC Test</span>
-                </button>
-                
-                <button
-                  on:click={showNetworkInfo}
-                  class="flex items-center space-x-2 px-3 py-2 rounded-lg bg-teal-600/20 text-teal-300 hover:bg-teal-600/30 transition-all duration-200"
-                  title="Show network and contract information"
-                >
-                  <span>ℹ️</span>
-                  <span class="text-sm">Network Info</span>
-                </button>
-              {/if}
-              -->
-              
               <!-- Connection Status -->
               <div class="flex items-center space-x-2 text-green-400">
                 <div class="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
@@ -1109,12 +1082,18 @@
             </div>
           {/if}
           
-          <!-- Wallet Connection Component -->
-          <WalletConnection
-            utxoManager={privateUTXOManager}
-            {currentAccount}
-            {isInitialized}
-          />
+          <!-- Wallet Connection Component - Solo visible cuando sea necesario -->
+          {#if currentStep === 4}
+            <WalletConnection
+              utxoManager={privateUTXOManager}
+              {currentAccount}
+              {isInitialized}
+              on:needsFullSetup={handleNeedsFullSetup}
+              on:reconnected={handleWalletReconnected}
+              on:disconnected={handleWalletDisconnected}
+              on:refresh={refreshData}
+            />
+          {/if}
         </div>
       </div>
     </div>
@@ -1294,48 +1273,48 @@
                 {#if isLibraryInitialized}
                   <div class="mt-4">
                     <button
-                      on:click={runMigrationTest}
-                      class="bg-gradient-to-r from-green-600 to-teal-600 text-white px-6 py-3 rounded-lg font-semibold hover:from-green-700 hover:to-teal-700 transition-all duration-200 shadow-lg hover:shadow-xl"
+                      disabled
+                      class="bg-gray-600 text-gray-400 px-6 py-3 rounded-lg font-semibold cursor-not-allowed opacity-50"
                     >
-                      🧪 Test Migration
+                      🧪 Test Migration (Disabled)
                     </button>
-                    <p class="text-gray-400 text-sm mt-2">Test the new ethers.js + elliptic crypto system</p>
+                    <p class="text-gray-500 text-sm mt-2">Test the new ethers.js + elliptic crypto system (coming soon)</p>
                   </div>
                   
                   <!-- UTXO Recovery Buttons -->
-                  <div class="mt-6 p-4 bg-gray-800 rounded-lg border border-gray-700">
-                    <h4 class="text-lg font-semibold text-white mb-3">🔍 UTXO Recovery & Audit</h4>
-                    <p class="text-gray-400 text-sm mb-4">
-                      If your deposit was successful but UTXOs are missing from your balance, use these tools to recover them.
+                  <div class="mt-6 p-4 bg-gray-800 rounded-lg border border-gray-700 opacity-50">
+                    <h4 class="text-lg font-semibold text-gray-400 mb-3">🔍 UTXO Recovery & Audit (Disabled)</h4>
+                    <p class="text-gray-500 text-sm mb-4">
+                      Recovery tools are temporarily disabled and will be available in future versions.
                     </p>
                     
                     <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
                       <button
-                        on:click={scanForLostUTXOs}
-                        class="bg-gradient-to-r from-blue-600 to-cyan-600 text-white px-4 py-2 rounded-lg font-medium hover:from-blue-700 hover:to-cyan-700 transition-all duration-200 shadow-md hover:shadow-lg text-sm"
+                        disabled
+                        class="bg-gray-600 text-gray-400 px-4 py-2 rounded-lg font-medium cursor-not-allowed text-sm"
                       >
-                        🔍 Scan & Recover
+                        🔍 Scan & Recover (Disabled)
                       </button>
                       
                       <button
-                        on:click={auditUTXOConsistency}
-                        class="bg-gradient-to-r from-yellow-600 to-orange-600 text-white px-4 py-2 rounded-lg font-medium hover:from-yellow-700 hover:to-orange-700 transition-all duration-200 shadow-md hover:shadow-lg text-sm"
+                        disabled
+                        class="bg-gray-600 text-gray-400 px-4 py-2 rounded-lg font-medium cursor-not-allowed text-sm"
                       >
-                        🔍 Audit Consistency
+                        🔍 Audit Consistency (Disabled)
                       </button>
                       
                       <button
-                        on:click={getRecoveryStats}
-                        class="bg-gradient-to-r from-purple-600 to-pink-600 text-white px-4 py-2 rounded-lg font-medium hover:from-purple-700 hover:to-pink-700 transition-all duration-200 shadow-md hover:shadow-lg text-sm"
+                        disabled
+                        class="bg-gray-600 text-gray-400 px-4 py-2 rounded-lg font-medium cursor-not-allowed text-sm"
                       >
-                        📊 Recovery Stats
+                        📊 Recovery Stats (Disabled)
                       </button>
                     </div>
                     
-                    <div class="mt-3 text-xs text-gray-500">
-                      <p><strong>Scan & Recover:</strong> Find UTXOs on blockchain missing from localStorage</p>
-                      <p><strong>Audit Consistency:</strong> Check for discrepancies between local and blockchain data</p>
-                      <p><strong>Recovery Stats:</strong> View statistics about your recoverable vs unusable UTXOs</p>
+                    <div class="mt-3 text-xs text-gray-600">
+                      <p><strong>Scan & Recover:</strong> Find UTXOs on blockchain missing from localStorage (coming soon)</p>
+                      <p><strong>Audit Consistency:</strong> Check for discrepancies between local and blockchain data (coming soon)</p>
+                      <p><strong>Recovery Stats:</strong> View statistics about your recoverable vs unusable UTXOs (coming soon)</p>
                     </div>
                   </div>
                 {/if}
@@ -1474,54 +1453,55 @@
               <div class="mb-8 text-center">
                 <button
                   on:click={runMigrationTest}
-                  class="bg-gradient-to-r from-green-600 to-teal-600 text-white px-8 py-4 rounded-lg font-semibold hover:from-green-700 hover:to-teal-700 transition-all duration-200 shadow-lg hover:shadow-xl text-lg"
+                  disabled
+                  class="bg-gray-600 text-gray-400 px-8 py-4 rounded-lg font-semibold cursor-not-allowed text-lg opacity-50"
                 >
-                  🧪 Test Migration
+                  🧪 Test Migration (Disabled)
                 </button>
-                <p class="text-gray-400 text-sm mt-2">Test the new ethers.js + elliptic crypto system</p>
+                <p class="text-gray-500 text-sm mt-2">Test the new ethers.js + elliptic crypto system (coming soon)</p>
               </div>
 
               <!-- Recovery Tools -->
               <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                <div class="bg-white/5 rounded-lg p-6 border border-white/10">
+                <div class="bg-white/5 rounded-lg p-6 border border-white/10 opacity-50">
                   <div class="text-center mb-4">
                     <div class="text-4xl mb-2">🔍</div>
-                    <h4 class="text-lg font-semibold text-white">Scan & Recover</h4>
-                    <p class="text-gray-400 text-sm">Find UTXOs on blockchain missing from localStorage</p>
+                    <h4 class="text-lg font-semibold text-gray-400">Scan & Recover</h4>
+                    <p class="text-gray-500 text-sm">Find UTXOs on blockchain missing from localStorage</p>
                   </div>
                   <button
-                    on:click={scanForLostUTXOs}
-                    class="w-full bg-gradient-to-r from-blue-600 to-cyan-600 text-white px-4 py-3 rounded-lg font-medium hover:from-blue-700 hover:to-cyan-700 transition-all duration-200 shadow-md hover:shadow-lg"
+                    disabled
+                    class="w-full bg-gray-600 text-gray-400 px-4 py-3 rounded-lg font-medium cursor-not-allowed"
                   >
-                    🔍 Scan & Recover
+                    🔍 Scan & Recover (Disabled)
                   </button>
                 </div>
 
-                <div class="bg-white/5 rounded-lg p-6 border border-white/10">
+                <div class="bg-white/5 rounded-lg p-6 border border-white/10 opacity-50">
                   <div class="text-center mb-4">
                     <div class="text-4xl mb-2">🔍</div>
-                    <h4 class="text-lg font-semibold text-white">Audit Consistency</h4>
-                    <p class="text-gray-400 text-sm">Check for discrepancies between local and blockchain data</p>
+                    <h4 class="text-lg font-semibold text-gray-400">Audit Consistency</h4>
+                    <p class="text-gray-500 text-sm">Check for discrepancies between local and blockchain data</p>
                   </div>
                   <button
-                    on:click={auditUTXOConsistency}
-                    class="w-full bg-gradient-to-r from-yellow-600 to-orange-600 text-white px-4 py-3 rounded-lg font-medium hover:from-yellow-700 hover:to-orange-700 transition-all duration-200 shadow-md hover:shadow-lg"
+                    disabled
+                    class="w-full bg-gray-600 text-gray-400 px-4 py-3 rounded-lg font-medium cursor-not-allowed"
                   >
-                    🔍 Audit Consistency
+                    🔍 Audit Consistency (Disabled)
                   </button>
                 </div>
 
-                <div class="bg-white/5 rounded-lg p-6 border border-white/10">
+                <div class="bg-white/5 rounded-lg p-6 border border-white/10 opacity-50">
                   <div class="text-center mb-4">
                     <div class="text-4xl mb-2">📊</div>
-                    <h4 class="text-lg font-semibold text-white">Recovery Stats</h4>
-                    <p class="text-gray-400 text-sm">View statistics about your recoverable vs unusable UTXOs</p>
+                    <h4 class="text-lg font-semibold text-gray-400">Recovery Stats</h4>
+                    <p class="text-gray-500 text-sm">View statistics about your recoverable vs unusable UTXOs</p>
                   </div>
                   <button
-                    on:click={getRecoveryStats}
-                    class="w-full bg-gradient-to-r from-purple-600 to-pink-600 text-white px-4 py-3 rounded-lg font-medium hover:from-purple-700 hover:to-pink-700 transition-all duration-200 shadow-md hover:shadow-lg"
+                    disabled
+                    class="w-full bg-gray-600 text-gray-400 px-4 py-3 rounded-lg font-medium cursor-not-allowed"
                   >
-                    📊 Recovery Stats
+                    📊 Recovery Stats (Disabled)
                   </button>
                 </div>
               </div>
