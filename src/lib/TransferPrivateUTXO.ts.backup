@@ -2,7 +2,35 @@
  * @fileoverview REAL secp256k1 ZK Private UTXO Transfer Service
  * @description Transfers private UTXOs between addresses with REAL cryptography
  * 
- * ARQUITECTURA CRIPTO
+ * ARQUITECTURA CRIPTO      console.log      // 6. ✅ Create backend attestation following DepositAsPrivateUTXO pattern
+      console.log('� Creating backend attestation following DepositAsPrivateUTXO pattern...');
+      const attestation = await backendAttestationProvider(dataHash);
+      console.log('✅ Backend attestation created');
+      
+      // 7. Generate new UTXO ID (needed for transferParams)
+      const newUTXOId: string = ethers.keccak256(ethers.solidityPacked(
+        ['uint256', 'uint256', 'address', 'uint256'],
+        [newCommitment.x, newCommitment.y, transferData.toAddress, Date.now()]
+      ));
+      console.log('✅ New UTXO ID generated:', newUTXOId.slice(0, 16) + '...');
+      
+      // 8. Execute transfer on contract
+      console.log('⛓️ Executing transfer on smart contract...');taHash criptográfico REAL: ${dataHash}`);
+      
+      // 6. ✅ Create backend attestation following DepositAsPrivateUTXO pattern
+      console.log('🔑 Creating backend attestation following DepositAsPrivateUTXO pattern...');
+      const attestation = await backendAttestationProvider(dataHash);
+      console.log('✅ Backend attestation created');
+      
+      // 7. Generate new UTXO ID (before using it in transferParams)
+      const newUTXOId: string = ethers.keccak256(ethers.solidityPacked(
+        ['uint256', 'uint256', 'address', 'uint256'],
+        [newCommitment.x, newCommitment.y, transferData.toAddress, Date.now()]
+      ));
+      console.log('✅ New UTXO ID generated:', newUTXOId.slice(0, 16) + '...');
+      
+      // 8. Execute transfer on contract
+      console.log('⛓️ Executing transfer on smart contract...');
  * ===========================
  * - Curva: secp256k1 (Ethereum compatible)
  * - Commitments: Pedersen sobre secp256k1
@@ -65,7 +93,7 @@ export interface TransferUTXOData {
  */
 export interface BackendAttestation {
   signature: string;
-  timestamp: number;
+  timestamp: bigint;
   operation: string;
   dataHash: string;
   nonce: string;
@@ -150,14 +178,7 @@ export class TransferPrivateUTXO {
         [transferData.toAddress, newCommitment.x, newCommitment.y, transferData.outputBlindingFactor]
       ));
       
-      // 4. Generate new UTXO ID (needed for contract call)
-      const newUTXOId: string = ethers.keccak256(ethers.solidityPacked(
-        ['uint256', 'uint256', 'address', 'uint256'],
-        [newCommitment.x, newCommitment.y, transferData.toAddress, Date.now()]
-      ));
-      console.log('✅ New UTXO ID generated:', newUTXOId.slice(0, 16) + '...');
-      
-      // 5. Update transfer data with real commitments
+      // 4. Update transfer data with real commitments
       const updatedTransferData: TransferUTXOData = {
         ...transferData,
         outputCommitment: { x: BigInt(newCommitment.x), y: BigInt(newCommitment.y) },
@@ -171,7 +192,7 @@ export class TransferPrivateUTXO {
         cryptographyType: 'secp256k1'
       });
       
-      // 6. ✅ Create dataHash following DepositAsPrivateUTXO pattern
+      // 5. ✅ Create dataHash following DepositAsPrivateUTXO pattern
       console.log('🔢 Calculating dataHash criptográfico REAL...');
       const dataHash = ethers.keccak256(
         ethers.solidityPacked(
@@ -187,19 +208,19 @@ export class TransferPrivateUTXO {
       );
       console.log(`📋 DataHash criptográfico REAL: ${dataHash}`);
       
-      // 7. ✅ Create backend attestation following DepositAsPrivateUTXO pattern
-      console.log('🔑 Creating backend attestation following DepositAsPrivateUTXO pattern...');
+      // 6. ✅ Create backend attestation following DepositAsPrivateUTXO pattern
+      console.log('� Creating backend attestation following DepositAsPrivateUTXO pattern...');
       const attestation = await backendAttestationProvider(dataHash);
       console.log('✅ Backend attestation created');
       
-      // 8. Execute transfer on contract
+      // 7. Execute transfer on contract
       console.log('⛓️ Executing transfer on smart contract...');
       
       // ✅ CORRECTED: Use transferPrivateUTXO with ZKTransferParams structure
       const transferParams: any = {
         inputNullifier: transferData.sourceNullifier,    // Source UTXO nullifier
         outputUTXOId: newUTXOId,                         // New UTXO ID
-        outputNullifier: newNullifier,                   // New UTXO nullifier
+        outputNullifier: transferData.outputNullifier,   // New UTXO nullifier
         attestation: {
           signature: attestation.signature,
           timestamp: attestation.timestamp,
@@ -223,6 +244,8 @@ export class TransferPrivateUTXO {
       
       console.log('✅ Transfer transaction confirmed:', receipt.hash);
       
+      // 8. Use the newUTXOId already generated at the start of the function
+      
       // 9. ✅ Verification post-transaction following DepositAsPrivateUTXO pattern
       console.log('🔍 Verifying transfer was processed correctly in contract...');
       try {
@@ -242,17 +265,17 @@ export class TransferPrivateUTXO {
       const result: UTXOOperationResult = {
         success: true,
         transactionHash: receipt.hash,
-        blockNumber: receipt.blockNumber,
-        gasUsed: receipt.gasUsed || BigInt(0),
+        blockNumber: receipt.blockNumber, // ✅ Added following DepositAsPrivateUTXO pattern
+        gasUsed: receipt.gasUsed,
         createdUTXOIds: [newUTXOId], // ✅ New UTXO created for recipient
-        spentUTXOIds: [transferData.sourceUTXOId || transferData.sourceNullifier] // ✅ Source UTXO consumed
+        spentUTXOIds: [transferData.sourceUTXOId || transferData.sourceNullifier] // ✅ Track spent UTXO
       };
       
       console.log('🎉 REAL secp256k1 ZK transfer completed successfully!');
       console.log('📊 Final transfer result:', {
         txHash: receipt.hash,
         blockNumber: receipt.blockNumber,
-        gasUsed: receipt.gasUsed?.toString(),
+        gasUsed: receipt.gasUsed.toString(),
         newUTXOId: newUTXOId.slice(0, 16) + '...',
         fromAddress: transferData.fromAddress.slice(0, 8) + '...',
         toAddress: transferData.toAddress.slice(0, 8) + '...',
@@ -268,11 +291,7 @@ export class TransferPrivateUTXO {
       return {
         success: false,
         error: `secp256k1 ZK Transfer failed: ${error.message}`,
-        transactionHash: '',
-        blockNumber: 0,
-        gasUsed: BigInt(0),
-        createdUTXOIds: [],
-        spentUTXOIds: []
+        transactionHash: undefined
       };
     }
   }

@@ -1,9 +1,15 @@
+<!--
+  @fileoverview Operations Panel
+  @description Main operations interface for UTXO operations
+-->
+
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
   import type { ERC20TokenData } from '../../types/ethereum.types';
   import type { PrivateUTXO } from '../../types/utxo.types';
   import { EthereumHelpers } from '../../utils/ethereum.helpers';
   import { getSplitErrorMessage } from '../../contracts/ZKUTXOVault.types';
+  import TransferPanelSimple from './TransferPanelSimple.svelte';
 
   // Import using default import only and infer type
   import privateUTXOManager  from '$lib/ManagerUTXO';
@@ -206,6 +212,10 @@
 
   // Computed values - only available private UTXOs when data is fully loaded
   $: availableUTXOs = isFullyLoaded ? 
+    privateUTXOs.filter(utxo => !utxo.isSpent) : [];
+  
+  // Simplified version for operations that need just basic fields (kept for backward compatibility)
+  $: availableUTXOsSimple = isFullyLoaded ? 
     privateUTXOs.filter(utxo => !utxo.isSpent).map(privateUTXO => ({
       id: privateUTXO.id,
       value: privateUTXO.value,
@@ -219,9 +229,9 @@
     })) : [];
   
   $: selectedUTXOData = {
-    split: availableUTXOs.find(u => u.id === splitSelectedUTXO),
-    withdraw: availableUTXOs.find(u => u.id === withdrawSelectedUTXO),
-    transfer: availableUTXOs.find(u => u.id === transferSelectedUTXO)
+    split: availableUTXOsSimple.find(u => u.id === splitSelectedUTXO),
+    withdraw: availableUTXOsSimple.find(u => u.id === withdrawSelectedUTXO),
+    transfer: availableUTXOsSimple.find(u => u.id === transferSelectedUTXO)
   };
 
   // Debug: Log UTXOs props when they change
@@ -233,11 +243,11 @@
   }
 
   // Debug: Log available private UTXOs when they change
-  $: if (availableUTXOs.length > 0) {
+  $: if (availableUTXOsSimple.length > 0) {
     console.log('🔧 Available private UTXOs for operations:', {
-      total: availableUTXOs.length,
+      total: availableUTXOsSimple.length,
       private: privateUTXOs.filter(utxo => !utxo.isSpent).length,
-      utxos: availableUTXOs.map(u => ({
+      utxos: availableUTXOsSimple.map(u => ({
         id: u.id.slice(0, 8),
         value: u.value.toString(),
         tokenAddress: u.tokenAddress
@@ -859,6 +869,30 @@
     }
   }
 
+  // ✅ NEW: Handle transfer completion from TransferPanelSimple
+  function handleTransferCompleted(event: CustomEvent) {
+    const { sourceUTXOId, recipientAddress, amount, transactionHash } = event.detail;
+    
+    console.log('🎉 Transfer completed in OperationsPanel:', {
+      sourceUTXOId: sourceUTXOId.slice(0, 16) + '...',
+      recipientAddress: recipientAddress.slice(0, 8) + '...',
+      amount,
+      transactionHash: transactionHash?.slice(0, 16) + '...'
+    });
+
+    // Dispatch to parent component (+page.svelte)
+    dispatch('operation', { 
+      type: 'transfer', 
+      result: { 
+        success: true, 
+        transactionHash,
+        sourceUTXOId,
+        recipientAddress,
+        amount
+      } 
+    });
+  }
+
   function handleExecute() {
     switch (activeOperation) {
       case 'split':
@@ -1065,7 +1099,7 @@
                 required
               >
                 <option value="">Choose a UTXO...</option>
-                {#each availableUTXOs as utxo}
+                {#each availableUTXOsSimple as utxo}
                   {@const tokenData = getTokenMetadata(utxo.tokenAddress)}
                   <option value={utxo.id}>
                     {formatValue(utxo.value, tokenData.decimals)} {tokenData.symbol} 
@@ -1205,7 +1239,7 @@
                 required
               >
                 <option value="">Choose a UTXO...</option>
-                {#each availableUTXOs as utxo}
+                {#each availableUTXOsSimple as utxo}
                   {@const tokenData = getTokenMetadata(utxo.tokenAddress)}
                   <option value={utxo.id}>
                     {formatValue(utxo.value, tokenData.decimals)} {tokenData.symbol} 
@@ -1253,90 +1287,41 @@
       <!-- Transfer Form -->
       {#if activeOperation === 'transfer'}
         <div class="space-y-6">
-          <h3 class="text-lg font-semibold text-white">Transfer UTXO Ownership</h3>
+          <h3 class="text-lg font-semibold text-white">🔄 Transfer Private UTXO</h3>
           
-          <!-- Select UTXO -->
-          <div>
-            <label for="transfer-utxo-select" class="block text-sm font-medium text-white mb-2">
-              Select UTXO to Transfer
-            </label>
-            
-            {#if !tokenMetadataLoaded}
-              <div class="w-full bg-gray-800 border border-gray-600 rounded-lg px-4 py-3 text-gray-400 flex items-center">
-                <div class="animate-spin w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full mr-2"></div>
-                Loading token metadata...
-              </div>
-            {:else}
-              <select
-                id="transfer-utxo-select"
-                bind:value={transferSelectedUTXO}
-                class="w-full bg-gray-800 border border-gray-600 rounded-lg px-4 py-3 text-white focus:border-purple-500 focus:outline-none"
-                required
-              >
-                <option value="">Choose a UTXO...</option>
-                {#each availableUTXOs as utxo}
-                  {@const tokenData = getTokenMetadata(utxo.tokenAddress)}
-                  <option value={utxo.id}>
-                    {formatValue(utxo.value, tokenData.decimals)} {tokenData.symbol} 
-                    (ID: {utxo.id.slice(0, 8)}...)
-                  </option>
-                {/each}
-              </select>
-            {/if}
-          </div>
-
-          <!-- New Owner -->
-          <div>
-            <label for="transfer-recipient" class="block text-sm font-medium text-white mb-2">
-              New Owner Address
-            </label>
-            <input
-              id="transfer-recipient"
-              type="text"
-              bind:value={transferRecipient}
-              placeholder="0x..."
-              class="w-full bg-white/5 border border-white/20 rounded-lg px-4 py-3 text-white placeholder-gray-400"
-              required
-            />
-          </div>
-
-          <div class="bg-yellow-600/20 border border-yellow-600/30 rounded-lg p-4">
-            <div class="flex space-x-3">
-              <div class="text-yellow-400 text-xl">🚧</div>
-              <div class="text-sm text-yellow-200">
-                <div class="font-medium mb-1">Coming Soon:</div>
-                <div class="text-yellow-300">
-                  UTXO transfer functionality is being implemented and will be available in a future update.
-                </div>
-              </div>
-            </div>
-          </div>
+          <!-- ✅ NEW: Use TransferPanelSimple component -->
+          <TransferPanelSimple 
+            availableUTXOs={availableUTXOs}
+            tokenMetadataCache={tokenMetadataCache}
+            on:transferCompleted={handleTransferCompleted}
+          />
         </div>
       {/if}
 
-      <!-- Execute Button -->
-      <div class="pt-6 border-t border-white/10">
-        <button
-          on:click={handleExecute}
-          disabled={!canExecute}
-          class="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white py-4 rounded-lg font-semibold transition-all duration-200 shadow-lg hover:shadow-xl flex items-center justify-center space-x-2"
-        >
-          {#if isProcessing}
-            <div class="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-            <span>Processing...</span>
-          {:else}
-            <span>
-              {#if activeOperation === 'split'}✂️
-              {:else if activeOperation === 'withdraw'}💸
-              {:else if activeOperation === 'transfer'}📤
-              {/if}
-            </span>
-            <span>
-              Execute {activeOperation.charAt(0).toUpperCase() + activeOperation.slice(1)}
-            </span>
-          {/if}
-        </button>
-      </div>
+      <!-- Execute Button (hidden for transfer operation since TransferPanelSimple has its own button) -->
+      {#if activeOperation !== 'transfer'}
+        <div class="pt-6 border-t border-white/10">
+          <button
+            on:click={handleExecute}
+            disabled={!canExecute}
+            class="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white py-4 rounded-lg font-semibold transition-all duration-200 shadow-lg hover:shadow-xl flex items-center justify-center space-x-2"
+          >
+            {#if isProcessing}
+              <div class="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+              <span>Processing...</span>
+            {:else}
+              <span>
+                {#if activeOperation === 'split'}✂️
+                {:else if activeOperation === 'withdraw'}💸
+                {/if}
+              </span>
+              <span>
+                Execute {activeOperation.charAt(0).toUpperCase() + activeOperation.slice(1)}
+              </span>
+            {/if}
+          </button>
+        </div>
+      {/if}
     {/if}
   </div>
 </div>

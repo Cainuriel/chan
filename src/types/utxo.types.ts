@@ -214,6 +214,31 @@ export interface TransferUTXOParams {
 }
 
 /**
+ * Transfer operation data with REAL secp256k1 cryptography
+ * ✅ Following DepositAsPrivateUTXO pattern for consistency
+ */
+export interface TransferUTXOData {
+  /** Source UTXO identifier */
+  sourceUTXOId?: string;
+  /** Source UTXO nullifier for spending */
+  sourceNullifier: string;
+  /** Current owner address */
+  fromAddress: string;
+  /** New owner address */
+  toAddress: string;
+  /** Amount to transfer */
+  transferAmount: bigint;
+  /** Token contract address */
+  tokenAddress: string;
+  /** Blinding factor for output UTXO */
+  outputBlindingFactor: string;
+  /** Output commitment (filled by service) */
+  outputCommitment: { x: bigint; y: bigint };
+  /** Output nullifier (filled by service) */
+  outputNullifier: string;
+}
+
+/**
  * UTXO withdrawal parameters
  */
 export interface WithdrawUTXOParams {
@@ -243,6 +268,23 @@ export interface UTXOOperationResult {
   error?: string;
   /** Detailed error info */
   errorDetails?: any;
+}
+
+/**
+ * Backend attestation for UTXO operations
+ * ✅ Used across all UTXO services following DepositAsPrivateUTXO pattern
+ */
+export interface BackendAttestation {
+  /** Cryptographic signature from backend */
+  signature: string;
+  /** Attestation timestamp */
+  timestamp: bigint;
+  /** Optional nonce for replay protection */
+  nonce?: string;
+  /** Optional operation context */
+  operation?: string;
+  /** Data hash that was signed */
+  dataHash?: string;
 }
 
 /**

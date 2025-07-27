@@ -7,6 +7,7 @@ import { ethers, toBigInt, type BigNumberish } from 'ethers';
 import { ZKCompatibilityAdapter } from './ZKCompatibilityAdapter';
 import { ZKCryptoServiceImpl } from './ZKCryptoService';
 import { AttestationService } from './AttestationService';
+import { SplitPrivateUTXO } from './SplitPrivateUTXO';
 import { EthereumHelpers } from './../utils/ethereum.helpers';
 import { CryptoHelpers } from './../utils/crypto.helpers';
 import { gasManager } from './GasManager';
@@ -17,15 +18,18 @@ import {
   type CreateUTXOParams,
   type SplitUTXOParams,
   type TransferUTXOParams,
+  type TransferUTXOData,
   type WithdrawUTXOParams,
   type UTXOManagerStats,
   type UTXOManagerConfig,
+  type BackendAttestation,
   UTXOOperationError,
   UTXONotFoundError,          
   InsufficientFundsError,      
   UTXOAlreadySpentError,       
   UTXOType
 } from '../types/utxo.types';
+import { TransferPrivateUTXO } from './TransferPrivateUTXO';
 import {
 
   createZKUTXOVaultContract,
@@ -598,6 +602,191 @@ export class ZKPrivateUTXOManager extends EventEmitter {
 
   /**
    * Transfer a private UTXO using REAL secp256k1 ZK cryptography
+   * ✅ SIMPLIFIED VERSION following successful patterns from deposit/withdraw
+   */
+  async transferPrivateUTXOSimple(
+    sourceUTXOId: string,
+    recipientAddress: string,
+    transferAmount?: bigint
+  ): Promise<UTXOOperationResult> {
+    if (!this.currentAccount || !this.contract) {
+      throw new Error('Manager not initialized or no account connected');
+    }
+
+    try {
+      console.log('🚀 Starting SIMPLIFIED REAL secp256k1 ZK private UTXO transfer...');
+      console.log('📊 Transfer parameters:', {
+        sourceUTXOId: sourceUTXOId.slice(0, 16) + '...',
+        from: this.currentAccount.address.slice(0, 8) + '...',
+        to: recipientAddress.slice(0, 8) + '...',
+        amount: transferAmount?.toString() || 'full amount',
+        cryptographyType: 'secp256k1'
+      });
+
+      // 1. ✅ Validate inputs
+      if (!ethers.isAddress(recipientAddress)) {
+        throw new UTXOOperationError('Invalid recipient address format', 'transferPrivateUTXOSimple');
+      }
+
+      if (recipientAddress.toLowerCase() === this.currentAccount.address.toLowerCase()) {
+        throw new UTXOOperationError('Cannot transfer to the same address', 'transferPrivateUTXOSimple');
+      }
+
+      // 2. ✅ Get and validate source UTXO
+      const sourceUTXO = this.findUTXO(sourceUTXOId);
+      if (!sourceUTXO) {
+        throw new UTXOOperationError(`Source UTXO not found: ${sourceUTXOId}`, 'transferPrivateUTXOSimple');
+      }
+
+      if (sourceUTXO.isSpent) {
+        throw new UTXOOperationError('Cannot transfer already spent UTXO', 'transferPrivateUTXOSimple');
+      }
+
+      if (!this.isUserUTXO(sourceUTXOId)) {
+        throw new UTXOOperationError('Cannot transfer UTXO that does not belong to current user', 'transferPrivateUTXOSimple');
+      }
+
+      const actualTransferAmount = transferAmount || sourceUTXO.value;
+      if (sourceUTXO.value < actualTransferAmount) {
+        throw new UTXOOperationError(
+          `Insufficient UTXO value: has ${sourceUTXO.value}, needs ${actualTransferAmount}`,
+          'transferPrivateUTXOSimple'
+        );
+      }
+
+      // 3. ✅ Use transfer service with correct parameters
+      const signer = EthereumHelpers.getSigner();
+      if (!signer) {
+        throw new UTXOOperationError('No signer available', 'transferPrivateUTXOSimple');
+      }
+      
+      const transferService = new TransferPrivateUTXO(this.contract as any, signer);
+      await transferService.initialize();
+
+      // 4. ✅ Create transfer data using the file's interface (not our types)
+      const sourceCommitment = sourceUTXO.commitment ? JSON.parse(sourceUTXO.commitment) : { x: BigInt(0), y: BigInt(0) };
+      const outputBlindingFactor = ethers.hexlify(ethers.randomBytes(32));
+      
+      // Generate output commitment with real secp256k1
+      const outputCommitment = await CryptoHelpers.createPedersenCommitment(
+        actualTransferAmount.toString(),
+        outputBlindingFactor
+      );
+
+      const transferData = {
+        // Source UTXO data
+        sourceCommitment: { x: BigInt(sourceCommitment.x), y: BigInt(sourceCommitment.y) },
+        sourceValue: sourceUTXO.value,
+        sourceBlindingFactor: sourceUTXO.blindingFactor || ethers.hexlify(ethers.randomBytes(32)),
+        sourceNullifier: sourceUTXO.nullifierHash,
+        
+        // Output UTXO data
+        outputCommitment: { x: BigInt(outputCommitment.x), y: BigInt(outputCommitment.y) },
+        outputBlindingFactor: outputBlindingFactor,
+        outputNullifier: ethers.keccak256(ethers.solidityPacked(
+          ['address', 'uint256', 'uint256', 'bytes32'],
+          [recipientAddress, outputCommitment.x, outputCommitment.y, outputBlindingFactor]
+        )),
+        
+        // Transfer data
+        transferAmount: actualTransferAmount,
+        fromAddress: this.currentAccount.address,
+        toAddress: recipientAddress,
+        tokenAddress: sourceUTXO.tokenAddress
+      };
+
+      // 5. ✅ Create backend attestation provider following DepositAsPrivateUTXO pattern
+      const backendAttestationProvider = async (dataHash: string) => {
+        if (!this.attestationService) {
+          throw new Error('Attestation service not available');
+        }
+        
+        // ✅ Use createZKTransferAttestation with proper transfer data
+        const zkTransferData = {
+          sourceUTXOId: sourceUTXOId,
+          recipientAddress: recipientAddress,
+          amount: actualTransferAmount,
+          outputCommitment: {
+            x: outputCommitment.x,
+            y: outputCommitment.y
+          },
+          outputNullifier: transferData.outputNullifier,
+          outputBlindingFactor: outputBlindingFactor,
+          dataHash: dataHash
+        };
+        
+        const attestation = await this.attestationService.createZKTransferAttestation(zkTransferData);
+        
+        // ✅ Convert to TransferPrivateUTXO's expected format
+        return {
+          signature: attestation.signature,
+          timestamp: Number(attestation.timestamp), // ✅ Convert bigint to number
+          operation: attestation.operation || 'TRANSFER',
+          dataHash: attestation.dataHash || dataHash,
+          nonce: attestation.nonce.toString() // ✅ Convert bigint to string
+        };
+      };
+
+      // 6. ✅ Execute transfer
+      console.log('⚡ Executing REAL secp256k1 ZK transfer...');
+      const result = await transferService.executeTransfer(transferData, backendAttestationProvider);
+
+      if (!result.success) {
+        throw new UTXOOperationError(result.error || 'Transfer execution failed', 'transferPrivateUTXOSimple');
+      }
+
+      console.log('✅ Transfer executed successfully on-chain');
+
+      // 7. ✅ Update source UTXO state and increment counter
+      const updatedSourceUTXO: PrivateUTXO = {
+        ...sourceUTXO,
+        isSpent: true
+      };
+
+      this.privateUTXOs.set(sourceUTXOId, updatedSourceUTXO);
+      this.secp256k1OperationCount++;
+
+      console.log('✅ Source UTXO marked as spent');
+
+      // 8. ✅ Convert result to UTXOOperationResult format (already is UTXOOperationResult)
+      const convertedResult: UTXOOperationResult = {
+        success: result.success,
+        transactionHash: result.transactionHash,
+        gasUsed: result.gasUsed,
+        createdUTXOIds: result.createdUTXOIds || [], // ✅ Use existing createdUTXOIds array
+        spentUTXOIds: [sourceUTXOId],
+        error: result.error
+      };
+
+      // 9. ✅ Log successful transfer
+      console.log('🎉 REAL secp256k1 ZK transfer completed successfully!');
+      console.log('📊 Final transfer summary:', {
+        txHash: result.transactionHash?.slice(0, 16) + '...',
+        gasUsed: result.gasUsed?.toString(),
+        sourceUTXOId: sourceUTXOId.slice(0, 16) + '...',
+        newUTXOId: result.createdUTXOIds?.[0]?.slice(0, 16) + '...',  // ✅ Use result.createdUTXOIds[0]
+        fromAddress: this.currentAccount.address.slice(0, 8) + '...',
+        toAddress: recipientAddress.slice(0, 8) + '...',
+        amount: actualTransferAmount.toString(),
+        cryptographyType: 'secp256k1'
+      });
+
+      return convertedResult;
+
+    } catch (error: any) {
+      console.error('❌ REAL secp256k1 ZK transfer failed:', error);
+      
+      if (error instanceof UTXOOperationError) {
+        throw error;
+      }
+      
+      throw new UTXOOperationError(`Transfer failed: ${error.message}`, 'transferPrivateUTXOSimple');
+    }
+  }
+
+  /**
+   * Transfer a private UTXO using REAL secp256k1 ZK cryptography
+   * ❌ COMPLEX VERSION - has compatibility issues, use transferPrivateUTXOSimple instead
    */
   async transferPrivateUTXO(params: TransferUTXOParams): Promise<UTXOOperationResult> {
     console.log('🔄 Starting REAL secp256k1 ZK transfer operation in ManagerUTXO...');
@@ -639,7 +828,6 @@ export class ZKPrivateUTXOManager extends EventEmitter {
       });
 
       // 4. Use TransferPrivateUTXO service with REAL secp256k1 cryptography
-      const { TransferPrivateUTXO } = await import('./TransferPrivateUTXO');
       const signer = EthereumHelpers.getSigner();
       if (!signer) {
         throw new UTXOOperationError('No signer available', 'transferPrivateUTXO');
@@ -658,55 +846,51 @@ export class ZKPrivateUTXOManager extends EventEmitter {
       
       console.log('🚀 Executing transfer with REAL secp256k1 ZK cryptography...');
       
-      // 6. Create attestation provider adapter
-      const attestationProvider = {
-        createTransferAttestation: async (data: any) => {
-          if (!this.attestationService) {
-            throw new Error('Attestation service not available');
-          }
-          
-          // Convert transfer data to ZK attestation format
-          const zkTransferData = {
-            sourceUTXOId: data.sourceUTXOId || '',
-            recipientAddress: data.toAddress,
-            amount: data.transferAmount,
-            outputCommitment: {
-              x: data.outputCommitment.x,
-              y: data.outputCommitment.y
-            },
-            outputNullifier: data.outputNullifier,
-            outputBlindingFactor: data.outputBlindingFactor
-          };
-          
-          const attestation = await this.attestationService.createZKTransferAttestation(zkTransferData);
-          
-          // Convert nonce from bigint to string for compatibility
-          return {
-            ...attestation,
-            nonce: attestation.nonce.toString()
-          };
+      // 6. Create attestation provider function that matches the expected signature
+      const attestationProvider = async (dataHash: string) => {
+        if (!this.attestationService) {
+          throw new Error('Attestation service not available');
         }
+        
+        // Create ZK attestation data for transfer
+        const zkTransferData = {
+          sourceUTXOId: params.utxoId,
+          recipientAddress: params.newOwner,
+          amount: sourceUTXO.value,
+          outputCommitment: transferData.outputCommitment,
+          outputNullifier: transferData.outputNullifier,
+          outputBlindingFactor: transferData.outputBlindingFactor,
+          dataHash // Include the dataHash parameter
+        };
+        
+        const attestation = await this.attestationService.createZKTransferAttestation(zkTransferData);
+        
+        // Convert nonce from bigint to string and ensure required fields for TransferPrivateUTXO.BackendAttestation
+        return {
+          nonce: attestation.nonce.toString(),
+          operation: attestation.operation || 'TRANSFER', // Ensure operation is always a string
+          dataHash: attestation.dataHash || dataHash,
+          timestamp: Number(attestation.timestamp), // ✅ Convert bigint to number
+          signature: attestation.signature
+        };
       };
       
       // 7. Execute transfer
       const transferResult = await transferService.executeTransfer(transferData, attestationProvider);
       
-      // 8. Convert to UTXOOperationResult
-      const result: UTXOOperationResult = {
-        success: transferResult.success,
-        transactionHash: transferResult.transactionHash,
-        createdUTXOIds: transferResult.newUTXOId ? [transferResult.newUTXOId] : [],
-        error: transferResult.error
-      };
+      // 8. Convert to UTXOOperationResult (no conversion needed since it's already UTXOOperationResult)
+      const result: UTXOOperationResult = transferResult;
       
-      if (result.success && transferResult.newUTXOId) {
+      if (result.success && result.createdUTXOIds && result.createdUTXOIds.length > 0) {
+        const newUTXOId = result.createdUTXOIds[0];
+        
         // 9. Mark source UTXO as spent
         sourceUTXO.isSpent = true;
         this.secp256k1OperationCount++; // ✅ INCREMENT secp256k1 operations
         
         // 10. Create new UTXO for the recipient
         const newUTXO: PrivateUTXO = {
-          id: transferResult.newUTXOId,
+          id: newUTXOId,
           exists: true,
           value: sourceUTXO.value,
           tokenAddress: sourceUTXO.tokenAddress,
@@ -722,7 +906,7 @@ export class ZKPrivateUTXOManager extends EventEmitter {
           blindingFactor: transferData.outputBlindingFactor,
           localCreatedAt: Date.now(),
           confirmed: true,
-          creationTxHash: transferResult.transactionHash || '',
+          creationTxHash: result.transactionHash || '',
           blockNumber: 0,
           nullifierHash: transferData.outputNullifier,
           cryptographyType: 'secp256k1' as const, // ✅ REAL crypto type
@@ -744,14 +928,14 @@ export class ZKPrivateUTXOManager extends EventEmitter {
         // Save new UTXO for recipient (if we have storage for other users)
         // For now, just add to internal collection if it's for current user
         if (params.newOwner.toLowerCase() === this.currentAccount.address.toLowerCase()) {
-          this.privateUTXOs.set(transferResult.newUTXOId, newUTXO);
+          this.privateUTXOs.set(newUTXOId, newUTXO);
           await PrivateUTXOStorage.savePrivateUTXO(this.currentAccount.address, newUTXO);
         }
         
         // 12. Emit events
         this.emit('utxoTransferred', {
           sourceUTXOId: params.utxoId,
-          newUTXOId: transferResult.newUTXOId,
+          newUTXOId: newUTXOId,
           fromAddress: sourceUTXO.owner,
           toAddress: params.newOwner,
           amount: sourceUTXO.value,
@@ -761,7 +945,7 @@ export class ZKPrivateUTXOManager extends EventEmitter {
         
         console.log('🎉 secp256k1 ZK Transfer operation completed successfully!', {
           sourceUTXOId: params.utxoId.slice(0, 16) + '...',
-          newUTXOId: transferResult.newUTXOId.slice(0, 16) + '...',
+          newUTXOId: newUTXOId.slice(0, 16) + '...',
           fromAddress: sourceUTXO.owner.slice(0, 8) + '...',
           toAddress: params.newOwner.slice(0, 8) + '...',
           cryptographyType: 'secp256k1'
