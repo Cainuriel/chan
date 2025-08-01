@@ -19,6 +19,9 @@ import {
 import type { UTXOData } from '../types/utxo.types';
 import type { PedersenCommitment } from '../types/zenroom.d';
 import { CryptoHelpers as ZenroomHelpers } from '../utils/crypto.helpers';
+import { ethereumHelpers } from '../utils/ethereum.helpers';
+import { get } from 'svelte/store';
+import { selectedNetwork } from '$lib/store';
 
 /**
  * Error específico para validación de split
@@ -102,8 +105,8 @@ export class SplitPrivateUTXO {
         splitData.sourceNullifier
       );
 
-      // 4. Construir parámetros del contrato con criptografía REAL
-      console.log('📋 Construyendo parámetros con criptografía REAL...');
+      // 4. Construir parámetros
+      console.log('📋 Construyendo parámetros...');
       const splitParams = await this._buildRealCryptoParams(
         splitData,
         outputs,
@@ -156,10 +159,10 @@ export class SplitPrivateUTXO {
         throw new SplitValidationError(`Pre-validación COMPLETA falló: ${error.message}`);
       }
 
-      // 5. Ejecutar split en Alastria (sin estimación de gas)
-      console.log('📤 Ejecutando split con criptografía secp256k1 REAL en Alastria...');
+      // 5. Ejecutar split 
+      // Ejecutar split (el gas se maneja internamente por el contrato)
       const tx = await this.contract.splitPrivateUTXO(splitParams);
-      
+
       console.log(`⏳ Transacción criptográfica enviada: ${tx.hash}`);
       const receipt = await tx.wait();
 
