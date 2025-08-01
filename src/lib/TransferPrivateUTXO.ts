@@ -13,10 +13,13 @@
 
 import { ethers } from 'ethers';
 import { CryptoHelpers } from '../utils/crypto.helpers';
+import { ethereumHelpers } from '../utils/ethereum.helpers';
 import { ZKCryptoServiceImpl } from './ZKCryptoService';
 import { ZKCompatibilityAdapter } from './ZKCompatibilityAdapter';
 import type { ZKUTXOVaultContract } from '../contracts/ZKUTXOVault.types';
 import type { UTXOOperationResult, ExtendedUTXOData, UTXOType } from '../types/utxo.types';
+import { get } from 'svelte/store';
+import { selectedNetwork } from '$lib/store';
 
 /**
  * Transfer operation error with context
@@ -215,7 +218,7 @@ export class TransferPrivateUTXO {
         throw new Error(`Transfer pre-validation failed: ${preValidationError}`);
       }
       
-      // 9. Execute transfer on contract
+      // 9. Execute transfer on contract with gas estimation
       console.log('⛓️ Executing transfer on smart contract...');
       
       // ✅ CORRECTED: Use transferPrivateUTXO with ZKTransferParams structure
@@ -232,7 +235,50 @@ export class TransferPrivateUTXO {
         }
       };
       
-      const tx: any = await (this.contract as any).transferPrivateUTXO(transferParams);
+      // Obtener red actual y estimar gas
+      const currentNetwork = get(selectedNetwork);
+      
+      let transferGas;
+      if (currentNetwork === 'amoy') {
+        console.log('🌐 Network:', currentNetwork, '- Estimating gas for transfer transaction');
+        
+        try {
+          // ✅ INTENTAR ESTIMACIÓN NATIVA DEL CONTRATO PRIMERO
+          const ethersContract = (this.contract as any).ethersContract || this.contract;
+          transferGas = await ethersContract.transferPrivateUTXO.estimateGas(transferParams);
+          console.log(`⛽ Gas estimado nativo para transfer: ${transferGas.toString()}`);
+        } catch (error) {
+          console.warn('⚠️ Native gas estimation failed, using fallback');
+          // Fallback usando ethereumHelpers
+          const transferComplexity = JSON.stringify(transferParams).length;
+          
+          transferGas = await ethereumHelpers.estimateGas({
+            to: ethers.ZeroAddress, // Placeholder para estimación
+            data: `0x${'0'.repeat(transferComplexity * 2)}` // Datos simulados basados en complejidad
+          });
+          
+          console.log(`⛽ Gas estimado fallback para transfer: ${transferGas.toString()}`);
+        }
+      }
+      
+      // Ejecutar transfer con gas límite optimizado
+      let tx: any;
+      if (transferGas && currentNetwork === 'amoy') {
+        // ✅ USAR CONTRATO ETHERS CON GAS OVERRIDES
+        try {
+          const ethersContract = (this.contract as any).ethersContract || this.contract;
+          tx = await ethersContract.transferPrivateUTXO(transferParams, {
+            gasLimit: transferGas
+          });
+          console.log(`✅ Transfer ejecutado con gas límite: ${transferGas.toString()}`);
+        } catch (error) {
+          console.warn('⚠️ Gas override failed, using default execution');
+          tx = await (this.contract as any).transferPrivateUTXO(transferParams);
+        }
+      } else {
+        // Ejecutar sin gas override para alastria
+        tx = await (this.contract as any).transferPrivateUTXO(transferParams);
+      }
       
       const receipt: any = await tx.wait();
       
