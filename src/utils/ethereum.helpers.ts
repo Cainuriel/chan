@@ -521,70 +521,27 @@ Timestamp: ${Date.now()}`;
   }
 
   /**
-   * Estimate gas for a transaction with ZK-optimized defaults
+   * Estimate gas for a transaction - simplified fallback version
    * @param params - Transaction parameters
    * @returns Promise resolving to gas estimation
    */
-  static async estimateGas(params: EthereumTransactionParams): Promise<GasEstimationResult> {
-    const provider = this.getProvider();
-    const signer = this.getSigner();
+  static async estimateGas(params: EthereumTransactionParams): Promise<bigint> {
+    console.log(`⛽ Estimating gas based on transaction data size: ${params.data?.length || 0}`, {
+      to: params.to,
+      dataLength: params.data?.length || 0,
+      hasValue: !!params.value
+    });
 
-    try {
-      // Estimate gas limit with safety margin for ZK operations
-      const baseGasEstimate = await provider.estimateGas({
-        to: params.to,
-        value: params.value || undefined,
-        data: params.data
-      });
-
-      // Apply ZK-optimized gas calculation
-      // ZK operations typically need 10-20% more gas due to proof verification
-      const zkGasMultiplier = params.data && params.data.length > 2000 ? 1.2 : 1.1;
-      const adjustedGasLimit = BigInt(Math.ceil(Number(baseGasEstimate) * zkGasMultiplier));
-
-      // Get gas price info
-      const feeData = await provider.getFeeData();
-      
-      let gasPrice = BigInt(0);
-      let maxFeePerGas: bigint | undefined;
-      let maxPriorityFeePerGas: bigint | undefined;
-
-      if (feeData.maxFeePerGas && feeData.maxPriorityFeePerGas) {
-        // EIP-1559 - optimize for ZK transactions
-        maxFeePerGas = BigInt(feeData.maxFeePerGas.toString());
-        maxPriorityFeePerGas = BigInt(feeData.maxPriorityFeePerGas.toString());
-        
-        // For ZK transactions, slightly higher priority fee for faster inclusion
-        const zkPriorityBoost = maxPriorityFeePerGas / 10n; // 10% boost
-        maxPriorityFeePerGas = maxPriorityFeePerGas + zkPriorityBoost;
-        
-        gasPrice = maxFeePerGas;
-      } else if (feeData.gasPrice) {
-        // Legacy - add small buffer for ZK operations
-        const baseGasPrice = BigInt(feeData.gasPrice.toString());
-        gasPrice = baseGasPrice + (baseGasPrice / 20n); // 5% buffer
-      }
-
-      const estimatedCost = adjustedGasLimit * gasPrice;
-
-      // Improved confidence calculation
-      const isZkTransaction = params.data && params.data.length > 1000;
-      const confidence = isZkTransaction ? 0.85 : 0.9; // Lower confidence for complex ZK txs
-
-      return {
-        gasLimit: adjustedGasLimit,
-        gasPrice,
-        maxFeePerGas,
-        maxPriorityFeePerGas,
-        estimatedCost,
-        confidence
-      };
-    } catch (error) {
-      throw new EthereumError(
-        'Failed to estimate gas',
-        -32000,
-        { params, error: error instanceof Error ? error.message : 'Unknown error' }
-      );
+    // Simple gas estimation based on data size - reliable fallback approach
+    if (params.data && params.data.length > 1000) {
+      console.log('✅ Complex transaction detected, using 500k gas');
+      return 500000n; // Complex transaction (like UTXO operations)
+    } else if (params.data && params.data.length > 100) {
+      console.log('✅ Contract interaction detected, using 100k gas');
+      return 100000n; // Contract interaction (like approve)
+    } else {
+      console.log('✅ Simple transfer detected, using 21k gas');
+      return 21000n;  // Simple transfer
     }
   }
 

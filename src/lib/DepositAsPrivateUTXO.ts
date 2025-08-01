@@ -20,6 +20,7 @@ import type { CreateUTXOParams, UTXOOperationResult, ExtendedUTXOData } from '..
 import { UTXOType } from '../types/utxo.types';
 import { CryptoHelpers } from '../utils/crypto.helpers';
 import { ethereumHelpers } from '../utils/ethereum.helpers';
+import { get } from 'svelte/store';
 import { selectedNetwork } from '$lib/store';
 /**
  * Generate REAL cryptographically secure blinding factor for secp256k1
@@ -234,14 +235,30 @@ export async function depositAsPrivateUTXOSimplified(
       ['function approve(address,uint256) returns (bool)'],
       ethereum.getSigner() // Use ethereum.getSigner() for transactions
     );
-    const network = $selectedNetwork;
+    const network = get(selectedNetwork);
+    let networkGas;
     if (network == 'amoy') {
-          console.log('🌐 Network:', network);
+      console.log('🌐 Network:', network);
+      
+      // ✅ Simplified gas estimation
+      networkGas = await ethereumHelpers.estimateGas({
+        to: contract.target || contract.address,
+        data: tokenContract.interface.encodeFunctionData('approve', [
+          contract.target || contract.address, 
+          amount
+        ]),
+        value: BigInt(0)
+      });
+      
+      console.log('⛽ Estimated gas for approve:', networkGas.toString());
     }
 
-  
-
-    const approveTx = await tokenContract.approve(contract.target || contract.address, amount);
+    // Usar el gas estimado si está disponible
+    const approveTx = await tokenContract.approve(
+      contract.target || contract.address, 
+      amount,
+      networkGas ? { gasLimit: networkGas } : {} // Usar gas estimado si está disponible
+    );
     await approveTx.wait();
     console.log('✅ Token approval confirmed');
 
@@ -276,7 +293,25 @@ export async function depositAsPrivateUTXOSimplified(
     // 10. Execute contract call
     console.log('🚀 Executing contract call...');
 
-    const tx = await contract.depositAsPrivateUTXO(depositParams);
+    // Estimate gas for the deposit transaction
+    let depositGas;
+    if (network == 'amoy') {
+      console.log('🌐 Network:', network, '- Estimating gas for deposit transaction');
+      
+      // ✅ Simplified gas estimation for deposit
+      depositGas = await ethereumHelpers.estimateGas({
+        to: contract.target || contract.address,
+        data: contract.interface.encodeFunctionData('depositAsPrivateUTXO', [depositParams]),
+        value: BigInt(0)
+      });
+      
+      console.log('⛽ Estimated gas for deposit:', depositGas.toString());
+    }
+
+    const tx = await contract.depositAsPrivateUTXO(
+      depositParams,
+      depositGas ? { gasLimit: depositGas } : {}
+    );
     
     console.log('📤 Transaction submitted:', {
       hash: tx.hash,
