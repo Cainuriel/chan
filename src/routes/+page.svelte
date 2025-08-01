@@ -5,12 +5,12 @@
   import type { PrivateUTXO } from '../types/utxo.types';
   import { PrivateUTXOStorage } from '$lib/PrivateUTXOStorage';
   import { calculateDepositDataHash } from '$lib/HashCalculator';
-
+  import { selectedNetwork } from '$lib/store';
   import { EthereumHelpers } from '../utils/ethereum.helpers';
   import { WalletProviderType } from '../types/ethereum.types';
   import type { UTXOManagerStats, UTXOManagerConfig } from '../types/utxo.types';
   import type { EOAData } from '../types/ethereum.types';
-  
+  type NetworkKey = 'amoy' | 'alastria';
   // Types for networks
   type NetworkConfig = {
     name: string;
@@ -22,7 +22,7 @@
     requiresGas: boolean; // Whether this network requires gas fees
   };
   
-  type NetworkKey = 'amoy' | 'alastria';
+
   
   // Components
   import WalletConnection from '../lib/components/WalletConnection.svelte';
@@ -39,7 +39,7 @@
   let stats: UTXOManagerStats | null = null;
   let activeTab = 'balance';
   let notifications: Array<{id: string, type: string, message: string}> = [];
-  let selectedNetwork: NetworkKey = 'amoy'; // Default network
+
   
   // Controlled Flow State
   let isWalletConnected = false;
@@ -73,7 +73,7 @@
   };
 
   // Configuration - will be updated based on selected network
-  let CONTRACT_ADDRESS = NETWORKS[selectedNetwork].contractAddress;
+  let CONTRACT_ADDRESS = NETWORKS[$selectedNetwork].contractAddress;
   const PREFERRED_PROVIDER = WalletProviderType.METAMASK;
 
   onMount(async () => {
@@ -296,7 +296,7 @@
       // Check if contract is deployed on this network
       if (!network.contractAddress) {
         addNotification('warning', `⚠️ No contract deployed on ${network.name} yet. Deploy contract first.`);
-        selectedNetwork = networkKey;
+        selectedNetwork.set(networkKey);
         CONTRACT_ADDRESS = '';
         return;
       }
@@ -330,7 +330,7 @@
       }
 
       // Update local state
-      selectedNetwork = networkKey;
+      selectedNetwork.set(networkKey);
       CONTRACT_ADDRESS = network.contractAddress;
 
       // Si ya estamos en el flujo y cambiamos de red, necesitamos reinicializar
@@ -352,28 +352,28 @@
 
   // Function to update contract address for current network
   function updateContractAddress(address: string) {
-    if (!selectedNetwork || !NETWORKS[selectedNetwork]) {
+    if (!$selectedNetwork || !NETWORKS[$selectedNetwork]) {
       addNotification('error', 'No network selected');
       return;
     }
 
-    NETWORKS[selectedNetwork].contractAddress = address;
+    NETWORKS[$selectedNetwork].contractAddress = address;
     CONTRACT_ADDRESS = address;
-    addNotification('success', `Contract address updated for ${NETWORKS[selectedNetwork].name}: ${address}`);
+    addNotification('success', `Contract address updated for ${NETWORKS[$selectedNetwork].name}: ${address}`);
   }
 
   // Handle network change from header selector (when fully initialized)
   async function handleNetworkChange(networkKey: NetworkKey) {
     if (!isLibraryInitialized) {
       // Si no estamos inicializados, solo cambiar la selección
-      selectedNetwork = networkKey;
-      CONTRACT_ADDRESS = NETWORKS[selectedNetwork].contractAddress || '';
-      console.log(`🌐 Network selection changed to ${NETWORKS[selectedNetwork].name} (not initialized yet)`);
+      selectedNetwork.set(networkKey);
+      CONTRACT_ADDRESS = NETWORKS[$selectedNetwork].contractAddress || '';
+      console.log(`🌐 Network selection changed to ${NETWORKS[$selectedNetwork].name} (not initialized yet)`);
       return;
     }
 
     // Si ya estamos inicializados, necesitamos reinicializar
-    console.log(`🌐 Network change from ${NETWORKS[selectedNetwork].name} to ${NETWORKS[networkKey].name} - reinitializing...`);
+    console.log(`🌐 Network change from ${NETWORKS[$selectedNetwork].name} to ${NETWORKS[networkKey].name} - reinitializing...`);
     
     try {
       // Cambiar red
@@ -393,7 +393,7 @@
   
   // Check if current network requires gas
   function currentNetworkRequiresGas(): boolean {
-    return NETWORKS[selectedNetwork]?.requiresGas ?? true; // Default to true for safety
+    return NETWORKS[$selectedNetwork]?.requiresGas ?? true; // Default to true for safety
   }
   
   // Get gas options for transaction based on network
@@ -518,22 +518,22 @@
   async function step2_selectNetwork() {
     try {
       console.log('🌐 Step 2: Confirming network selection...');
-      addNotification('info', `Confirming network: ${NETWORKS[selectedNetwork].name}...`);
+      addNotification('info', `Confirming network: ${NETWORKS[$selectedNetwork].name}...`);
       
       // Validate that we have a contract address for this network
-      if (!NETWORKS[selectedNetwork].contractAddress) {
-        addNotification('error', `No contract deployed on ${NETWORKS[selectedNetwork].name}. Please deploy contract first.`);
+      if (!NETWORKS[$selectedNetwork].contractAddress) {
+        addNotification('error', `No contract deployed on ${NETWORKS[$selectedNetwork].name}. Please deploy contract first.`);
         return;
       }
       
       // Switch to the selected network
-      await switchNetwork(selectedNetwork);
+      await switchNetwork($selectedNetwork);
       
       isNetworkSelected = true;
       currentStep = 3;
-      CONTRACT_ADDRESS = NETWORKS[selectedNetwork].contractAddress;
-      
-      addNotification('success', `✅ Step 2 complete: Network ${NETWORKS[selectedNetwork].name} selected!`);
+      CONTRACT_ADDRESS = NETWORKS[$selectedNetwork].contractAddress;
+
+      addNotification('success', `✅ Step 2 complete: Network ${NETWORKS[$selectedNetwork].name} selected!`);
       console.log('✅ Step 2 complete: Network selected');
       
     } catch (error: any) {
@@ -600,17 +600,17 @@
   async function initializeLibrary() {
     try {
       console.log('🚀 Initializing library with contract address:', CONTRACT_ADDRESS);
-      console.log('🌐 Selected network:', NETWORKS[selectedNetwork].name);
+      console.log('🌐 Selected network:', NETWORKS[$selectedNetwork].name);
       console.log('🔗 Network config:', {
-        name: NETWORKS[selectedNetwork].name,
-        chainId: NETWORKS[selectedNetwork].chainId,
-        rpcUrl: NETWORKS[selectedNetwork].rpcUrl,
+        name: NETWORKS[$selectedNetwork].name,
+        chainId: NETWORKS[$selectedNetwork].chainId,
+        rpcUrl: NETWORKS[$selectedNetwork].rpcUrl,
         contractAddress: CONTRACT_ADDRESS,
-        requiresGas: NETWORKS[selectedNetwork].requiresGas
+        requiresGas: NETWORKS[$selectedNetwork].requiresGas
       });
 
       if (!CONTRACT_ADDRESS) {
-        addNotification('warning', `⚠️ No contract deployed on ${NETWORKS[selectedNetwork].name}. Deploy contract first.`);
+        addNotification('warning', `⚠️ No contract deployed on ${NETWORKS[$selectedNetwork].name}. Deploy contract first.`);
         console.error('❌ No contract address provided');
         return false;
       }
@@ -635,7 +635,7 @@
           // no llamar refresh data aqui
         }
         console.log('✅ Library initialization completed successfully');
-        addNotification('success', `Library initialized successfully on ${NETWORKS[selectedNetwork].name}`);
+        addNotification('success', `Library initialized successfully on ${NETWORKS[$selectedNetwork].name}`);
         return true;
       } else {
         console.error('❌ Library initialization returned false');
@@ -1046,7 +1046,7 @@
               <!-- Network Selector -->
               <div class="relative">
                 <select 
-                  bind:value={selectedNetwork}
+                  bind:value={$selectedNetwork}
                   on:change={(e) => handleNetworkChange((e.target as HTMLSelectElement).value as NetworkKey)}
                   class="appearance-none bg-gray-800/50 text-white border border-gray-600 rounded-lg px-4 py-2 pr-8 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   disabled={currentStep < 4}
@@ -1070,7 +1070,7 @@
               <div class="flex items-center space-x-2 px-3 py-2 rounded-lg bg-gray-800/30 text-gray-300">
                 <div class="w-2 h-2 rounded-full {CONTRACT_ADDRESS ? 'bg-green-400' : 'bg-yellow-400'}"></div>
                 <span class="text-sm">
-                  {CONTRACT_ADDRESS ? NETWORKS[selectedNetwork].name : `${NETWORKS[selectedNetwork].name} (No Contract)`}
+                  {CONTRACT_ADDRESS ? NETWORKS[$selectedNetwork].name : `${NETWORKS[$selectedNetwork].name} (No Contract)`}
                 </span>
               </div>
               
@@ -1185,8 +1185,8 @@
                 <div class="space-y-4 mb-8">
                   <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <button
-                      on:click={() => selectedNetwork = 'amoy'}
-                      class="p-6 rounded-lg border-2 transition-all duration-200 {selectedNetwork === 'amoy' ? 'border-blue-500 bg-blue-500/20' : 'border-gray-600 bg-gray-800/30 hover:border-gray-500'}"
+                      on:click={() => $selectedNetwork = 'amoy'}
+                      class="p-6 rounded-lg border-2 transition-all duration-200 {$selectedNetwork === 'amoy' ? 'border-blue-500 bg-blue-500/20' : 'border-gray-600 bg-gray-800/30 hover:border-gray-500'}"
                     >
                       <div class="text-3xl mb-3">🔵</div>
                       <h4 class="text-white font-semibold">Polygon Amoy</h4>
@@ -1200,8 +1200,8 @@
                     </button>
                     
                     <button
-                      on:click={() => selectedNetwork = 'alastria'}
-                      class="p-6 rounded-lg border-2 transition-all duration-200 {selectedNetwork === 'alastria' ? 'border-purple-500 bg-purple-500/20' : 'border-gray-600 bg-gray-800/30 hover:border-gray-500'}"
+                      on:click={() => $selectedNetwork = 'alastria'}
+                      class="p-6 rounded-lg border-2 transition-all duration-200 {$selectedNetwork === 'alastria' ? 'border-purple-500 bg-purple-500/20' : 'border-gray-600 bg-gray-800/30 hover:border-gray-500'}"
                     >
                       <div class="text-3xl mb-3">⚡</div>
                       <h4 class="text-white font-semibold">Alastria</h4>
@@ -1219,15 +1219,15 @@
                 <button
                   on:click={step2_selectNetwork}
                   class="bg-gradient-to-r from-purple-600 to-blue-600 text-white px-8 py-4 rounded-lg font-semibold text-lg hover:from-purple-700 hover:to-blue-700 transition-all duration-200 shadow-lg hover:shadow-xl"
-                  disabled={isNetworkSelected || !NETWORKS[selectedNetwork].contractAddress}
+                  disabled={isNetworkSelected || !NETWORKS[$selectedNetwork].contractAddress}
                 >
-                  {isNetworkSelected ? '✅ Network Selected' : `🌐 Use ${NETWORKS[selectedNetwork].name}`}
+                  {isNetworkSelected ? '✅ Network Selected' : `🌐 Use ${NETWORKS[$selectedNetwork].name}`}
                 </button>
                 
-                {#if !NETWORKS[selectedNetwork].contractAddress}
+                {#if !NETWORKS[$selectedNetwork].contractAddress}
                   <div class="mt-6 p-4 bg-yellow-600/20 rounded-lg border border-yellow-500/30">
                     <p class="text-yellow-300 text-sm">
-                      ⚠️ No contract deployed on {NETWORKS[selectedNetwork].name}. Please deploy a contract first.
+                      ⚠️ No contract deployed on {NETWORKS[$selectedNetwork].name}. Please deploy a contract first.
                     </p>
                   </div>
                 {/if}
@@ -1244,7 +1244,7 @@
                   <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-left">
                     <div>
                       <span class="text-gray-400 text-sm">Network:</span>
-                      <p class="text-white font-semibold">{NETWORKS[selectedNetwork].name}</p>
+                      <p class="text-white font-semibold">{NETWORKS[$selectedNetwork].name}</p>
                     </div>
                     <div>
                       <span class="text-gray-400 text-sm">Contract:</span>

@@ -19,7 +19,8 @@ import { calculateAndValidateDepositHash, logAttestationData } from './HashCalcu
 import type { CreateUTXOParams, UTXOOperationResult, ExtendedUTXOData } from '../types/utxo.types';
 import { UTXOType } from '../types/utxo.types';
 import { CryptoHelpers } from '../utils/crypto.helpers';
-
+import { ethereumHelpers } from '../utils/ethereum.helpers';
+import { selectedNetwork } from '$lib/store';
 /**
  * Generate REAL cryptographically secure blinding factor for secp256k1
  * NO DUMMY DATA - This is actual cryptographic material
@@ -233,6 +234,12 @@ export async function depositAsPrivateUTXOSimplified(
       ['function approve(address,uint256) returns (bool)'],
       ethereum.getSigner() // Use ethereum.getSigner() for transactions
     );
+    const network = $selectedNetwork;
+    if (network == 'amoy') {
+          console.log('🌐 Network:', network);
+    }
+
+  
 
     const approveTx = await tokenContract.approve(contract.target || contract.address, amount);
     await approveTx.wait();
@@ -268,7 +275,7 @@ export async function depositAsPrivateUTXOSimplified(
 
     // 10. Execute contract call
     console.log('🚀 Executing contract call...');
-    
+
     const tx = await contract.depositAsPrivateUTXO(depositParams);
     
     console.log('📤 Transaction submitted:', {
