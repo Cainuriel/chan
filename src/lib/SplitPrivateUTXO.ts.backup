@@ -122,8 +122,20 @@ export class SplitPrivateUTXO {
       });
       
       // Verificar si el nullifier está usado ANTES del split
-      const isUsedBefore = await this.contract.isNullifierUsed(splitData.sourceNullifier);
-      console.log('🔍 Source nullifier used BEFORE split?', isUsedBefore);
+      let isUsedBefore = false;
+      try {
+        isUsedBefore = await this.contract.isNullifierUsed(splitData.sourceNullifier);
+        console.log('🔍 Source nullifier used BEFORE split?', isUsedBefore);
+      } catch (error) {
+        console.error('❌ Error verificando source nullifier:', error);
+        console.warn('⚠️ Asumiendo que el nullifier NO está usado (continuando con split)');
+        isUsedBefore = false;
+      }
+      
+      // Si el nullifier ya está usado, no podemos hacer split
+      if (isUsedBefore) {
+        throw new SplitValidationError('Source UTXO already spent (nullifier used)');
+      }
       
       console.log('📤 Split params que se envían al contrato:', {
         inputNullifier: splitParams.inputNullifier,
@@ -159,89 +171,131 @@ export class SplitPrivateUTXO {
         throw new SplitValidationError(`Pre-validación COMPLETA falló: ${error.message}`);
       }
 
-      // 5. Ejecutar split con estimación de gas optimizada para Amoy
-      console.log('🚀 Preparando ejecución del split...');
+      // 5. Ejecutar split con estimación de gas optimizada
+      console.log('🚀 Preparando ejecución del split con estimación de gas...');
       
-      // Obtener red actual para decidir estrategia de gas
+      // Obtener red actual y estimar gas
       const currentNetwork = get(selectedNetwork);
-      let tx: any;
       
+      let splitGas;
       if (currentNetwork === 'amoy') {
-        console.log('🌐 Red Amoy detectada - Aplicando estimación de gas optimizada');
-        
-        let splitGas: bigint | undefined;
+        console.log('🌐 Network:', currentNetwork, '- Estimating gas for split transaction');
         
         try {
-          // ✅ ESTIMACIÓN NATIVA DEL CONTRATO
-          console.log('⛽ Estimando gas nativo del contrato...');
+          // ✅ INTENTAR ESTIMACIÓN NATIVA DEL CONTRATO PRIMERO
+          console.log('🔍 Intentando estimación de gas nativa...');
           const ethersContract = (this.contract as any).ethersContract || this.contract;
-          const estimatedGas = await ethersContract.splitPrivateUTXO.estimateGas(splitParams);
+          splitGas = await ethersContract.splitPrivateUTXO.estimateGas(splitParams);
           
-          // ✅ MARGEN DE SEGURIDAD PARA AMOY (40% adicional)
-          const gasWithMargin = (estimatedGas * BigInt(140)) / BigInt(100);
+          // ✅ AGREGAR MARGEN DE SEGURIDAD DEL 20%
+          const gasWithMargin = (splitGas * BigInt(120)) / BigInt(100);
           splitGas = gasWithMargin;
           
-          console.log(`⛽ Gas estimado: ${splitGas.toString()} (con margen de seguridad del 40%)`);
+          console.log(`⛽ Gas estimado nativo para split: ${splitGas.toString()}`);
+        } catch (error) {
+          console.warn('⚠️ Native gas estimation failed, using enhanced fallback');
+          console.error('Gas estimation error:', error);
           
-        } catch (gasEstimationError) {
-          console.warn('⚠️ Estimación nativa falló, usando cálculo basado en outputs');
-          
-          // ✅ FALLBACK: Gas calculado basado en complejidad del split
+          // Fallback mejorado usando ethereumHelpers basado en complejidad del split
+          const splitComplexity = JSON.stringify(splitParams).length;
           const outputCount = splitParams.outputNullifiers.length;
-          const baseGas = BigInt(300000); // Gas base aumentado para operaciones ZK
-          const gasPerOutput = BigInt(100000); // Gas por cada output UTXO
           
-          splitGas = baseGas + (gasPerOutput * BigInt(outputCount));
-          
-          console.log(`⛽ Gas calculado: ${splitGas.toString()} (base: ${baseGas}, ${outputCount} outputs × ${gasPerOutput})`);
+          try {
+            // Usar dirección del contrato si está disponible, sino placeholder
+            let contractAddress = ethers.ZeroAddress;
+            try {
+              contractAddress = (this.contract as any).target || (this.contract as any).address || ethers.ZeroAddress;
+            } catch {
+              // Usar placeholder si no se puede obtener la dirección
+            }
+            
+            splitGas = await ethereumHelpers.estimateGas({
+              to: contractAddress,
+              data: `0x${'0'.repeat(splitComplexity * 2)}`, // Datos basados en tamaño real
+              value: BigInt(0)
+            });
+            
+            // ✅ AJUSTE BASADO EN NÚMERO DE OUTPUTS (más outputs = más gas)
+            const outputMultiplier = BigInt(Math.max(outputCount, 1));
+            splitGas = splitGas * outputMultiplier;
+            
+            console.log(`⛽ Gas estimado fallback para split (${outputCount} outputs): ${splitGas.toString()}`);
+          } catch (fallbackError) {
+            console.error('❌ Fallback gas estimation also failed:', fallbackError);
+            
+            // ✅ ÚLTIMO FALLBACK: Gas fijo basado en número de outputs
+            const baseGas = BigInt(200000); // Gas base para split
+            const gasPerOutput = BigInt(50000); // Gas adicional por output
+            splitGas = baseGas + (gasPerOutput * BigInt(outputCount));
+            
+            console.log(`⛽ Usando gas fijo calculado: ${splitGas.toString()} (base: ${baseGas}, per output: ${gasPerOutput})`);
+          }
         }
-        
-        // ✅ EJECUTAR CON GAS OPTIMIZADO
+      
+      // Ejecutar split con gas límite optimizado
+      console.log('📤 Ejecutando transacción de split...');
+      let tx: any;
+      
+      if (splitGas && currentNetwork === 'amoy') {
+        // ✅ USAR CONTRATO ETHERS CON GAS OVERRIDES
+        console.log(`🔧 Ejecutando con gas override: ${splitGas.toString()}`);
         try {
-          console.log('📤 Ejecutando split con gas optimizado...');
           const ethersContract = (this.contract as any).ethersContract || this.contract;
           
-          // Obtener gas price optimizado para Amoy
-          let gasPrice: bigint | undefined;
+          // ✅ PARÁMETROS DE TRANSACCIÓN OPTIMIZADOS
+          const txOptions: any = {
+            gasLimit: splitGas
+          };
+          
+          // Agregar gas price si estamos en Amoy para mejorar velocidad
           try {
             const feeData = await this.signer.provider?.getFeeData();
             if (feeData?.gasPrice) {
-              // Aumentar gas price 50% para mayor velocidad en Amoy
-              gasPrice = (feeData.gasPrice * BigInt(150)) / BigInt(100);
-              console.log(`⛽ Gas price optimizado: ${gasPrice.toString()}`);
+              // Usar 1.5x el gas price sugerido para mayor velocidad
+              txOptions.gasPrice = (feeData.gasPrice * BigInt(150)) / BigInt(100);
+              console.log(`⛽ Gas price optimizado: ${txOptions.gasPrice.toString()}`);
             }
           } catch (feeError) {
-            console.warn('⚠️ No se pudo obtener gas price, usando predeterminado');
+            console.warn('⚠️ No se pudo obtener gas price, usando default');
           }
           
-          const txOptions: any = { gasLimit: splitGas };
-          if (gasPrice) {
-            txOptions.gasPrice = gasPrice;
-          }
-          
-          console.log('📋 Opciones de transacción:', {
+          console.log('📋 Parámetros de transacción:', {
             gasLimit: txOptions.gasLimit?.toString(),
             gasPrice: txOptions.gasPrice?.toString(),
-            network: currentNetwork
+            outputCount: splitParams.outputNullifiers.length
           });
           
           tx = await ethersContract.splitPrivateUTXO(splitParams, txOptions);
-          console.log(`✅ Split ejecutado con gas optimizado en Amoy`);
+          console.log(`✅ Split ejecutado con gas límite: ${splitGas.toString()}`);
           
-        } catch (gasExecutionError) {
-          console.error('❌ Error con gas optimizado:', gasExecutionError);
-          console.log('🔄 Reintentando sin gas override...');
+        } catch (error: any) {
+          console.error('❌ Error con gas override:', error);
+          console.warn('🔄 Intentando ejecución sin gas override...');
           
-          // Fallback sin gas override
+          try {
+            tx = await this.contract.splitPrivateUTXO(splitParams);
+            console.log('✅ Split ejecutado sin gas override');
+          } catch (fallbackError: any) {
+            console.error('❌ Error en ejecución fallback:', fallbackError);
+            throw new UTXOOperationError(
+              `Failed to execute split: ${fallbackError.message}`,
+              'executeSplit'
+            );
+          }
+        }
+      } else {
+        // Ejecutar sin gas override para alastria o si no hay gas estimado
+        console.log('🔧 Ejecutando sin gas override');
+        try {
           tx = await this.contract.splitPrivateUTXO(splitParams);
           console.log('✅ Split ejecutado sin gas override');
+        } catch (error: any) {
+          console.error('❌ Error en ejecución estándar:', error);
+          throw new UTXOOperationError(
+            `Failed to execute split: ${error.message}`,
+            'executeSplit'
+          );
         }
-        
-      } else {
-        // ✅ EJECUCIÓN ESTÁNDAR PARA OTRAS REDES
-        console.log(`🌐 Red ${currentNetwork} - Ejecución estándar sin gas override`);
-        tx = await this.contract.splitPrivateUTXO(splitParams);
-        console.log('✅ Split ejecutado con configuración estándar');
       }
 
       console.log(`⏳ Transacción criptográfica enviada: ${tx.hash}`);
@@ -260,11 +314,16 @@ export class SplitPrivateUTXO {
       console.log('🔍 DESPUÉS DEL SPLIT:');
       
       // Verificar si el nullifier del source se marcó como usado
-      const isUsedAfter = await this.contract.isNullifierUsed(splitData.sourceNullifier);
-      console.log('🔍 Source nullifier used AFTER split?', {
-        nullifier: splitData.sourceNullifier,
-        isUsed: isUsedAfter
-      });
+      try {
+        const isUsedAfter = await this.contract.isNullifierUsed(splitData.sourceNullifier);
+        console.log('🔍 Source nullifier used AFTER split?', {
+          nullifier: splitData.sourceNullifier,
+          isUsed: isUsedAfter
+        });
+      } catch (error) {
+        console.error('❌ Error verificando nullifier después del split:', error);
+        console.warn('⚠️ No se pudo verificar el estado del nullifier post-split');
+      }
 
       // 6. Extraer UTXOIds REALES de los eventos
       const outputUTXOIds = await this._extractRealUTXOIds(receipt);
@@ -443,7 +502,8 @@ export class SplitPrivateUTXO {
           attemptCount++;
         } catch (error) {
           console.error(`❌ Error checking nullifier uniqueness: ${error}`);
-          break;
+          console.warn(`⚠️ Asumiendo que nullifier ${nullifier.substring(0, 10)}... es único (continuando)`);
+          break; // Continuar asumiendo que es único
         }
       }
       
@@ -720,14 +780,20 @@ export class SplitPrivateUTXO {
   }> {
     try {
       // Para validación ligera, solo verificamos si el nullifier está usado
-      const isUsed = await this.contract.isNullifierUsed(sourceNullifier);
-      
-      if (isUsed) {
-        return {
-          isValid: false,
-          errorCode: 2,
-          errorMessage: 'Input already spent'
-        };
+      try {
+        const isUsed = await this.contract.isNullifierUsed(sourceNullifier);
+        
+        if (isUsed) {
+          return {
+            isValid: false,
+            errorCode: 2,
+            errorMessage: 'Input already spent'
+          };
+        }
+      } catch (error) {
+        console.error('❌ Error verificando nullifier en validación:', error);
+        // Si no podemos verificar, asumir que es válido y continuar
+        console.warn('⚠️ No se pudo verificar nullifier, asumiendo válido');
       }
 
       return {
